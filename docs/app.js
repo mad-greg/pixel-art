@@ -19,6 +19,8 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
+  const ASSET_VER = '2.3';
+
   // Overview images & optional ultra-high-res 0.25 m/px tile pyramids per lighting mode
   const overviewImages = {};
   const tileManifests = {};   // mode -> { width, height, tileSize, cols, rows, mpp } | null
@@ -69,13 +71,13 @@
         resolve(img);
       };
       img.onerror = () => resolve(null);
-      img.src = `assets/diorama_${mode}.webp`;
+      img.src = `assets/diorama_${mode}.webp?v=${ASSET_VER}`;
     });
   }
 
   function loadTileManifest(mode) {
     if (mode in tileManifests) return Promise.resolve(tileManifests[mode]);
-    return fetch(`assets/tiles/${mode}/manifest.json`)
+    return fetch(`assets/tiles/${mode}/manifest.json?v=${ASSET_VER}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         tileManifests[mode] = data;
@@ -103,7 +105,7 @@
     img.onerror = () => {
       tileCache[key] = 'error';
     };
-    img.src = `assets/tiles/${mode}/${col}_${row}.webp`;
+    img.src = `assets/tiles/${mode}/${col}_${row}.webp?v=${ASSET_VER}`;
     return 'loading';
   }
 
@@ -661,7 +663,7 @@
       modalImg = img;
       fitModal(1.0);
     };
-    img.src = `assets/${c.file}`;
+    img.src = `assets/${c.file}?v=${ASSET_VER}`;
   }
 
   modalViewport.addEventListener('pointerdown', (e) => {
@@ -728,7 +730,7 @@
     CROPS.forEach((c) => {
       const card = document.createElement('div');
       card.className = 'crop-thumb';
-      card.innerHTML = `<img src="assets/${c.file}" alt="${c.label}" loading="lazy" /><span>${c.label}</span>`;
+      card.innerHTML = `<img src="assets/${c.file}?v=${ASSET_VER}" alt="${c.label}" loading="lazy" /><span>${c.label}</span>`;
       card.addEventListener('click', () => openCropModal(c));
       gal.appendChild(card);
     });
@@ -788,7 +790,7 @@
   Promise.all([
     loadModeOverview('day'),
     loadTileManifest('day'),
-    fetch('data/kilchberg_interactive.json').then((r) => r.json()).catch(() => null),
+    fetch(`data/kilchberg_interactive.json?v=${ASSET_VER}`).then((r) => r.json()).catch(() => null),
   ]).then(([_, __, loadedMeta]) => {
     meta = loadedMeta;
     populateSidebar();

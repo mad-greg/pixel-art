@@ -199,11 +199,52 @@ def build_diorama_polygon(kpoly: MultiPolygon | Polygon, lake_poly: MultiPolygon
     return combined
 
 
+def _ensure_v2_rasters(cache_dir: Path, bldg_npz: Path) -> None:
+    """Ensure 25cm SWISSIMAGE texture atlas and exact 2D building roof mask exist."""
+    ortho25_p = cache_dir / "ortho_25cm.npy"
+    roof_mask_p = cache_dir / "bldg_roof_mask_05m.npy"
+    if not ortho25_p.exists():
+        print("[scene] Building 25 cm SWISSIMAGE DOP10 true-color texture atlas (ortho_25cm.npy)...")
+        w25 = int(round((E_MAX - E_MIN) / 0.25))
+        h25 = int(round((N_MAX - N_MIN) / 0.25))
+        out25 = np.zeros((h25, w25, 3), dtype=np.uint8)
+        for e_km in (2682, 2683, 2684, 2685):
+            for n_km in (1240, 1241, 1242, 1243):
+                tp = cache_dir / "swissimage" / f"{e_km}-{n_km}.tif"
+                if not tp.exists():
+                    continue
+                ie0, ie1 = max(E_MIN, e_km * 1000.0), min(E_MAX, (e_km + 1) * 1000.0)
+                in0, in1 = max(N_MIN, n_km * 1000.0), min(N_MAX, (n_km + 1) * 1000.0)
+                if ie1 <= ie0 or in1 <= in0:
+                    continue
+                c0 = int(round((ie0 - E_MIN) / 0.25))
+                c1 = int(round((ie1 - E_MIN) / 0.25))
+                r0 = int(round((N_MAX - in1) / 0.25))
+                r1 = int(round((N_MAX - in0) / 0.25))
+                with rasterio.open(tp) as ds:
+                    win = rasterio.windows.from_bounds(ie0, in0, ie1, in1, transform=ds.transform)
+                    arr = ds.read([1, 2, 3], window=win, out_shape=(3, r1 - r0, c1 - c0), resampling=Resampling.average)
+                    out25[r0:r1, c0:c1, :] = np.transpose(arr, (1, 2, 0))
+        np.save(ortho25_p, out25)
+
+    if not roof_mask_p.exists() and bldg_npz.exists():
+        print("[scene] Rasterizing exact 0.5m LOD2 building roof mask (bldg_roof_mask_05m.npy)...")
+        b = np.load(bldg_npz)
+        verts = b["verts"]
+        stype = b["surf_type"]
+        rv = verts[stype == 1][:, :, :2]
+        tfm = from_bounds(E_MIN, N_MIN, E_MAX, N_MAX, GRID_W, GRID_H)
+        polys = [Polygon(tri) for tri in rv if Polygon(tri).area > 0.02]
+        rmask = rasterize([(g.buffer(0.35), 1) for g in polys], out_shape=(GRID_H, GRID_W), transform=tfm, dtype=np.uint8) > 0
+        np.save(roof_mask_p, rmask)
+
+
 def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     scene_npz = cache_dir / "scene_kilchberg_05m.npz"
     bldg_npz = cache_dir / "buildings_kilchberg_3d.npz"
     meta_json = cache_dir / "buildings_kilchberg_meta.json"
     if scene_npz.exists() and bldg_npz.exists() and meta_json.exists() and not force:
+        _ensure_v2_rasters(cache_dir, bldg_npz)
         print(f"[scene] Using cached extracted scene at {scene_npz}")
         return scene_npz
 
@@ -646,6 +687,7 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
         rgb=all_rgb,
     )
     meta_json.write_text(json.dumps({"buildings": buildings_meta, "boats": boats}, indent=2))
+    _ensure_v2_rasters(cache_dir, bldg_npz)
     print(f"[scene] Saved extracted scene -> {scene_npz.name}, {bldg_npz.name}, {meta_json.name}")
     return scene_npz
 
