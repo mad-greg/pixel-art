@@ -24,17 +24,19 @@ html, body {
   color: var(--text-primary);
   font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .topbar {
-  height: 62px;
+  min-height: 62px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
-  gap: 16px;
+  padding: 6px 16px;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .brand {
@@ -73,7 +75,7 @@ html, body {
 }
 
 .brand h1 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -90,8 +92,8 @@ html, body {
 .controls-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: nowrap;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .segmented {
@@ -109,7 +111,7 @@ html, body {
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
-  padding: 5px 11px;
+  padding: 5px 10px;
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
@@ -137,19 +139,20 @@ html, body {
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
+  font-size: 11.5px;
   height: 28px;
   min-width: 28px;
-  padding: 0 8px;
+  padding: 0 7px;
   border-radius: 4px;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
+  user-select: none;
 }
 .icon-btn:hover, .toggle-btn:hover {
   border-color: var(--accent-gold);
 }
 .toggle-btn.active {
-  background: #2b3828;
+  background: #25363a;
   border-color: var(--accent-teal);
   color: var(--accent-teal);
 }
@@ -157,14 +160,15 @@ html, body {
 .mono-pill {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
-  color: var(--text-secondary);
-  min-width: 46px;
+  color: var(--accent-gold);
+  min-width: 48px;
   text-align: center;
+  font-weight: 600;
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: 1fr 350px;
+  grid-template-columns: 1fr 345px;
   height: calc(100vh - 62px);
 }
 
@@ -173,15 +177,22 @@ html, body {
   overflow: hidden;
   background: radial-gradient(circle at 50% 45%, #243248 0%, #141c2b 100%);
   cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  outline: none;
 }
-.viewport:active {
-  cursor: grabbing;
+.viewport.is-dragging {
+  cursor: grabbing !important;
 }
 
 #diorama-canvas {
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
@@ -196,6 +207,8 @@ html, body {
   position: absolute;
   transform: translate(-50%, -100%);
   pointer-events: auto;
+  touch-action: none;
+  user-select: none;
   background: rgba(19, 25, 36, 0.9);
   border: 1px solid var(--accent-gold);
   color: var(--text-primary);
@@ -231,6 +244,7 @@ html, body {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
   image-rendering: pixelated;
   background: #0f1520;
+  z-index: 15;
 }
 .hidden {
   display: none !important;
@@ -240,7 +254,7 @@ html, body {
   position: absolute;
   left: 14px;
   bottom: 14px;
-  background: rgba(19, 25, 36, 0.88);
+  background: rgba(19, 25, 36, 0.9);
   border: 1px solid var(--border-subtle);
   padding: 6px 11px;
   border-radius: 4px;
@@ -248,10 +262,73 @@ html, body {
   font-size: 11px;
   color: var(--text-secondary);
   display: flex;
+  align-items: center;
   gap: 8px;
+  max-width: calc(100% - 340px);
+  flex-wrap: wrap;
+  z-index: 10;
+}
+.lod-badge {
+  color: var(--accent-teal);
 }
 .sep {
   color: var(--border-subtle);
+}
+
+.nav-overlay {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  z-index: 10;
+}
+
+.dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: repeat(3, 28px);
+  gap: 2px;
+  background: rgba(19, 25, 36, 0.88);
+  border: 1px solid var(--border-subtle);
+  padding: 4px;
+  border-radius: 6px;
+}
+.dpad-btn {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+.dpad-btn:hover {
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+}
+.dpad-btn.up { grid-column: 2; grid-row: 1; }
+.dpad-btn.left { grid-column: 1; grid-row: 2; }
+.dpad-btn.center { grid-column: 2; grid-row: 2; font-size: 13px; }
+.dpad-btn.right { grid-column: 3; grid-row: 2; }
+.dpad-btn.down { grid-column: 2; grid-row: 3; }
+
+.minimap-box {
+  background: rgba(15, 21, 32, 0.92);
+  border: 1px solid var(--border-warm);
+  border-radius: 5px;
+  overflow: hidden;
+  cursor: crosshair;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  touch-action: none;
+}
+#minimap-canvas {
+  display: block;
+  image-rendering: pixelated;
 }
 
 .sidebar {
@@ -263,7 +340,7 @@ html, body {
 }
 
 .panel-section {
-  padding: 15px 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -392,16 +469,16 @@ html, body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(10, 14, 22, 0.86);
+  background: rgba(10, 14, 22, 0.88);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 50;
-  padding: 24px;
+  padding: 20px;
 }
 .modal-box {
-  max-width: 92vw;
-  max-height: 90vh;
+  width: 92vw;
+  height: 88vh;
   background: var(--bg-panel);
   border: 1px solid var(--border-warm);
   border-radius: 6px;
@@ -415,24 +492,44 @@ html, body {
   justify-content: space-between;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-subtle);
+  gap: 10px;
+}
+.modal-actions {
+  display: flex;
+  gap: 6px;
 }
 .modal-body {
-  overflow: auto;
+  flex: 1;
+  position: relative;
+  overflow: hidden;
   background: #0f1520;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
-.modal-body img {
+.modal-body.is-dragging {
+  cursor: grabbing !important;
+}
+#modal-canvas {
   display: block;
-  max-width: none;
+  width: 100%;
+  height: 100%;
   image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 @media (max-width: 960px) {
   .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: 60vh 1fr;
+    grid-template-rows: 62vh 1fr;
   }
   .sidebar {
     border-left: none;
     border-top: 1px solid var(--border-subtle);
+  }
+  .hud-coords {
+    max-width: calc(100% - 28px);
+    bottom: auto;
+    top: 10px;
   }
 }
