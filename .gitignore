@@ -1,0 +1,12 @@
+# Raw multi-GB GIS cache & intermediate binary arrays
+data/raw/
+data/cache/
+*.gdb.zip
+*.citygml.zip
+*.tif
+*.npz
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
