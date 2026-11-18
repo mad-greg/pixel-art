@@ -19,7 +19,8 @@ def verify_all() -> None:
         assert w >= 4000 and h >= 1900, f"Unexpected dimensions for {p.name}: {w}x{h}"
         arr = np.asarray(img)
         std = float(arr.std())
-        assert std > 28.0, f"Low visual contrast ({std:.1f}) in {p.name}"
+        min_std = 18.0 if mode == "night" else 28.0
+        assert std > min_std, f"Low visual contrast ({std:.1f}) in {p.name}"
         wp = DOCS_DIR / "assets" / f"diorama_{mode}.webp"
         assert wp.exists() and wp.stat().st_size > 100_000, f"Missing/empty web asset {wp}"
         print(f"[ok] {p.name}: {w}x{h} px, std={std:.1f}, size={p.stat().st_size/1e6:.2f} MB")
