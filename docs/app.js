@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '2.3';
+  const ASSET_VER = '2.4';
 
   // Overview images & optional ultra-high-res 0.25 m/px tile pyramids per lighting mode
   const overviewImages = {};

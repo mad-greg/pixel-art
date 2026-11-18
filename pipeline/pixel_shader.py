@@ -95,36 +95,36 @@ class LightingPreset:
 PRESETS: dict[str, LightingPreset] = {
     "day": LightingPreset(
         name="90s SVGA Crisp Midday",
-        sun_az_deg=146.0,
-        sun_alt_deg=44.0,
-        sun_rgb=(1.01, 0.99, 0.95),
-        amb_rgb=(0.57, 0.57, 0.59),
+        sun_az_deg=124.0,
+        sun_alt_deg=43.0,
+        sun_rgb=(1.00, 0.99, 0.96),
+        amb_rgb=(0.54, 0.55, 0.58),
         sky_top_rgb=(24, 34, 52),
         sky_bot_rgb=(38, 52, 74),
         is_night=False,
-        dither_strength=10.5,
+        dither_strength=9.5,
     ),
     "sunset": LightingPreset(
         name="Alpenglow Golden Sunset",
-        sun_az_deg=116.0,
+        sun_az_deg=114.0,
         sun_alt_deg=22.0,
-        sun_rgb=(1.22, 0.83, 0.54),
-        amb_rgb=(0.45, 0.41, 0.54),
+        sun_rgb=(1.12, 0.76, 0.50),
+        amb_rgb=(0.42, 0.39, 0.52),
         sky_top_rgb=(34, 26, 48),
         sky_bot_rgb=(70, 44, 60),
         is_night=False,
-        dither_strength=11.5,
+        dither_strength=10.5,
     ),
     "night": LightingPreset(
         name="Zürichsee Lantern Night",
-        sun_az_deg=135.0,
+        sun_az_deg=128.0,
         sun_alt_deg=36.0,
-        sun_rgb=(0.25, 0.31, 0.50),
-        amb_rgb=(0.19, 0.23, 0.37),
+        sun_rgb=(0.32, 0.40, 0.62),
+        amb_rgb=(0.23, 0.28, 0.45),
         sky_top_rgb=(12, 17, 30),
         sky_bot_rgb=(20, 28, 48),
         is_night=True,
-        dither_strength=9.5,
+        dither_strength=9.0,
     ),
 }
 
@@ -132,7 +132,7 @@ PRESETS: dict[str, LightingPreset] = {
 @lru_cache(maxsize=1)
 def build_90s_palette_and_lut() -> tuple[np.ndarray, np.ndarray]:
     """Construct a curated 256-color 90s SVGA isometric city-builder palette calibrated to
-    authentic Swiss architecture, terracotta roofs, yellow road markings & alpine Zürichsee water."""
+    authentic Swiss architecture, clinker brick, neutral concrete, terracotta roofs & Zürichsee water."""
     colors = []
 
     def add_ramp(c_dark, c_mid, c_light, n):
@@ -156,20 +156,21 @@ def build_90s_palette_and_lut() -> tuple[np.ndarray, np.ndarray]:
     add_ramp((34, 40, 22), (88, 108, 48), (158, 176, 88), 8)   # Sedum green roofs, vineyards & dry meadow
     add_ramp((34, 18, 24), (96, 44, 48), (162, 82, 78), 6)     # Copper beech (Blutbuche)
 
-    # 2. Classic Swiss Roofs & Clinker Brick (terracotta red, aged clay brown, slate, solar PV, copper) — 48 colors
-    add_ramp((48, 22, 18), (154, 68, 46), (228, 124, 86), 12)  # Swiss terracotta & Lindt clinker brick
-    add_ramp((40, 26, 20), (116, 78, 56), (190, 140, 106), 10) # Weathered brown clay tile & timber
-    add_ramp((24, 24, 28), (74, 70, 74), (152, 146, 142), 10)  # Anthracite / slate / gravel flat roof
-    add_ramp((20, 28, 48), (44, 64, 104), (96, 132, 182), 8)   # Rooftop solar PV arrays & skylights
-    add_ramp((26, 52, 48), (58, 118, 104), (124, 190, 170), 8) # Patina copper spires
+    # 2. Clinker Brick, Swiss Clay Roofs, Neutral Gravel/Concrete & Taupe-Greige Facades — 48 colors
+    add_ramp((42, 16, 16), (124, 44, 36), (178, 68, 54), 8)     # Deep Swiss ziegelrot clinker & 1899 red brick
+    add_ramp((52, 24, 18), (148, 72, 46), (212, 114, 74), 8)    # Classic Swiss terracotta clay roof tiles
+    add_ramp((38, 26, 20), (106, 72, 52), (176, 130, 98), 8)    # Weathered brown clay tile & dark barn timber
+    add_ramp((24, 26, 30), (96, 98, 102), (218, 220, 224), 8)   # Neutral anthracite / concrete / silver flat roof
+    add_ramp((20, 28, 48), (44, 64, 104), (96, 132, 182), 8)    # Rooftop solar PV arrays & skylights
+    add_ramp((46, 44, 40), (132, 126, 114), (196, 190, 176), 8) # Pebble-greige stucco & Lindt concrete frame
 
-    # 3. Swiss Facades, Warm Ochre, Traffic Yellow Markings, Sandstone & Plaster — 52 colors
-    add_ramp((44, 42, 46), (144, 140, 134), (248, 245, 238), 12) # Chalk-white, alabaster & limestone
-    add_ramp((50, 40, 32), (158, 138, 112), (240, 226, 198), 10) # Warm cream & sand stucco
-    add_ramp((64, 48, 24), (176, 144, 68), (246, 214, 104), 10)  # Yellow-ochre villas, gold clock & Swiss crosswalk yellow!
-    add_ramp((54, 36, 34), (152, 112, 98), (228, 192, 176), 8)   # Soft rose-sandstone plaster
-    add_ramp((36, 26, 18), (98, 72, 48), (176, 138, 98), 6)      # Chalet timber & geological moraine
-    add_ramp((20, 26, 38), (50, 66, 90), (108, 138, 168), 6)     # Window glass & cool mullions
+    # 3. Swiss Plaster Facades, Butter-Ochre, Dusty Rose, Sage Green & Shutters — 52 colors
+    add_ramp((52, 52, 56), (154, 152, 146), (242, 240, 234), 10)# Glazed white brick, alabaster & off-white plaster
+    add_ramp((52, 42, 32), (150, 134, 108), (224, 210, 182), 10)# Warm travertine, sand & cream stucco
+    add_ramp((62, 48, 22), (172, 144, 68), (242, 216, 112), 10) # Butter-yellow villas, buff brick, gold & crosswalks
+    add_ramp((56, 36, 34), (148, 106, 94), (214, 172, 156), 8)  # Historic dusty rose / terracotta-salmon stucco
+    add_ramp((26, 48, 42), (76, 124, 108), (158, 192, 172), 6)  # Sage/pistachio pavilion, copper patina & teal shutters
+    add_ramp((18, 26, 40), (54, 82, 124), (118, 156, 204), 8)   # Window glass & cornflower/dove-blue Swiss shutters
 
     # 4. Streets, Asphalt, Courtyards, Railway Ballast & Cutaway Strata — 26 colors
     add_ramp((18, 20, 26), (78, 82, 90), (194, 196, 200), 14)    # Asphalt -> concrete -> white markings
@@ -347,16 +348,15 @@ class SceneData:
 
 def condition_90s_albedo(
     rgb_u8: np.ndarray,
-    shadow_knee: float = 58.0,
-    vibrancy: float = 1.32,
-    dehaze: float = 1.0,
+    shadow_knee: float = 56.0,
+    vibrancy: float = 1.24,
+    dehaze: float = 0.0,
 ) -> np.ndarray:
-    """Subtract subtle high-altitude aerial path haze, lift shadows, and restore crisp 90s SVGA chroma."""
+    """Lift harsh aerial shadows and restore crisp 90s SVGA chroma without shifting neutral greys brown."""
     rgb = rgb_u8.astype(np.float32)
     if dehaze > 0.0:
-        # Remove subtle blue-grey Rayleigh/aerosol veil [7, 10, 14] scaled smoothly above darks
         veil_w = np.clip((rgb.min(axis=-1, keepdims=True) - 18.0) / 70.0, 0.0, 1.0) * dehaze
-        rgb = np.maximum(4.0, rgb - veil_w * np.array([6.5, 9.5, 13.5], dtype=np.float32))
+        rgb = np.maximum(4.0, rgb - veil_w * np.array([7.5, 8.5, 9.5], dtype=np.float32))
     lum = 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
     target_lum = np.where(
         lum < shadow_knee,
@@ -366,8 +366,11 @@ def condition_90s_albedo(
     scale = target_lum / np.maximum(lum, 6.0)
     lifted = rgb * scale[..., None]
     lum2 = (0.299 * lifted[..., 0] + 0.587 * lifted[..., 1] + 0.114 * lifted[..., 2])[..., None]
-    boosted = lum2 + vibrancy * (lifted - lum2)
-    return np.clip(boosted, 0.0, 252.0)
+    # Keep truly low-chroma concrete/gravel/metal strictly neutral so flat roofs never turn clay-brown
+    chroma = lifted.max(axis=-1, keepdims=True) - lifted.min(axis=-1, keepdims=True)
+    vib_eff = np.where(chroma < 12.0, 1.02, vibrancy)
+    boosted = lum2 + vib_eff * (lifted - lum2)
+    return np.clip(boosted, 0.0, 250.0)
 
 
 def condition_90s_foliage(raw_u8: np.ndarray, crown_id: np.ndarray, chm_h: np.ndarray) -> np.ndarray:
@@ -437,35 +440,41 @@ def compute_shadow_grid(scene: SceneData, sun_az_deg: float, sun_alt_deg: float)
 
 
 def _compute_building_facade_styles(scene: SceneData) -> tuple[np.ndarray, np.ndarray]:
-    """Determine authentic Swiss facade RGB and architectural style code for each of the 1,890 buildings.
+    """Determine authentic Swiss facade RGB and architectural style code for each of the 1,890 buildings,
+    verified against ground-level photographs of Lindt & Sprüngli, Schooren, Bendlikon & Kilchberg village.
     Styles:
-      0 = Traditional Swiss pitched-roof house (warm plaster/ochre/sandstone/timber + spaced shuttered casements)
-      1 = Modernist flat-roof lakeside villa / terrace apartment (asymmetric architectural glazing + stone piers)
-      2 = Lindt Home of Chocolate (monumental red clinker-brick museum + curved white concrete NE atrium)
-      3 = Historic Lindt & Sprüngli 1899 works / commercial building (pilaster-grouped industrial casements)
+      0 = Traditional Swiss pitched-roof house (natural plaster/ochre/greige/rose/timber + shuttered casements)
+      1 = Modernist flat-roof lakeside & hillside terrace villa/apartment (concrete/travertine/sand/stone/alabaster)
+      2 = Lindt Home of Chocolate (deep ziegelrot clinker-brick + curved white glazed brick NE entrance + gold frieze)
+      3 = Lindt & Sprüngli Campus (1899 polychrome red/yellow brick Stammhaus, limestone clock tower, taupe/brick hall, brick courtyard works)
       4 = Sacred church & bell tower (giant round tower clock + arched belfry louvers + nave stained-glass lancets)
-      5 = Non-windowed structure (Hochkamin brick chimney, Lagertank silo, Flugdach)
-      6 = Small outbuilding / boathouse / garage / pavilion (timber double door or single window, never rows!)
+      5 = Non-windowed structure (buff-yellow brick Hochkamin smokestack, Lagertank silo, Flugdach)
+      6 = Small outbuilding / boathouse / garage / pier pavilion (timber door or single window, never rows!)
     """
     buildings = scene.buildings
     n = len(buildings)
     wall_rgb = np.empty((n, 3), dtype=np.uint8)
     style_code = np.zeros(n, dtype=np.uint8)
 
+    # Calibrated physical Swiss facade albedos (verified against Zürichsee panoramic photos — zero hospital-white blowout!)
     plaster_trad = [
-        (238, 230, 212),  # Warm Swiss chalk-ivory plaster
-        (232, 216, 186),  # Classic Kilchberg sand-ochre stucco
-        (226, 202, 158),  # Historic Zürichsee golden-ochre villa plaster
-        (235, 225, 212),  # Pale warm sandstone
-        (218, 212, 202),  # Warm village limestone
-        (228, 198, 182),  # Soft terracotta-rose stucco
-        (174, 134, 96),   # Sun-weathered Swiss chalet timber
+        (214, 210, 200),  # Classic Swiss off-white plaster
+        (204, 190, 162),  # Warm Kilchberg sand-cream stucco
+        (178, 174, 162),  # Canton Zürich pebble-greige stucco
+        (212, 194, 142),  # Historic Zürichsee golden-butter ochre villa
+        (198, 160, 148),  # Historic dusty terracotta-rose villa plaster
+        (194, 186, 172),  # Warm Jura limestone plaster
+        (218, 208, 160),  # Soft pale cream-yellow stucco
+        (164, 162, 152),  # Olive-grey Swiss apartment plaster
+        (114, 82, 58),    # Sun-weathered Swiss chalet / barn timber
     ]
     modern_pal = [
-        (240, 238, 232),  # Warm architectural alabaster
-        (224, 220, 212),  # Travertine / fair-faced concrete
-        (212, 212, 210),  # Natural Jura limestone grey
-        (234, 226, 210),  # Warm sand-cream villa
+        (172, 170, 164),  # Fair-faced architectural concrete / Jura stone grey
+        (196, 182, 158),  # Warm travertine / sand-limestone terrace apartment
+        (212, 210, 204),  # Architectural alabaster off-white
+        (188, 156, 136),  # Stepped hillside terracotta-sand apartment masonry
+        (152, 146, 136),  # Warm bronze-taupe natural stone modern villa
+        (198, 194, 186),  # Pale warm architectural stone
     ]
 
     for i, b in enumerate(buildings):
@@ -473,37 +482,78 @@ def _compute_building_facade_styles(scene: SceneData) -> tuple[np.ndarray, np.nd
         e, nc = b["e"], b["n"]
         h = b["height"]
         area_box = b["footprint_w"] * b["footprint_l"]
-        h_seed = int(abs(round(e * 3.7 + nc * 7.3)))
+        h_seed = ((i * 73856093) ^ int(round(e * 13.0)) ^ int(round(nc * 29.0))) & 0x7FFFFFFF
 
         if obj == "Hochkamin":
-            wall_rgb[i] = (178, 86, 62)
+            # Building 1773: Lindt 43.6m industrial smokestack — pale buff-yellow chimney brick in real photos!
+            wall_rgb[i] = (194, 180, 148)
             style_code[i] = 5
         elif obj == "Lagertank":
-            wall_rgb[i] = (218, 220, 222)
+            wall_rgb[i] = (196, 198, 202)
             style_code[i] = 5
         elif obj in ("Flugdach", "Offenes Gebaeude", "Mauer gross"):
-            wall_rgb[i] = (188, 184, 176)
+            wall_rgb[i] = (172, 168, 160)
             style_code[i] = 5
         elif obj == "Treibhaus":
-            wall_rgb[i] = (176, 212, 224)
+            wall_rgb[i] = (166, 198, 210)
             style_code[i] = 6
         elif obj in ("Sakrales Gebaeude", "Sakraler Turm"):
             if nc < 1241450:
-                wall_rgb[i] = (242, 238, 226)  # Reformierte Kirche bright whitewashed plaster
+                wall_rgb[i] = (228, 224, 214)  # Reformierte Kirche crisp whitewashed plaster
             else:
-                wall_rgb[i] = (218, 210, 196)  # St. Elisabeth warm sculptural concrete
+                wall_rgb[i] = (198, 192, 180)  # St. Elisabeth sculptural fair-faced concrete
             style_code[i] = 4
-        elif 2684080 <= e <= 2684136 and 1241395 <= nc <= 1241440 and area_box > 4000:
-            # Building 1443: Lindt Home of Chocolate (red-terracotta clinker brick + curved white atrium!)
-            wall_rgb[i] = (186, 86, 60)
+        elif i == 1443:
+            # Building 1443: Lindt Home of Chocolate — deep ziegelrot clinker brick + curved white glazed brick!
+            wall_rgb[i] = (154, 58, 46)
             style_code[i] = 2
-        elif 2684130 <= e <= 2684255 and 1241280 <= nc <= 1241515 and area_box > 1100:
-            # Historic 1899 Lindt & Sprüngli factory complex & corporate HQ along Seestrasse
-            wall_rgb[i] = (236, 229, 214) if e > 2684148 else (228, 226, 220)
+        elif i in (988, 1539):
+            # Historic 1899 red-brick Lindt factory buildings right next to the 43.6m smokestack (Pilgerweg 44 & 52)
+            wall_rgb[i] = (158, 66, 52)
             style_code[i] = 3
+        elif i == 963:
+            # Courtyard industrial brick/stone works (Pilgerweg 54.7)
+            wall_rgb[i] = (174, 148, 126)
+            style_code[i] = 3
+        elif i == 1520:
+            # Lindt HQ south wing facing Schokoladenplatz & Seestrasse — warm natural travertine sand-beige stone
+            wall_rgb[i] = (198, 186, 164)
+            style_code[i] = 3
+        elif i == 1281:
+            # Lindt International HQ north wing — crisp architectural limestone-white with dark ribbon windows
+            wall_rgb[i] = (214, 214, 208)
+            style_code[i] = 3
+        elif i == 1173:
+            # Lindt Seestrasse 204.1 central gatehouse / link building
+            wall_rgb[i] = (188, 184, 174)
+            style_code[i] = 3
+        elif i in (1473, 1720):
+            # Lindt southern production & warehouse halls — taupe concrete frame + buff brick & sand louvers
+            wall_rgb[i] = (178, 168, 148)
+            style_code[i] = 3
+        elif i == 1642:
+            # Main 160m Seestrasse 204 Lindt & Sprüngli complex (sub-divided per wing in Stage 3B!)
+            wall_rgb[i] = (208, 206, 198)
+            style_code[i] = 3
+        elif i in (1582, 1695):
+            # Seestrasse 201 / 201a historic Schooren house right across from Lindt — soft butter-yellow!
+            wall_rgb[i] = (220, 212, 156)
+            style_code[i] = 0
+        elif i in (981, 1823):
+            # Boesch Motorboote historic lakeside shipyard halls (Seestrasse 197.2) — crisp white painted timber!
+            wall_rgb[i] = (218, 220, 222)
+            style_code[i] = 0
+        elif i == 1402:
+            # Historic Kilchberg-Bendlikon ZSG ship pier pavilion — pistachio/sage green walls + white gable!
+            wall_rgb[i] = (140, 174, 156)
+            style_code[i] = 6
+        elif i in (1490, 1726):
+            # Historic Sigristenhaus next to Reformierte Kirche (Dorfstrasse 122a) — dark weathered vertical timber!
+            wall_rgb[i] = (102, 70, 48)
+            style_code[i] = 0
         elif h < 4.3 or area_box < 42.0 or min(b["footprint_w"], b["footprint_l"]) < 4.3:
             # Boathouses, garages, garden pavilions & small annexes
-            wall_rgb[i] = (168, 130, 96) if (h_seed % 3 == 0) else plaster_trad[h_seed % 5]
+            wall_rgb[i] = (122, 88, 62) if (h_seed % 3 == 0) else plaster_trad[h_seed % 6]
             style_code[i] = 6
         elif scene.bldg_is_pitched[i]:
             wall_rgb[i] = plaster_trad[h_seed % len(plaster_trad)]
@@ -820,7 +870,7 @@ def render_diorama(
         gnz = scene.terr_nz[r0:r1, c0:c1][gr, gc].copy()
 
         raw_ortho = sample_ortho_25cm(scene, ge, gn)
-        gcol = condition_90s_albedo(raw_ortho, shadow_knee=54.0, vibrancy=1.30, dehaze=1.0)
+        gcol = condition_90s_albedo(raw_ortho, shadow_knee=52.0, vibrancy=1.22, dehaze=0.0)
         ro_f = raw_ortho.astype(np.float32)
 
         # Enrich ONLY genuine March grass/meadow/vineyard turf into crisp Swiss summer green
@@ -1110,28 +1160,17 @@ def render_diorama(
                     restored = np.clip(sun_ref[in_aerial_sh] * local_mod, 24.0, 248.0)
                     rf[in_aerial_sh] = (1.0 - sh_blend) * rf[in_aerial_sh] + sh_blend * restored
 
-                r_alb = condition_90s_albedo(rf, shadow_knee=54.0, vibrancy=1.42, dehaze=1.15)
+                pitched = r_norms[:, 2] < 0.93
+                r_alb_flat = condition_90s_albedo(rf, shadow_knee=50.0, vibrancy=1.10, dehaze=0.0)
+                r_alb_pit = condition_90s_albedo(rf, shadow_knee=52.0, vibrancy=1.26, dehaze=0.0)
+                r_alb = np.where(pitched[:, None], r_alb_pit, r_alb_flat)
 
-                # Enhance real rooftop solar PV arrays (cool bluish dark cells on flat/pitched roofs)
-                is_pv = (rf[:, 2] > (rf[:, 0] + 5.5)) & (raw_lum >= 45.0) & (raw_lum <= 145.0)
+                # Enhance real rooftop solar PV arrays (cool bluish/anthracite dark cells on roofs)
+                is_pv = (rf[:, 2] > (rf[:, 0] + 5.5)) & (raw_lum >= 40.0) & (raw_lum <= 140.0)
                 if is_pv.any():
-                    r_alb[is_pv] = 0.48 * r_alb[is_pv] + 0.52 * np.array([46.0, 68.0, 114.0])
-
-                # Lindt Home of Chocolate (bi == 1443): crisp red-brick roof parapet border!
-                is_hoc_roof = r_bi == 1443
-                if is_hoc_roof.any():
-                    re_h, rn_h = fe[rm], fn[rm]
-                    # Outer 2.2m perimeter of Bldg 1443 roof is red clinker brick parapet (visible in SWISSIMAGE!)
-                    # Rotated local coordinates along Lindt HoC building axes (~34.5° azimuth)
-                    dx_h = re_h - 2684096.5
-                    dy_h = rn_h - 1241427.0
-                    u_h = dx_h * 0.824 + dy_h * 0.566
-                    v_h = -dx_h * 0.566 + dy_h * 0.824
-                    on_parapet = is_hoc_roof & ((np.abs(u_h) > 22.8) | (np.abs(v_h) > 45.8)) & (~(re_h > 2684112.0))
-                    r_alb[on_parapet] = [188.0, 92.0, 64.0]
+                    r_alb[is_pv] = 0.48 * r_alb[is_pv] + 0.52 * np.array([42.0, 62.0, 104.0])
 
                 # Subtle 90s pixel-art clay tile course lines on pitched roofs
-                pitched = r_norms[:, 2] < 0.93
                 course = pitched & (((fz[rm] * 1.55) % 1.0) < 0.24)
                 r_alb[course] *= 0.91
                 f_col[rm] = r_alb
@@ -1163,53 +1202,183 @@ def render_diorama(
                 edge_dist = np.minimum(u_local, wall_len - u_local)
 
                 # Crisp 1px stone plinth at ground & subtle cornice shadow directly under eaves
-                w_base[h_rel < 0.52] *= 0.87
+                w_base[h_rel < 0.55] *= 0.85
                 w_base[(top_dist > 0.0) & (top_dist < 0.42)] *= 0.80
+
+                # Buff-brick Lindt smokestack (bi == 1773): horizontal brick courses + weathered dark soot cap ring!
+                is_chimney = w_bi == 1773
+                if is_chimney.any():
+                    ch_i = np.nonzero(is_chimney)[0]
+                    ch_course = ((w_z[ch_i] * 1.4) % 1.0) < 0.25
+                    w_base[ch_i[ch_course]] *= 0.93
+                    ch_cap = top_dist[ch_i] < 1.55
+                    w_base[ch_i[ch_cap]] = [86.0, 82.0, 78.0]
 
                 # -------------------------------------------------------------
                 # B1. LANDMARK: Lindt Home of Chocolate (Building 1443, style 2)
-                # Monumental solid red clinker-brick museum + curved white concrete NE entrance!
+                # Deep ziegelrot clinker-brick museum + curved white glazed brick NE entrance + gold lettering!
                 # -------------------------------------------------------------
                 is_hoc = w_sty == 2
                 if is_hoc.any():
                     hi_l = np.nonzero(is_hoc)[0]
                     le, ln, lz, lh = w_e[hi_l], w_n[hi_l], w_z[hi_l], h_rel[hi_l]
                     lu = u_local[hi_l]
-                    # Curved white sculptural concrete entrance corner facing Lindtplatz (NE recess)
-                    in_white_curve = (le >= 2684109.2) & (ln >= 1241403.0) & (ln <= 1241436.8)
-                    w_base[hi_l[in_white_curve]] = [244.0, 242.0, 236.0]
+                    # Curved white glazed brick entrance quadrant facing Schokoladenplatz (NE scooped corner)
+                    in_white_curve = (le >= 2684107.5) & (ln >= 1241401.5) & (ln <= 1241437.2)
+                    w_base[hi_l[in_white_curve]] = [236.0, 234.0, 228.0]
 
-                    # Subtle horizontal clinker-brick courses + vertical brick relief piers on brick faces
+                    # Subtle horizontal clinker-brick courses + vertical brick relief piers on ziegelrot faces
                     brick_m = ~in_white_curve
                     bcourse = brick_m & (((lz * 2.4) % 1.0) < 0.28)
                     bpier = brick_m & (lh > 4.2) & (((lu % 4.6) < 0.45))
-                    w_base[hi_l[bcourse]] *= 0.92
-                    w_base[hi_l[bpier]] *= 0.94
+                    w_base[hi_l[bcourse]] *= 0.91
+                    w_base[hi_l[bpier]] *= 0.93
 
-                    # Ground-floor grand museum entrance glazing (smooth across curved white atrium & SE plaza front)
                     arc_u = np.where(
                         in_white_curve,
                         (np.arctan2(ln - 1241418.0, le - 2684122.0) + math.pi) * 13.5,
                         lu,
                     )
+                    # Golden "LINDT HOME OF CHOCOLATE" frieze lettering along upper parapet of white glazed brick curve!
+                    lt_d = top_dist[hi_l]
+                    gold_frieze = (
+                        in_white_curve
+                        & (lt_d >= 0.65)
+                        & (lt_d <= 2.05)
+                        & (((arc_u * 1.45) % 1.0) >= 0.28)
+                        & (arc_u >= 3.5)
+                    )
+                    if gold_frieze.any():
+                        gf_idx = hi_l[gold_frieze]
+                        w_base[gf_idx] = [224.0, 184.0, 74.0]
+                        if preset.is_night:
+                            f_mat[wi[gf_idx]] = M_WINDOW_LIT
+
+                    # Ground-floor grand museum entrance glazing (curved white atrium + SE plaza café front)
                     plaza_glass = (
                         ((in_white_curve & (lh >= 0.35) & (lh <= 5.4)) | (brick_m & (le >= 2684118.0) & (lh >= 0.45) & (lh <= 3.8)))
                         & (((arc_u % 4.2) >= 0.85) & ((arc_u % 4.2) <= 3.35))
                     )
-                    # Sparse sculpted circular museum oculi on the curved white facade (Christ & Gantenbein signature!)
-                    oc_z = ((lh - 10.5) % 6.8) - 3.4
-                    oc_u = ((arc_u + 2.0) % 7.6) - 3.8
-                    oculi = in_white_curve & (lh >= 8.5) & (lh <= 19.5) & ((oc_z * oc_z + oc_u * oc_u) <= 0.62)
-
-                    hoc_win = plaza_glass | oculi
+                    # Narrow vertical shadow-joint slit windows on upper red-brick office elevation only
+                    brick_office_win = (
+                        brick_m
+                        & (lh >= 6.2)
+                        & (lh <= 18.6)
+                        & (((lh - 6.2) % 4.2) <= 2.1)
+                        & (((lu + 1.8) % 6.8) <= 1.05)
+                        & (edge_dist[hi_l] >= 2.2)
+                    )
+                    hoc_win = plaza_glass | brick_office_win
                     if hoc_win.any():
                         hw_idx = hi_l[hoc_win]
                         if preset.is_night:
-                            w_base[hw_idx] = [255.0, 224.0, 142.0]
+                            w_base[hw_idx] = [255.0, 222.0, 138.0]
                             f_mat[wi[hw_idx]] = M_WINDOW_LIT
                         else:
-                            w_base[hw_idx] = [62.0, 86.0, 112.0]
+                            w_base[hw_idx] = [52.0, 72.0, 96.0]
                             f_mat[wi[hw_idx]] = M_WINDOW_DAY
+
+                # -------------------------------------------------------------
+                # B1b. LANDMARK: Main Seestrasse 204 Lindt & Sprüngli Complex (Building 1642, 1473, 1720)
+                # Photographic 4-wing architecture along Seestrasse (archiv_01, archiv_02, lindt_00, lindt_01, lindt_03)!
+                # -------------------------------------------------------------
+                is_1642 = w_bi == 1642
+                if is_1642.any():
+                    m_i = np.nonzero(is_1642)[0]
+                    me, mn, mz, mh = w_e[m_i], w_n[m_i], w_z[m_i], h_rel[m_i]
+                    mu = u_local[m_i]
+                    mtd = top_dist[m_i]
+
+                    # Wing A (N >= 1241403): Iconic 1899 Polychrome Red & Buff-Yellow Brick Stammhaus (Firmenarchiv)!
+                    wing_poly = mn >= 1241403.0
+                    if wing_poly.any():
+                        pi = m_i[wing_poly]
+                        ph = mh[wing_poly]
+                        pu = mu[wing_poly]
+                        pz = mz[wing_poly]
+                        # Default rich historic red brick + alternating buff-yellow brick pilasters & horizontal bands!
+                        pcol = np.full((len(pi), 3), [162.0, 68.0, 52.0], dtype=np.float32)
+                        yellow_band = (((pz * 0.95) % 1.0) < 0.34) | ((pu % 3.6) < 0.72)
+                        pcol[yellow_band] = [214.0, 190.0, 138.0]
+                        # Rusticated grey sandstone ground floor
+                        pcol[ph < 4.5] = [146.0, 142.0, 134.0]
+                        # Decorative diamond red/gold frieze & dark stone cornice below attic mansard
+                        frieze_z = (ph >= 15.0) & (ph < 16.8)
+                        checker = (((np.floor(pu * 1.4) + np.floor(pz * 1.4)).astype(np.int32)) & 1) == 0
+                        pcol[frieze_z] = np.where(checker[frieze_z, None], [218.0, 192.0, 134.0], [156.0, 62.0, 48.0])
+                        pcol[(ph >= 16.8) & (ph < 17.5)] = [92.0, 78.0, 70.0]
+                        # Mansard attic trim
+                        pcol[(ph >= 17.5) & ((pu % 3.2) < 0.55)] = [216.0, 212, 202.0]
+                        w_base[pi] = pcol
+
+                    # Wing B (1241362 <= N < 1241403): Historic light stone-white "MAÎTRE CHOCOLATIER SUISSE" wing
+                    wing_mid = (mn >= 1241362.0) & (mn < 1241403.0)
+                    if wing_mid.any():
+                        mi_b = m_i[wing_mid]
+                        mh_b = mh[wing_mid]
+                        mtd_b = mtd[wing_mid]
+                        me_b = me[wing_mid]
+                        mu_b = mu[wing_mid]
+                        bcol = np.full((len(mi_b), 3), [208.0, 206.0, 198.0], dtype=np.float32)
+                        bcol[mh_b < 1.6] = [140.0, 138.0, 134.0]
+                        # Golden rooftop sign accent along NE Seestrasse parapet
+                        gsign_b = (me_b >= 2684208.0) & (mtd_b <= 1.25) & (((mu_b * 1.3) % 1.0) >= 0.30)
+                        bcol[gsign_b] = [224.0, 188.0, 78.0]
+                        w_base[mi_b] = bcol
+
+                    # Wing C (1241342 <= N < 1241362, E >= 2684225): Central Limestone Clock & Twin-Crest Tower (lindt_03.jpg)!
+                    wing_twr = (mn >= 1241342.0) & (mn < 1241362.0) & (me >= 2684225.0)
+                    if wing_twr.any():
+                        ti_c = m_i[wing_twr]
+                        th_c = mh[wing_twr]
+                        tu_c = mu[wing_twr]
+                        ttd_c = mtd[wing_twr]
+                        tcol = np.full((len(ti_c), 3), [212.0, 210.0, 202.0], dtype=np.float32)
+                        tcol[th_c < 1.6] = [138.0, 136.0, 132.0]
+                        # Blind recessed vertical wall panels on central tower shaft (6m..19.5m)
+                        recess = (th_c >= 6.0) & (th_c <= 19.5) & (((tu_c % 4.4) >= 0.8) & ((tu_c % 4.4) <= 3.6))
+                        tcol[recess] = [196.0, 194.0, 186.0]
+                        # Golden twin Lindt medallions highlight at central tower roofline
+                        crest = (ttd_c <= 1.6) & (np.abs(d_center[ti_c]) <= 3.6)
+                        tcol[crest] = [228.0, 190.0, 76.0]
+                        w_base[ti_c] = tcol
+
+                    # Wing D (N < 1241342 or courtyard West): Taupe concrete grid + buff brick spandrels & beige louvers!
+                    wing_south = (mn < 1241342.0) | ((mn < 1241362.0) & (me < 2684225.0))
+                    if wing_south.any():
+                        si_d = m_i[wing_south]
+                        sh_d = mh[wing_south]
+                        su_d = mu[wing_south]
+                        std_d = mtd[wing_south]
+                        se_d = me[wing_south]
+                        # Pebble-taupe concrete frame + thin buff brick sills + pale cream-beige blind bays (lindt_00.jpg & lindt_01.jpg)
+                        scol = np.full((len(si_d), 3), [196.0, 190.0, 178.0], dtype=np.float32)
+                        in_fl = (sh_d % 4.1) / 4.1
+                        is_frame = ((su_d % 3.8) < 0.48) | (in_fl < 0.12)
+                        is_buff_brick = (~is_frame) & (in_fl >= 0.12) & (in_fl < 0.28)
+                        scol[is_buff_brick] = [178.0, 156.0, 118.0]
+                        scol[is_frame] = [156.0, 150.0, 140.0]
+                        # Subtle horizontal blind slats texture on middle stories
+                        slat_d = (~is_frame) & (~is_buff_brick) & (((sh_d * 3.2) % 1.0) < 0.35)
+                        scol[slat_d] *= 0.94
+                        # Golden "LINDT & SPRÜNGLI AG" rooftop sign accent along Seestrasse front
+                        gsign_d = (se_d >= 2684245.0) & (std_d <= 1.25) & (((su_d * 1.3) % 1.0) >= 0.30)
+                        scol[gsign_d] = [224.0, 188.0, 78.0]
+                        w_base[si_d] = scol
+
+                # Also style Building 1473 & 1720 with the matching southern concrete frame + buff brick spandrel motif!
+                is_south_prod = (w_bi == 1473) | (w_bi == 1720)
+                if is_south_prod.any():
+                    sp_i = np.nonzero(is_south_prod)[0]
+                    sp_h = h_rel[sp_i]
+                    sp_fl = (sp_h % 4.1) / 4.1
+                    sp_fr = ((u_local[sp_i] % 3.8) < 0.48) | (sp_fl < 0.12)
+                    sp_bb = (~sp_fr) & (sp_fl >= 0.12) & (sp_fl < 0.28)
+                    sp_sl = (~sp_fr) & (~sp_bb) & (((sp_h * 3.2) % 1.0) < 0.35)
+                    w_base[sp_i] = [196.0, 190.0, 178.0]
+                    w_base[sp_i[sp_sl]] *= 0.94
+                    w_base[sp_i[sp_bb]] = [178.0, 156.0, 118.0]
+                    w_base[sp_i[sp_fr]] = [156.0, 150.0, 140.0]
 
                 # -------------------------------------------------------------
                 # B2. LANDMARK: Churches & Bell Towers (style 4)
@@ -1227,14 +1396,13 @@ def render_diorama(
 
                     # Warm sandstone corner quoins on church & tower corners
                     quoin = (s_bi == 1715) & (s_edg < 0.52) & (((np.floor(sz_w * 1.3).astype(np.int32)) % 2) == 0)
-                    w_base[si_l[quoin]] = [214.0, 202, 180.0]
+                    w_base[si_l[quoin]] = [196.0, 184.0, 164.0]
 
                     # 1. Reformierte Kirche Square Bell Tower (bi == 1715, East side E >= 2683407.6)
                     rk_tower = (s_bi == 1715) & (se_w >= 2683407.6)
                     if rk_tower.any():
                         rt_i = np.nonzero(rk_tower)[0]
                         rt_glob = si_l[rt_i]
-                        # Exact horizontal offset from square tower center (2683413.0, 1241287.7) along this tower wall!
                         tx_t = tw_x_v[s_ft[rt_i]]
                         ty_t = tw_y_v[s_ft[rt_i]]
                         d_tc = (se_w[rt_i] - 2683413.0) * tx_t + (sn_w[rt_i] - 1241287.7) * ty_t
@@ -1265,14 +1433,12 @@ def render_diorama(
                             ux = d_tc[ck_sub]
                             uz = dz_ck[ck_sub]
 
-                            # Dark slate dial + gleaming gold outer bezel & cardinal hour markers + gold hands (~10:10)!
                             dial_col = np.full((len(ck_sub), 3), 24.0, dtype=np.float32)
                             dial_col[:, 1] = 28.0
                             dial_col[:, 2] = 38.0
 
                             gold_rim = (rc >= 1.72) & (rc <= 2.22)
                             inner_ring = (rc >= 1.38) & (rc <= 1.50)
-                            # Hour hand (~10 o'clock: angle ~145°) & minute hand (~2 o'clock: angle ~30°)
                             d_hr = np.abs(ux * 0.57 + uz * 0.82)
                             along_hr = -ux * 0.82 + uz * 0.57
                             hand_hr = (d_hr <= 0.22) & (along_hr >= -0.15) & (along_hr <= 1.18)
@@ -1314,7 +1480,6 @@ def render_diorama(
                         et_glob = si_l[et_i]
                         edc = s_dc[et_i]
                         ez = sz_w[et_i]
-                        # Tall modernist acoustic belfry slots near top + sleek round gold clock
                         bslot = (np.abs(np.abs(edc) - 0.55) <= 0.24) & (ez >= 510.2) & (ez <= 516.4)
                         w_base[et_glob[bslot]] = [42.0, 44.0, 50.0]
                         r_ec = np.hypot(edc, ez - 507.6)
@@ -1325,7 +1490,6 @@ def render_diorama(
                     if st_el_nave.any():
                         en_i = np.nonzero(st_el_nave)[0]
                         en_glob = si_l[en_i]
-                        # Sculptural clerestory glass band near roofline (not residential rows!)
                         clere = (sh_w[en_i] >= 9.5) & (sh_w[en_i] <= 12.2) & (((s_ul[en_i] % 2.8) >= 0.45))
                         if clere.any():
                             cg_idx = en_glob[clere]
@@ -1333,26 +1497,34 @@ def render_diorama(
                             f_mat[wi[cg_idx]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
 
                 # -------------------------------------------------------------
-                # B3. SMALL OUTBUILDINGS, BOATHOUSES & GARAGES (style 6)
-                # Timber double-door or single small casement — NEVER rows of windows!
+                # B3. SMALL OUTBUILDINGS, BOATHOUSES, GARAGES & BENDLIKON PAVILION (style 6)
                 # -------------------------------------------------------------
                 is_outb = w_sty == 6
                 if is_outb.any():
                     oi = np.nonzero(is_outb)[0]
+                    o_bi = w_bi[oi]
                     odc = d_center[oi]
                     oh = h_rel[oi]
+                    oz = w_z[oi]
+                    oeave = eave_z[oi]
                     owlen = wall_len[oi]
                     odb = w_dbin[oi]
-                    # Put a timber garage/boathouse door on one main wall, tiny window on one side
-                    is_door_face = ((w_bi[oi] + odb) % 3 == 0) & (owlen >= 3.2)
+                    # Bendlikon pier ZSG pavilion (bi == 1402): crisp white upper gable over pistachio-sage walls!
+                    bend_gable = (o_bi == 1402) & (oz > (oeave - 0.15))
+                    w_base[oi[bend_gable]] = [224.0, 222.0, 216.0]
+                    bend_win = (o_bi == 1402) & (oz <= (oeave - 0.35)) & (oh >= 1.0) & (oh <= 3.1) & (np.abs(odc) <= 2.2)
+                    w_base[oi[bend_win]] = [56.0, 78.0, 98.0]
+
+                    reg_outb = o_bi != 1402
+                    is_door_face = reg_outb & (((o_bi + odb) % 3) == 0) & (owlen >= 3.2)
                     gdoor = is_door_face & (np.abs(odc) <= 1.05) & (oh >= 0.08) & (oh <= 2.25)
-                    tiny_w = (~is_door_face) & (owlen >= 3.6) & (np.abs(odc) <= 0.45) & (oh >= 1.15) & (oh <= 2.05)
-                    w_base[oi[gdoor]] = [96.0, 68.0, 46.0]
+                    tiny_w = reg_outb & (~is_door_face) & (owlen >= 3.6) & (np.abs(odc) <= 0.45) & (oh >= 1.15) & (oh <= 2.05)
+                    w_base[oi[gdoor]] = [92.0, 64.0, 44.0]
                     w_base[oi[tiny_w]] = [52.0, 68.0, 88.0]
 
                 # -------------------------------------------------------------
-                # B4. RESIDENTIAL HOUSES (0), MODERN VILLAS (1) & HISTORIC FACTORIES (3)
-                # Per-wall corner margins, eave/gable cutoffs, organic bay piers & front doors!
+                # B4. RESIDENTIAL HOUSES (0), MODERN VILLAS (1) & LINDT CAMPUS WINGS (3)
+                # Per-wall corner margins, eave/gable cutoffs, organic bay piers & authentic shutters!
                 # -------------------------------------------------------------
                 is_res = (w_sty == 0) | (w_sty == 1) | (w_sty == 3)
                 if is_res.any():
@@ -1362,6 +1534,8 @@ def render_diorama(
                     r_db = w_dbin[ri_l]
                     r_h = h_rel[ri_l]
                     r_z = w_z[ri_l]
+                    r_n = w_n[ri_l]
+                    r_e = w_e[ri_l]
                     r_eave = eave_z[ri_l]
                     r_wlen = wall_len[ri_l]
                     r_uloc = u_local[ri_l]
@@ -1370,28 +1544,25 @@ def render_diorama(
 
                     # Subtle horizontal balcony/slab shadow ledges on wider modern villas (style 1)
                     slab_line = (r_sty == 1) & (r_wlen >= 9.0) & (r_h >= 2.8) & (((r_h % 3.15) < 0.24))
-                    w_base[ri_l[slab_line]] *= 0.86
+                    w_base[ri_l[slab_line]] *= 0.85
 
-                    # Vertical structural pilaster piers every 12.8m on historic Lindt factory wings (style 3)
-                    pilaster = (r_sty == 3) & ((r_uloc % 12.8) < 0.65)
-                    w_base[ri_l[pilaster]] = np.minimum(250.0, w_base[ri_l[pilaster]] * 1.05)
+                    # Vertical structural pilaster piers every 10.5m on historic Lindt wings (except 1642 south grid)
+                    pilaster = (r_sty == 3) & (~((r_bi_w == 1642) & (r_n < 1241362.0))) & (r_bi_w != 1473) & (r_bi_w != 1720) & ((r_uloc % 10.5) < 0.55)
+                    w_base[ri_l[pilaster]] = np.minimum(242.0, w_base[ri_l[pilaster]] * 1.05)
 
-                    # Story height & generous bay spacing (so walls are 65-75% warm masonry, NOT window stripes!)
-                    fl_h = np.where(r_sty == 3, 3.85, np.where(r_sty == 1, 3.15, 3.05))
-                    bay_w = np.where(r_sty == 3, 3.20, np.where(r_sty == 1, 4.65, 3.85))
+                    fl_h = np.where(r_sty == 3, 4.10, np.where(r_sty == 1, 3.15, 3.05))
+                    bay_w = np.where(r_sty == 3, 3.60, np.where(r_sty == 1, 4.55, 3.85))
 
                     fl_idx = np.floor(r_h / fl_h).astype(np.int32)
                     in_z = (r_h - fl_idx * fl_h) / fl_h
 
-                    # Center the bay grid symmetrically on each individual wall!
                     n_bays = np.maximum(1, np.floor((r_wlen - 2.1) / bay_w).astype(np.int32))
                     grid_span = n_bays.astype(np.float32) * bay_w
                     u_start = 0.5 * (r_wlen - grid_span)
                     u_in_grid = r_uloc - u_start
                     bay_idx = np.floor(u_in_grid / bay_w).astype(np.int32)
-                    bay_center_offset = (u_in_grid - (bay_idx.astype(np.float32) + 0.5) * bay_w)  # meters from bay center!
+                    bay_center_offset = u_in_grid - (bay_idx.astype(np.float32) + 0.5) * bay_w
 
-                    # Strict corner piers & strict eave/roofline ceiling (NEVER rows of windows in triangular gables!)
                     z_ceil = np.where(r_sty == 0, np.minimum(r_eave - 0.35, bldg_z1[r_bi_w] - 0.75), bldg_z1[r_bi_w] - 0.75)
                     in_grid_bounds = (
                         (r_wlen >= 3.5)
@@ -1402,8 +1573,6 @@ def render_diorama(
                         & (r_h >= 0.85)
                     )
 
-                    # Deterministic architectural rhythm: skip ~26% of bays as solid plaster wall piers,
-                    # leave ~30% of narrow side walls (<5.8m) completely blank!
                     wall_hash = ((r_bi_w.astype(np.int64) * 2654435761) ^ (r_db.astype(np.int64) * 40503)) & 0xFF
                     bay_hash = ((r_bi_w.astype(np.int64) * 73856093) ^ (r_db.astype(np.int64) * 19349663) ^ (bay_idx.astype(np.int64) * 83492791)) & 0xFF
 
@@ -1411,10 +1580,20 @@ def render_diorama(
                     solid_pier_bay = (
                         ((r_sty == 0) & (n_bays >= 3) & ((bay_hash % 4) == 1))
                         | ((r_sty == 1) & (n_bays >= 2) & ((bay_hash % 4) == 2))
-                        | ((r_sty == 3) & ((bay_idx % 4) == 3))
+                        | ((r_sty == 3) & ((bay_idx % 5) == 4) & (r_bi_w != 1473))
                     )
 
-                    # Ground-floor wooden entrance door on one bay of houses (instead of another window!)
+                    # Special historic accuracy on Building 1642 & 1473/1720:
+                    # - Central clock tower shaft (1241342 <= N < 1241362, 5.5m <= h_rel <= 19.5m) is blind recessed stone (no windows!)
+                    # - South production hall (N < 1241342 or 1473/1720) has lowered beige sun-blinds on middle floors & dark glass on ground + top clerestory!
+                    blind_tower_shaft = (r_bi_w == 1642) & (r_n >= 1241342.0) & (r_n < 1241362.0) & (r_e >= 2684225.0) & (r_h >= 5.2) & (r_h <= 19.8)
+                    south_blind_floor = (
+                        (((r_bi_w == 1642) & (r_n < 1241342.0)) | (r_bi_w == 1473) | (r_bi_w == 1720))
+                        & (r_h >= 4.2)
+                        & ((bldg_z1[r_bi_w] - r_z) > 4.4)
+                    )
+
+                    # Ground-floor wooden entrance door on one bay of houses
                     is_door_bay = (r_sty == 0) & (fl_idx == 0) & (bay_idx == (n_bays // 2)) & ((wall_hash % 2) == 0)
                     front_door = (
                         in_grid_bounds
@@ -1425,28 +1604,34 @@ def render_diorama(
                         & (r_h <= 2.22)
                     )
                     if front_door.any():
-                        w_base[ri_l[front_door]] = [98.0, 66.0, 44.0]
+                        w_base[ri_l[front_door]] = [92.0, 62.0, 42.0]
 
-                    # Half of remaining ground-floor bays on hillside Swiss houses are solid masonry basement/plinth!
                     skip_gf_win = (r_sty == 0) & (fl_idx == 0) & (((bay_hash >> 3) % 3) == 0)
 
-                    # Window half-width in meters: crisp 1.12m casements on Swiss houses, varied 1.10m / 1.85m on modern villas!
                     half_w = np.where(
                         r_sty == 0,
                         0.56,
                         np.where(
                             r_sty == 3,
-                            0.62,
-                            np.where((bay_hash & 1) == 0, 0.92, 0.55),
+                            0.74,
+                            np.where((bay_hash & 1) == 0, 0.94, 0.56),
                         ),
                     )
-                    z_lo = np.where((r_sty == 1) & ((bay_hash & 1) == 0), 0.18, 0.32)
-                    z_hi = np.where(r_sty == 3, 0.78, 0.74)
+                    z_lo = np.where((r_sty == 1) & ((bay_hash & 1) == 0), 0.18, np.where(r_sty == 3, 0.36, 0.32))
+                    z_hi = np.where(r_sty == 3, 0.82, 0.74)
 
-                    active_bay = in_grid_bounds & (~blank_narrow_wall) & (~solid_pier_bay) & (~is_door_bay) & (~skip_gf_win)
+                    active_bay = (
+                        in_grid_bounds
+                        & (~blank_narrow_wall)
+                        & (~solid_pier_bay)
+                        & (~is_door_bay)
+                        & (~skip_gf_win)
+                        & (~blind_tower_shaft)
+                        & (~south_blind_floor)
+                    )
                     is_pane = active_bay & (in_z >= z_lo) & (in_z <= z_hi) & (np.abs(bay_center_offset) <= half_w)
 
-                    # Single small centered attic window high in wide pitched roof gables (above eaves!)
+                    # Single small centered attic window high in wide pitched roof gables
                     in_gable_peak = (
                         (r_sty == 0)
                         & (r_wlen >= 6.4)
@@ -1458,10 +1643,14 @@ def render_diorama(
                     )
                     is_pane |= in_gable_peak
 
-                    # Classic dark green / burgundy / timber shutters flanking traditional Swiss house windows (style 0)!
+                    # Authentic Swiss shutters flanking traditional house windows (forest green, seafoam, cornflower blue, burgundy, timber, dove-blue)!
                     is_shutter = (
                         (r_sty == 0)
                         & active_bay
+                        & (r_bi_w != 981)
+                        & (r_bi_w != 1823)
+                        & (r_bi_w != 1490)
+                        & (r_bi_w != 1726)
                         & (in_z >= z_lo)
                         & (in_z <= z_hi)
                         & (np.abs(bay_center_offset) > (half_w + 0.03))
@@ -1469,17 +1658,56 @@ def render_diorama(
                     )
                     if is_shutter.any():
                         sh_g = ri_l[is_shutter]
-                        sh_mode = r_bi_w[is_shutter] % 5
-                        sh_col = np.where(
-                            (sh_mode == 0)[:, None],
-                            [114.0, 46.0, 46.0],
-                            np.where((sh_mode == 1)[:, None], [96.0, 68.0, 46.0], [42.0, 78.0, 54.0]),
+                        sb_id = r_bi_w[is_shutter]
+                        sh_mode = sb_id % 6
+                        sh_col = np.select(
+                            [
+                                (sb_id == 1582) | (sb_id == 1695),
+                                sh_mode == 0,
+                                sh_mode == 1,
+                                sh_mode == 2,
+                                sh_mode == 3,
+                                sh_mode == 4,
+                            ],
+                            [
+                                166.0,  # Dove-blue shutters on yellow Schooren house (archiv_02.jpg)
+                                46.0,   # Classic Swiss forest green
+                                62.0,   # Zürichsee cornflower blue (lake_01.jpg)
+                                68.0,   # Seafoam teal (Thomas Mann Haus)
+                                126.0,  # Historic burgundy red
+                                92.0,   # Dark timber
+                            ],
+                            default=52.0,
                         )
-                        w_base[sh_g] = sh_col
+                        sh_col_g = np.select(
+                            [
+                                (sb_id == 1582) | (sb_id == 1695),
+                                sh_mode == 0,
+                                sh_mode == 1,
+                                sh_mode == 2,
+                                sh_mode == 3,
+                                sh_mode == 4,
+                            ],
+                            [180.0, 86.0, 104.0, 124.0, 48.0, 66.0],
+                            default=94.0,
+                        )
+                        sh_col_b = np.select(
+                            [
+                                (sb_id == 1582) | (sb_id == 1695),
+                                sh_mode == 0,
+                                sh_mode == 1,
+                                sh_mode == 2,
+                                sh_mode == 3,
+                                sh_mode == 4,
+                            ],
+                            [198.0, 58.0, 162.0, 110.0, 46.0, 46.0],
+                            default=68.0,
+                        )
+                        w_base[sh_g] = np.stack([sh_col, sh_col_g, sh_col_b], axis=1)
 
                     # Crisp 1px stone window sill directly below active windows
                     is_sill = active_bay & (in_z >= (z_lo - 0.08)) & (in_z < z_lo) & (np.abs(bay_center_offset) <= (half_w + 0.14))
-                    w_base[ri_l[is_sill]] = np.minimum(250.0, w_base[ri_l[is_sill]] * 1.12)
+                    w_base[ri_l[is_sill]] = np.minimum(242.0, w_base[ri_l[is_sill]] * 1.10)
 
                     if is_pane.any():
                         p_sub = np.nonzero(is_pane)[0]
@@ -1499,11 +1727,10 @@ def render_diorama(
                             w_base[p_local] = np.where(lit[:, None], lit_c, [30.0, 42.0, 64.0])
                             f_mat[p_global] = np.where(lit, M_WINDOW_LIT, M_WINDOW_DAY)
                         else:
-                            # Subtle center casement mullion + sky reflection glint in upper pane
                             mullion = np.abs(p_bco) < 0.08
                             upper_glint = p_inz > 0.56
-                            pane_c = np.where(upper_glint[:, None], [86.0, 118.0, 148.0], [42.0, 56.0, 76.0])
-                            pane_c[mullion] = [196.0, 192.0, 184.0]
+                            pane_c = np.where(upper_glint[:, None], [78.0, 108.0, 138.0], [38.0, 52.0, 72.0])
+                            pane_c[mullion] = [188.0, 184.0, 176.0]
                             w_base[p_local] = pane_c
                             f_mat[p_global] = M_WINDOW_DAY
 
@@ -1582,7 +1809,7 @@ def render_diorama(
 
             raw_leaf = sample_ortho_25cm(scene, ce_all[cv], cn_all[cv])
             lcol_v = condition_90s_foliage(raw_leaf, loid_v, chm_all[cv])
-            lcol_v *= 0.89 + 0.036 * (th_v[:, None].astype(np.float32))
+            lcol_v *= 0.92 + 0.036 * (th_v[:, None].astype(np.float32))
             lcol_v = np.clip(lcol_v, 14.0, 236.0)
 
             lsh_v = sub_shadow[rr_v, cc_v]
@@ -1630,7 +1857,7 @@ def render_diorama(
 
             eoid = 100000 + (((ec_c + c0) // 7) * 1024 + ((er_c + r0) // 7))
             eraw = sample_ortho_25cm(scene, ee, en)
-            ecol = condition_90s_foliage(eraw, eoid, echm) * 0.78
+            ecol = condition_90s_foliage(eraw, eoid, echm) * 0.82
             enx = scene.can_nx[r0:r1, c0:c1][er_c, ec_c]
             eny = scene.can_ny[r0:r1, c0:c1][er_c, ec_c]
 
@@ -1703,7 +1930,7 @@ def render_diorama(
                 obj_buf[iy_t[wt], ix_t[wt]] = 200000
 
     # -------------------------------------------------------------------------
-    # STAGE 5: 90s Pixel-Art Stepped Lighting + 256-Color Bayer Dither + Sel-Out
+    # STAGE 5: Physically Normalized 90s Stepped Lighting + 256-Color Dither
     # -------------------------------------------------------------------------
     active_px = mat_buf > M_DROP_SHADOW
     ay, ax = np.nonzero(active_px)
@@ -1715,13 +1942,15 @@ def render_diorama(
             0.0,
             1.0,
         )
-        ndotl = np.where(shadow_buf[ay, ax], ndotl * 0.14, ndotl)
-        ndotl_step = np.round(ndotl * 5.0) / 5.0
+        ndotl = np.where(shadow_buf[ay, ax], ndotl * 0.12, ndotl)
+        ndotl_step = np.round(ndotl * 6.0) / 6.0
 
         amb = np.array(preset.amb_rgb, dtype=np.float32)
         sun_c = np.array(preset.sun_rgb, dtype=np.float32)
         sky_dome = (0.5 + 0.5 * np.clip(n_xyz[:, 2], -1.0, 1.0))[:, None]
-        lit_mult = amb[None, :] * (0.74 + 0.36 * sky_dome) + sun_c[None, :] * ndotl_step[:, None] * 0.76
+        # Normalized so sunlit horizontal SWISSIMAGE surfaces (~0.67 ndotl) receive ~1.00x (zero whiteout!)
+        # and isometric 3D building walls show crisp 3-tone shading (~1.01x SE sunlit, ~0.76x NE lakefront, ~0.50x shadow)
+        lit_mult = amb[None, :] * (0.72 + 0.28 * sky_dome) + sun_c[None, :] * ndotl_step[:, None] * 0.67
 
         base_f = rgb_buf[ay, ax]
         shaded = base_f * lit_mult
