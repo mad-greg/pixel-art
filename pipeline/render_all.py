@@ -22,6 +22,7 @@ import json
 import time
 
 from .config import CROPS_DIR, DOCS_DIR, IsometricCamera, LANDMARKS, RENDERS_DIR
+from .export_animations import export_animations
 from .extract_scene import extract_scene
 from .pixel_shader import SceneData, render_diorama, render_diorama_tiled_hires
 
@@ -89,6 +90,8 @@ def render_everything(
             img_c.save(out_c, optimize=True)
             img_c.save(DOCS_DIR / "assets" / fname.replace(".png", ".webp"), format="WEBP", lossless=True, method=4)
             print(f"[render] Crop {fname}: {img_c.size[0]}x{img_c.size[1]} @ {mpp_crop:.2f} m/px ({time.time() - t_c:.1f}s)")
+
+    export_animations(mpp_full=mpp_full)
 
 
 if __name__ == "__main__":
