@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kilchberg ZH — 3D Isometric Pixel Art Diorama</title>
+  <meta name="description" content="Interactive 3D isometric pixel-art diorama of Kilchberg (ZH), Switzerland, built from official swisstopo 0.5m LiDAR, LOD2 3D buildings, and 10cm SWISSIMAGE aerial data." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar" id="topbar">
+    <div class="brand">
+      <div class="swiss-crest" aria-hidden="true"><span></span></div>
+      <div>
+        <h1>Kilchberg ZH — 3D Isometric Pixel Art Diorama</h1>
+        <p class="subtitle">Official swisstopo EPSG:2056 · 1,890 LOD2 3D Buildings · 0.5 m LiDAR · 10 cm SWISSIMAGE</p>
+      </div>
+    </div>
+
+    <div class="controls-bar">
+      <div class="segmented" role="group" aria-label="Lighting preset">
+        <button id="btn-mode-day" class="seg-btn active" data-mode="day">Midday</button>
+        <button id="btn-mode-sunset" class="seg-btn" data-mode="sunset">Alpenglow</button>
+        <button id="btn-mode-night" class="seg-btn" data-mode="night">Night</button>
+      </div>
+
+      <div class="zoom-group">
+        <button id="btn-zoom-out" class="icon-btn" title="Zoom out">−</button>
+        <span id="zoom-readout" class="mono-pill">Fit</span>
+        <button id="btn-zoom-in" class="icon-btn" title="Zoom in">+</button>
+        <button id="btn-zoom-1x" class="icon-btn text-btn" title="1:1 Native Pixel Art">1:1 px</button>
+        <button id="btn-zoom-2x" class="icon-btn text-btn" title="2x Crisp Integer Pixel Zoom">2× px</button>
+        <button id="btn-zoom-fit" class="icon-btn text-btn" title="Reset full island view">Reset</button>
+      </div>
+
+      <button id="btn-toggle-pins" class="toggle-btn active" title="Toggle landmark pins">Pins</button>
+      <button id="btn-toggle-loupe" class="toggle-btn" title="Toggle 6x pixel-grid magnifier">6× Loupe</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="viewport" id="viewport">
+      <canvas id="diorama-canvas"></canvas>
+      <div id="pins-layer" class="pins-layer"></div>
+      <canvas id="loupe-canvas" class="loupe-canvas hidden" width="216" height="216"></canvas>
+
+      <div class="hud-coords" id="hud-coords">
+        <span id="coord-lv95">LV95 E 2'683'780 · N 1'241'890</span>
+        <span class="sep">|</span>
+        <span id="coord-elev">406.0 m a.s.l.</span>
+      </div>
+    </section>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="panel-section inspector-card" id="inspector-card">
+        <div class="eyebrow">GIS BUILDING &amp; TERRAIN INSPECTOR</div>
+        <h2 id="insp-title">Municipality of Kilchberg (ZH)</h2>
+        <p id="insp-sub" class="insp-sub">Hover or click any 3D building or landmark pin on the diorama to inspect its real official Swiss GIS attributes.</p>
+        <dl class="spec-grid" id="insp-specs">
+          <div><dt>BFS Number</dt><dd>0135 (Kanton Zürich)</dd></div>
+          <div><dt>Elevation Range</dt><dd>406.0 m – 545.0 m</dd></div>
+          <div><dt>3D Buildings</dt><dd>1,890 (124,155 tris)</dd></div>
+          <div><dt>LiDAR Trees</dt><dd>5,689 crowns + 46 boats</dd></div>
+        </dl>
+      </div>
+
+      <div class="panel-section tour-section">
+        <div class="section-head">
+          <span class="eyebrow">GUIDED LANDMARK TOUR</span>
+          <span class="mono-tag">10 STOPS</span>
+        </div>
+        <div id="landmark-list" class="landmark-list"></div>
+      </div>
+
+      <div class="panel-section crops-section">
+        <div class="section-head">
+          <span class="eyebrow">0.30 m/px ULTRA-DETAIL PLATES</span>
+        </div>
+        <div id="crop-gallery" class="crop-gallery"></div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="modal-title">0.30 m/px Detail Plate</h3>
+        <button id="btn-close-modal" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <img id="modal-img" alt="High-detail isometric pixel art plate" />
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
