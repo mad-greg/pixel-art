@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '4.4';
+  const ASSET_VER = '4.5';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -2056,103 +2056,165 @@
     }
   }
 
-  function drawLakeWaves(glints, ships, worldW, worldH, wScale, tSec, mode) {
-    // Master-crafted 90s pixel-art rolling Lake Zurich wave trains!
-    // Spawns sweeping, curved, multi-tone isometric wavelets across both open-water glint anchors
-    // and Lake Zurich ship lanes (~500 living waves drifting smoothly along the NE->SW lake breeze).
+  function drawShorelineWaves(shoreline, worldW, worldH, wScale, tSec, mode) {
+    // Organic, hand-crafted 90s pixel-art shoreline wave arcs gently rolling INWARD toward the Kilchberg shore!
+    // Keeps open Lake Zurich water calm and glassy while soft overlapping wavelets approach the bays & seawalls,
+    // break into delicate pixelated foam at the water's edge, and clip cleanly behind piers/boathouses.
+    if (!shoreline || shoreline.length < 4) return;
+
     const isNight = mode === 'night';
     const isSunset = mode === 'sunset';
     const s = scale * wScale;
-    const hStep = Math.max(1.2, s * 1.35);
+
+    // Precompute smooth shoreline wave emitters (~140 evenly spaced coastal stations) once
+    if (!drawShorelineWaves._stations || drawShorelineWaves._stations.len !== shoreline.length) {
+      // Extra gentle smoothing pass over shoreline coordinates to remove sharp pier corners
+      const sm = shoreline.map((p, i) => {
+        let su = 0; let sv = 0; let cnt = 0;
+        for (let k = -3; k <= 3; k++) {
+          const j = Math.max(0, Math.min(shoreline.length - 1, i + k));
+          su += shoreline[j][0];
+          sv += shoreline[j][1];
+          cnt++;
+        }
+        return [su / cnt, sv / cnt];
+      });
+      const stations = [];
+      for (let i = 0; i < sm.length - 1; i++) {
+        const a = sm[i];
+        const b = sm[i + 1];
+        const du = b[0] - a[0];
+        const dv = b[1] - a[1];
+        const segLen = Math.hypot(du, dv);
+        if (segLen < 1e-5) continue;
+        // Skip steep pier-edge jumps so waves never wrap awkwardly around pier sides
+        if (Math.abs(dv) > Math.abs(du) * 1.45) continue;
+        const tx = du / segLen;
+        const ty = dv / segLen;
+        // Outward-into-lake normal (SE direction: +x, +y)
+        let nx = -ty;
+        let ny = tx;
+        if (ny < 0) { nx = -nx; ny = -ny; }
+        nx = nx * 0.55 + 0.55 * 0.45;
+        ny = ny * 0.55 + 0.83 * 0.45;
+        const nm = Math.hypot(nx, ny) || 1;
+        nx /= nm; ny /= nm;
+        const subSteps = Math.max(1, Math.round(segLen / 0.0055));
+        for (let st = 0; st < subSteps; st++) {
+          const f = (st + 0.5) / subSteps;
+          const idx = stations.length;
+          const seed = ((idx * 2654435761) >>> 0) / 4294967296;
+          stations.push({
+            u: a[0] + du * f,
+            v: a[1] + dv * f,
+            tx,
+            ty,
+            nx,
+            ny,
+            seed,
+          });
+        }
+      }
+      drawShorelineWaves._stations = { len: shoreline.length, list: stations };
+    }
+    const stations = drawShorelineWaves._stations.list;
 
     const troughCol = isNight
-      ? 'rgba(8, 18, 42, 0.45)'
-      : (isSunset ? 'rgba(42, 34, 62, 0.36)' : 'rgba(12, 54, 78, 0.38)');
-    const bodyCol = isNight
-      ? 'rgba(72, 114, 168, 0.48)'
-      : (isSunset ? 'rgba(232, 158, 108, 0.48)' : 'rgba(86, 174, 198, 0.50)');
-    const crestCol = isNight
-      ? 'rgba(168, 206, 248, 0.68)'
-      : (isSunset ? 'rgba(255, 214, 146, 0.74)' : 'rgba(218, 246, 255, 0.76)');
-    const sparkCol = isNight
-      ? 'rgba(224, 240, 255, 0.90)'
-      : (isSunset ? 'rgba(255, 246, 204, 0.92)' : 'rgba(255, 255, 255, 0.92)');
+      ? 'rgba(8, 22, 48, 0.30)'
+      : (isSunset ? 'rgba(38, 30, 56, 0.24)' : 'rgba(12, 58, 78, 0.24)');
+    const swellCol = isNight
+      ? 'rgba(124, 170, 226, 0.44)'
+      : (isSunset ? 'rgba(255, 198, 134, 0.48)' : 'rgba(176, 232, 240, 0.50)');
+    const foamCol = isNight
+      ? 'rgba(198, 226, 255, 0.66)'
+      : (isSunset ? 'rgba(255, 234, 188, 0.72)' : 'rgba(242, 253, 255, 0.78)');
 
-    // Build deterministic open-water wave centers once (guaranteed 100% over Lake Zurich water!)
-    if (!drawLakeWaves._anchors) {
-      const anchors = [];
-      for (let i = 0; i < glints.length; i++) {
-        const g = glints[i];
-        anchors.push([g[0], g[1], g[2]]);
-        // Add 4 staggered neighbors within open water around each verified glint anchor
-        for (let k = 1; k <= 4; k++) {
-          const a = g[2] * 29.3 + k * 1.57;
-          const r = 0.0045 + k * 0.0028;
-          anchors.push([g[0] + Math.cos(a) * r, g[1] + Math.sin(a) * r * 0.55, (g[2] + k * 0.21) % 1]);
+    const cycleSec = 5.6;
+    const nWaves = 3;
+    const maxDistWorld = 48.0 * wScale; // starts ~12 m offshore
+    const minDistWorld = 4.0 * wScale;  // softly laps right at the water's edge
+
+    ctx.save();
+    ctx.lineCap = 'round';
+
+    for (let i = 0; i < stations.length; i++) {
+      const st = stations[i];
+      // Quick viewport reject before running wave loop
+      const baseSx = offsetX + st.u * worldW * scale;
+      const baseSy = offsetY + st.v * worldH * scale;
+      if (baseSx < -90 || baseSx > canvas.width + 90 || baseSy < -90 || baseSy > canvas.height + 90) continue;
+
+      // Tangent vector in screen aspect
+      const tanX = st.tx * worldW;
+      const tanY = st.ty * worldH;
+      const tanM = Math.hypot(tanX, tanY) || 1;
+      const ux = tanX / tanM;
+      const uy = tanY / tanM;
+
+      for (let w = 0; w < nWaves; w++) {
+        // Organic phase offset per coastal station so adjacent wavelets roll in naturally staggered arcs!
+        const phaseOff = (w / nWaves) + Math.sin(i * 0.42 + w * 1.9) * 0.08 + (st.seed - 0.5) * 0.07;
+        const p = (((tSec / cycleSec) + phaseOff) % 1 + 1) % 1;
+        const alpha = p < 0.20 ? (p / 0.20) : (p > 0.80 ? ((1.0 - p) / 0.20) : 1.0);
+        if (alpha <= 0.05) continue;
+
+        const eased = 1.0 - Math.pow(1.0 - p, 1.35);
+        const dist = maxDistWorld * (1.0 - eased) + minDistWorld * eased;
+        const wx = st.u * worldW + st.nx * dist;
+        const wy = st.v * worldH + st.ny * dist;
+
+        // Clip cleanly behind harbor piers, boathouses & shoreline trees using our 16-bit depth occluder map!
+        if (depthPixels) {
+          const dx = Math.floor((wx / worldW) * depthW);
+          const dy = Math.floor((wy / worldH) * depthH);
+          if (dx >= 0 && dx < depthW && dy >= 0 && dy < depthH) {
+            if (depthPixels[(dy * depthW + dx) * 4 + 2] > 128) continue;
+          }
+        }
+
+        const sx = offsetX + wx * scale;
+        const sy = offsetY + wy * scale;
+        const isBreaking = p > 0.66;
+        const halfLen = (15.0 + st.seed * 12.0) * (0.65 + 0.35 * Math.sin(p * Math.PI)) * s;
+        // Subtle inward bow (center of wavelet curves slightly toward the shore!)
+        const bow = -2.2 * s;
+        const x0 = sx - ux * halfLen;
+        const y0 = sy - uy * halfLen;
+        const x1 = sx + ux * halfLen;
+        const y1 = sy + uy * halfLen;
+        const cx = sx + st.nx * bow;
+        const cy = sy + st.ny * bow;
+
+        // 1. Subtle darker-teal shadow trough just offshore behind the crest
+        const shX = st.nx * 2.1 * s;
+        const shY = st.ny * 2.1 * s;
+        ctx.globalAlpha = alpha * 0.65;
+        ctx.strokeStyle = troughCol;
+        ctx.lineWidth = Math.max(1.1, 1.8 * s);
+        ctx.beginPath();
+        ctx.moveTo(x0 + shX, y0 + shY);
+        ctx.quadraticCurveTo(cx + shX, cy + shY, x1 + shX, y1 + shY);
+        ctx.stroke();
+
+        // 2. Soft curved aqua/foam wave crest gliding smoothly toward shore
+        ctx.globalAlpha = alpha * (isBreaking ? 0.88 : 0.68);
+        ctx.strokeStyle = isBreaking ? foamCol : swellCol;
+        ctx.lineWidth = Math.max(1.0, (isBreaking ? 1.9 : 1.35) * s);
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.quadraticCurveTo(cx, cy, x1, y1);
+        ctx.stroke();
+
+        // 3. Delicate pixel-art foam sparkle at peak shoreline lap
+        if (isBreaking && alpha > 0.35) {
+          const pxSz = Math.max(1.2, 1.5 * s);
+          ctx.globalAlpha = alpha * 0.9;
+          ctx.fillStyle = foamCol;
+          ctx.fillRect(Math.round(cx - pxSz * 1.4), Math.round(cy - pxSz * 0.5), Math.round(pxSz * 2.8), Math.max(1, Math.round(pxSz)));
         }
       }
-      // Also distribute wave anchors evenly along the open-water ZSG steamer & sailboat paths
-      for (let si = 0; si < (ships || []).length; si++) {
-        const pts = ships[si].pts || [];
-        const step = Math.max(4, Math.floor(pts.length / 28));
-        for (let pi = 2; pi < pts.length - 2; pi += step) {
-          const p = pts[pi];
-          const seed = ((si * 37 + pi * 13) % 997) / 997;
-          anchors.push([p[0], p[1], seed]);
-          anchors.push([p[0] + 0.008 * Math.cos(seed * 18), p[1] + 0.005 * Math.sin(seed * 18), (seed + 0.43) % 1]);
-        }
-      }
-      drawLakeWaves._anchors = anchors;
     }
-
-    const anchors = drawLakeWaves._anchors;
-    // Gentle rolling drift perpendicular to the isometric wave crest (WNW -> ESE / SW breeze)
-    const driftVx = -32.0 * wScale;
-    const driftVy = 15.0 * wScale;
-    const tilt = -0.32; // isometric NE-SW wave ridge angle
-
-    for (let i = 0; i < anchors.length; i++) {
-      const a = anchors[i];
-      const seed = a[2];
-      const cycleSec = 4.6 + (i % 7) * 0.42;
-      const age = (((tSec / cycleSec) + seed * 5.3) % 1 + 1) % 1;
-      const amp = Math.sin(age * Math.PI);
-      if (amp < 0.16) continue;
-
-      const wx = a[0] * worldW + driftVx * (age - 0.5);
-      const wy = a[1] * worldH + driftVy * (age - 0.5);
-      const sx = offsetX + wx * scale;
-      const sy = offsetY + wy * scale;
-      if (sx < -45 || sx > canvas.width + 45 || sy < -25 || sy > canvas.height + 25) continue;
-
-      const halfLen = (11.5 + (i % 5) * 2.8) * (0.45 + 0.55 * amp) * s;
-      const segW = Math.max(2, Math.round(halfLen * 0.58));
-      const hh = Math.max(1, Math.round(hStep));
-
-      ctx.save();
-      ctx.globalAlpha = Math.min(1.0, amp * 1.15);
-
-      // 1. Curved dark-teal trough shadow beneath the wave
-      ctx.fillStyle = troughCol;
-      ctx.fillRect(Math.round(sx - halfLen * 0.78), Math.round(sy + hh * 1.1), Math.max(3, Math.round(halfLen * 1.56)), hh);
-
-      // 2. Tapered isometric wave wings (5-step sculpted pixel-art crest arch!)
-      ctx.fillStyle = bodyCol;
-      ctx.fillRect(Math.round(sx - halfLen), Math.round(sy - halfLen * tilt + hh * 0.5), segW, hh);
-      ctx.fillRect(Math.round(sx + halfLen - segW), Math.round(sy + halfLen * tilt + hh * 0.5), segW, hh);
-
-      // 3. Bright turquoise-white foam crest along center ridge
-      ctx.fillStyle = crestCol;
-      ctx.fillRect(Math.round(sx - halfLen * 0.62), Math.round(sy - hh * 0.15), Math.max(3, Math.round(halfLen * 1.24)), hh);
-
-      // 4. Dancing sun/moonlight specular glint at peak swell
-      if (amp > 0.68) {
-        const spW = Math.max(2, Math.round(halfLen * 0.45));
-        ctx.fillStyle = sparkCol;
-        ctx.fillRect(Math.round(sx - spW * 0.5), Math.round(sy - hh * 0.55), spW, Math.max(1, Math.round(hh * 0.85)));
-      }
-      ctx.restore();
-    }
+    ctx.restore();
   }
 
   function draw3DCyclist(pos, colorIdx, wScale, mode, tSec) {
@@ -2280,9 +2342,9 @@
     const isNight = currentMode === 'night';
     const isSunset = currentMode === 'sunset';
 
-    // 1. Living, Rolling 90s Pixel-Art Lake Zurich Waves & Sun-Crests
-    if (animData.ambient && animData.ambient.lake_glints) {
-      drawLakeWaves(animData.ambient.lake_glints, animData.ships, worldW, worldH, wScale, tSec, currentMode);
+    // 1. Gentle Series of Shoreline Waves Rolling Inward Toward the Kilchberg Shore
+    if (animData.ambient && animData.ambient.shoreline) {
+      drawShorelineWaves(animData.ambient.shoreline, worldW, worldH, wScale, tSec, currentMode);
     }
 
     // 2. Lake Zurich ZSG Steamer & Sailboats (with crisp pixel V-wakes!)
