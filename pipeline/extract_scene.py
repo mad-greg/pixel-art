@@ -15,9 +15,8 @@ from rasterio.transform import from_bounds
 from lxml import etree
 from pyproj import Transformer
 from scipy import ndimage
-from shapely.affinity import translate
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box, shape
-from shapely.ops import unary_union
+from shapely.ops import linemerge, unary_union
 
 from .config import E_MAX, E_MIN, LAKE_SURFACE_Z, N_MAX, N_MIN, RAW_CACHE_DIR
 from .fetch_data import fetch_all
@@ -26,7 +25,7 @@ GRID_RES = 0.5  # 0.5 meter ground grid cells!
 GRID_W = int(round((E_MAX - E_MIN) / GRID_RES))  # 4280
 GRID_H = int(round((N_MAX - N_MIN) / GRID_RES))  # 5920
 
-# Semantic ground codes
+# Semantic ground codes (surface layer <= 0)
 G_TERRAIN = 0
 G_LAKE = 1
 G_STREAM = 2
@@ -41,6 +40,15 @@ G_STREET_MAIN = 10
 G_MOTORWAY = 11
 G_RAILWAY = 12
 G_PLATFORM_PIER = 13
+G_PARKING = 14
+
+# Elevated 3D bridge / viaduct codes (layer >= 1)
+BR_NONE = 0
+BR_FOOTBRIDGE = 1
+BR_ROAD_VIADUCT = 2
+BR_MOTORWAY = 3
+BR_RAIL_BRIDGE = 4
+BR_STEPS = 5
 
 
 def _tile_bounds_3857(x: int, y: int, z: int = 14):
@@ -199,14 +207,30 @@ def build_diorama_polygon(kpoly: MultiPolygon | Polygon, lake_poly: MultiPolygon
     return combined
 
 
-def _ensure_v2_rasters(cache_dir: Path, bldg_npz: Path) -> None:
-    """Ensure 25cm SWISSIMAGE texture atlas and exact 2D building roof mask exist."""
+def _iter_linestrings(geom) -> list[LineString]:
+    if geom is None or geom.is_empty:
+        return []
+    if geom.geom_type == "LineString":
+        return [geom] if geom.length > 0.2 else []
+    if hasattr(geom, "geoms"):
+        out = []
+        for sub in geom.geoms:
+            out.extend(_iter_linestrings(sub))
+        return out
+    return []
+
+
+def _ensure_v2_rasters(cache_dir: Path, bldg_npz: Path, force: bool = False) -> None:
+    """Ensure 25cm SWISSIMAGE texture atlas, exact 2D building roof mask, and 25cm roof parapet edge step exist."""
     ortho25_p = cache_dir / "ortho_25cm.npy"
     roof_mask_p = cache_dir / "bldg_roof_mask_05m.npy"
+    roof_edge25_p = cache_dir / "roof_edge_step_25cm.npy"
+
+    w25 = int(round((E_MAX - E_MIN) / 0.25))
+    h25 = int(round((N_MAX - N_MIN) / 0.25))
+
     if not ortho25_p.exists():
         print("[scene] Building 25 cm SWISSIMAGE DOP10 true-color texture atlas (ortho_25cm.npy)...")
-        w25 = int(round((E_MAX - E_MIN) / 0.25))
-        h25 = int(round((N_MAX - N_MIN) / 0.25))
         out25 = np.zeros((h25, w25, 3), dtype=np.uint8)
         for e_km in (2682, 2683, 2684, 2685):
             for n_km in (1240, 1241, 1242, 1243):
@@ -227,16 +251,155 @@ def _ensure_v2_rasters(cache_dir: Path, bldg_npz: Path) -> None:
                     out25[r0:r1, c0:c1, :] = np.transpose(arr, (1, 2, 0))
         np.save(ortho25_p, out25)
 
-    if not roof_mask_p.exists() and bldg_npz.exists():
-        print("[scene] Rasterizing exact 0.5m LOD2 building roof mask (bldg_roof_mask_05m.npy)...")
+    if (force or not roof_mask_p.exists() or not roof_edge25_p.exists()) and bldg_npz.exists():
+        print("[scene] Rasterizing exact LOD2 building roof mask & 25cm parapet rim bands...")
         b = np.load(bldg_npz)
         verts = b["verts"]
         stype = b["surf_type"]
-        rv = verts[stype == 1][:, :, :2]
-        tfm = from_bounds(E_MIN, N_MIN, E_MAX, N_MAX, GRID_W, GRID_H)
-        polys = [Polygon(tri) for tri in rv if Polygon(tri).area > 0.02]
-        rmask = rasterize([(g.buffer(0.35), 1) for g in polys], out_shape=(GRID_H, GRID_W), transform=tfm, dtype=np.uint8) > 0
+        bidx = b["bldg_idx"]
+        rm = stype == 1
+        rv = verts[rm][:, :, :2]
+        rb = bidx[rm]
+
+        tfm05 = from_bounds(E_MIN, N_MIN, E_MAX, N_MAX, GRID_W, GRID_H)
+        shapes_id = []
+        polys_05 = []
+        for tri, bid in zip(rv, rb):
+            p = Polygon(tri)
+            if p.area > 0.015:
+                polys_05.append((p.buffer(0.25), 1))
+                shapes_id.append((p, int(bid) + 1))
+
+        rmask = rasterize(polys_05, out_shape=(GRID_H, GRID_W), transform=tfm05, dtype=np.uint8) > 0
         np.save(roof_mask_p, rmask)
+
+        # Rasterize building ID onto 25cm grid and compute fast perimeter bands:
+        # 0 = outside, 1 = outer 0.50m coping rim, 2 = inner 0.50..0.85m parapet shadow band,
+        # 3 = near-edge 0.85..1.35m, 4 = interior (>1.35m from roof perimeter)
+        tfm25 = from_bounds(E_MIN, N_MIN, E_MAX, N_MAX, w25, h25)
+        bmap25 = rasterize(shapes_id, out_shape=(h25, w25), transform=tfm25, dtype=np.int32)
+
+        def _erode_same_id(cur_id: np.ndarray) -> np.ndarray:
+            nxt = cur_id.copy()
+            bad = np.zeros(cur_id.shape, dtype=np.bool_)
+            bad[:, :-1] |= cur_id[:, :-1] != cur_id[:, 1:]
+            bad[:, 1:] |= cur_id[:, 1:] != cur_id[:, :-1]
+            bad[:-1, :] |= cur_id[:-1, :] != cur_id[1:, :]
+            bad[1:, :] |= cur_id[1:, :] != cur_id[:-1, :]
+            nxt[bad] = 0
+            return nxt
+
+        step = np.zeros((h25, w25), dtype=np.uint8)
+        step[bmap25 > 0] = 1
+        e1 = _erode_same_id(bmap25)       # > 0.25m
+        e2 = _erode_same_id(e1)           # > 0.50m
+        step[e2 > 0] = 2
+        e3 = _erode_same_id(e2)           # > 0.75m
+        step[e3 > 0] = 3
+        e4 = _erode_same_id(_erode_same_id(e3))  # > 1.25m
+        step[e4 > 0] = 4
+        np.save(roof_edge25_p, step)
+
+
+def _rasterize_centerline_field(
+    lines_with_hw: list[tuple[LineString, float]],
+    max_dist_m: float = 12.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute exact 0.5m Euclidean distance, arc-length s, half-width, and tangent angle
+    to a set of LineStrings using fast C-speed distance_transform_edt."""
+    seed_mask = np.zeros((GRID_H, GRID_W), dtype=np.bool_)
+    seed_s = np.zeros((GRID_H, GRID_W), dtype=np.float32)
+    seed_hw = np.zeros((GRID_H, GRID_W), dtype=np.float32)
+    seed_ang = np.zeros((GRID_H, GRID_W), dtype=np.float32)
+
+    s_accum = 0.0
+    for ls, hw in lines_with_hw:
+        length = float(ls.length)
+        if length < 0.4:
+            continue
+        n_pts = max(2, int(math.ceil(length / 0.25)) + 1)
+        s_local = np.linspace(0.0, length, n_pts, dtype=np.float32)
+        coords = np.asarray(ls.coords, dtype=np.float64)
+        seg_d = np.hypot(np.diff(coords[:, 0]), np.diff(coords[:, 1]))
+        cum_d = np.concatenate([[0.0], np.cumsum(seg_d)])
+        if cum_d[-1] < 0.2:
+            continue
+        es = np.interp(s_local, cum_d, coords[:, 0])
+        ns = np.interp(s_local, cum_d, coords[:, 1])
+        de = np.gradient(es)
+        dn = np.gradient(ns)
+        ang = np.arctan2(dn, de).astype(np.float32)
+
+        cols = np.clip(((es - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
+        rows = np.clip(((N_MAX - ns) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
+        # Wider road wins if two centerlines cross at an intersection
+        take = (~seed_mask[rows, cols]) | (hw >= seed_hw[rows, cols])
+        rr, cc = rows[take], cols[take]
+        seed_mask[rr, cc] = True
+        seed_s[rr, cc] = s_accum + s_local[take]
+        seed_hw[rr, cc] = hw
+        seed_ang[rr, cc] = ang[take]
+        s_accum = (s_accum + length + 10.0) % 10000.0
+
+    if not seed_mask.any():
+        return (
+            np.full((GRID_H, GRID_W), max_dist_m, dtype=np.float16),
+            np.zeros((GRID_H, GRID_W), dtype=np.float16),
+            np.zeros((GRID_H, GRID_W), dtype=np.float16),
+            np.zeros((GRID_H, GRID_W), dtype=np.float16),
+        )
+
+    dist_px, (ir, ic) = ndimage.distance_transform_edt(~seed_mask, return_indices=True)
+    dist_m = np.minimum(max_dist_m, dist_px * GRID_RES).astype(np.float16)
+    along_m = (seed_s[ir, ic] % 1024.0).astype(np.float16)
+    hw_m = seed_hw[ir, ic].astype(np.float16)
+    ang_r = seed_ang[ir, ic].astype(np.float16)
+    return dist_m, along_m, hw_m, ang_r
+
+
+def _extend_bridge_ramp(
+    bridge_ls: LineString,
+    surf_roads: list[LineString],
+    dem: np.ndarray,
+    dsm: np.ndarray,
+    max_ext_m: float = 16.0,
+) -> LineString:
+    """Extend road bridge endpoints by up to 16m along connecting approach roads where DSM > DEM + 0.30m,
+    so viaduct ramps (such as Dorfstrasse Viaduct NE & SW approaches) meet ground roads with zero step!"""
+    coords = list(bridge_ls.coords)
+
+    def _sample_diff(e_pt: float, n_pt: float) -> float:
+        c = int(np.clip((e_pt - E_MIN) / GRID_RES, 0, GRID_W - 1))
+        r = int(np.clip((N_MAX - n_pt) / GRID_RES, 0, GRID_H - 1))
+        return float(dsm[r, c] - dem[r, c])
+
+    for at_start in (True, False):
+        ep = coords[0] if at_start else coords[-1]
+        if _sample_diff(ep[0], ep[1]) < 0.35:
+            continue
+        best_ext = []
+        for rls in surf_roads:
+            rc = list(rls.coords)
+            d0 = math.hypot(rc[0][0] - ep[0], rc[0][1] - ep[1])
+            d1 = math.hypot(rc[-1][0] - ep[0], rc[-1][1] - ep[1])
+            if d0 <= 1.8 or d1 <= 1.8:
+                ordered = rc if d0 <= d1 else list(reversed(rc))
+                cand_ls = LineString(ordered)
+                ext_pts = []
+                for dist in np.arange(2.0, min(max_ext_m, cand_ls.length) + 0.1, 2.0):
+                    pt = cand_ls.interpolate(float(dist)).coords[0]
+                    ext_pts.append(pt)
+                    if _sample_diff(pt[0], pt[1]) <= 0.22:
+                        break
+                if len(ext_pts) > len(best_ext):
+                    best_ext = ext_pts
+        if best_ext:
+            if at_start:
+                coords = list(reversed(best_ext)) + coords
+            else:
+                coords = coords + best_ext
+
+    return LineString(coords)
 
 
 def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
@@ -244,7 +407,7 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     bldg_npz = cache_dir / "buildings_kilchberg_3d.npz"
     meta_json = cache_dir / "buildings_kilchberg_meta.json"
     if scene_npz.exists() and bldg_npz.exists() and meta_json.exists() and not force:
-        _ensure_v2_rasters(cache_dir, bldg_npz)
+        _ensure_v2_rasters(cache_dir, bldg_npz, force=False)
         print(f"[scene] Using cached extracted scene at {scene_npz}")
         return scene_npz
 
@@ -266,7 +429,7 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     if nan_mask.any():
         dem[nan_mask] = LAKE_SURFACE_Z
 
-    print("[scene] Mosaicking 0.5m swissSURFACE3D LiDAR canopy surface...")
+    print("[scene] Mosaicking 0.5m swissSURFACE3D LiDAR canopy & bridge surface...")
     dsm = _mosaic_tiles(cache_dir, "surface3d", bands=1, dtype=np.float32)
     dsm_nan = np.isnan(dsm) | (dsm < 300.0)
     dsm[dsm_nan] = dem[dsm_nan]
@@ -275,18 +438,16 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     print("[scene] Mosaicking 10cm SWISSIMAGE DOP10 true-color orthophotos to 0.5m...")
     ortho = _mosaic_tiles(cache_dir, "swissimage", bands=3, dtype=np.uint8)
 
-    print("[scene] Rasterizing semantic vector ground, streets, rail, pools & bathymetry...")
+    print("[scene] Rasterizing semantic vector ground, roads, rail, pools & 3D viaducts...")
     diorama_mask = rasterize([(diorama_poly, 1)], out_shape=(GRID_H, GRID_W), transform=tfm, dtype=np.uint8) > 0
     kpoly_mask = rasterize([(kpoly, 1)], out_shape=(GRID_H, GRID_W), transform=tfm, dtype=np.uint8) > 0
     lake_mask = rasterize([(g, 1) for g in lake_geoms], out_shape=(GRID_H, GRID_W), transform=tfm, dtype=np.uint8) > 0
 
-    # Clamp DEM on Lake Zurich to exact lake surface level
     dem[lake_mask] = LAKE_SURFACE_Z
 
     # Interpolate Lake Zurich underwater bathymetry from swisstopo bathymetry polygons + shoreline distance
     bathy_depth = np.zeros((GRID_H, GRID_W), dtype=np.float32)
     dist_offshore_m = ndimage.distance_transform_edt(lake_mask).astype(np.float32) * GRID_RES
-    # Smooth baseline shelf + glacial drop-off calibrated to Zürichsee Kilchberg profile
     bathy_depth[lake_mask] = np.minimum(125.0, 0.14 * dist_offshore_m[lake_mask] + 0.00022 * (dist_offshore_m[lake_mask] ** 2))
     for g, p in mvt.get("bathymetry", []):
         d_val = abs(float(p.get("lake_depth", 0.0)))
@@ -297,7 +458,24 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     bathy_depth[~lake_mask] = 0.0
     bathy_z = LAKE_SURFACE_Z - bathy_depth
 
-    # Semantic ground rasterization (painter's order from broad landcover to crisp roads/rails/pools)
+    # Identify all named main Kilchberg streets (Dorfstrasse, Bahnhofstrasse, Alte Landstrasse,
+    # Weinbergstrasse, Böndlerstrasse, Stockenstrasse, Pilgerweg, Seestrasse) from transportation_name!
+    named_main_lines = [
+        g for g, p in mvt.get("transportation_name", [])
+        if p.get("class") in ("primary", "secondary") and g is not None and not g.is_empty
+    ]
+    named_main_buf = unary_union([g.buffer(3.2) for g in named_main_lines]) if named_main_lines else Polygon()
+
+    def _is_main_road(ls: LineString, props: dict) -> bool:
+        if props.get("class") in ("primary", "secondary"):
+            return True
+        if props.get("is_route") is not None:
+            return True
+        if not named_main_buf.is_empty and ls.intersects(named_main_buf):
+            if ls.intersection(named_main_buf).length >= 0.48 * ls.length:
+                return True
+        return False
+
     sem = np.zeros((GRID_H, GRID_W), dtype=np.uint8)
 
     def _burn(shapes_list, code: int):
@@ -317,39 +495,368 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     _burn([g for g, p in mvt.get("landcover", []) if p.get("subclass") in ("park", "orchard", "plant_nursery")], G_PARK_CEMETERY)
     _burn([g for g, p in mvt.get("landcover", []) if p.get("subclass") == "vineyard"], G_VINEYARD)
     _burn([g for g, p in mvt.get("landuse", []) if p.get("class") in ("pitch", "sports")], G_PITCH)
-    _burn([g for g, p in mvt.get("landuse", []) if p.get("class") == "parking"], G_STREET_MINOR)
+    _burn([g for g, p in mvt.get("landuse", []) if p.get("class") == "parking"], G_PARKING)
 
     # Waterways / streams
     _burn([g.buffer(1.4) for g, p in mvt.get("waterway", []) if p.get("class") == "stream"], G_STREAM)
 
-    # Surface transportation (strictly excluding underground tunnels!)
-    foot_geoms, minor_geoms, main_geoms, mw_geoms, rail_geoms = [], [], [], [], []
+    # Partition MVT transportation into:
+    # 1) Surface ground network (layer <= 0, not tunnel, not elevated bridge)
+    # 2) Elevated 3D viaducts & bridges (brunnel == 'bridge' or layer > 0, not lake pier)
+    foot_geoms, minor_geoms, main_geoms, mw_geoms, rail_surf_geoms = [], [], [], [], []
+    road_centerlines_hw: list[tuple[LineString, float]] = []
+    rail_all_centerlines: list[tuple[LineString, float]] = []
+    surf_road_lines: list[LineString] = []
+
+    raw_bridges_main_road: list[LineString] = []
+    raw_bridges_local_road: list[LineString] = []
+    raw_bridges_mw: list[LineString] = []
+    raw_bridges_foot: list[LineString] = []
+    raw_bridges_steps: list[LineString] = []
+    raw_bridges_rail: list[LineString] = []
+    pier_gangways: list[LineString] = []
+
     for g, p in mvt.get("transportation", []):
         if p.get("brunnel") == "tunnel" or int(p.get("layer", 0)) < 0:
             continue
         cls = p.get("class")
-        if cls in ("footway", "path", "track"):
-            foot_geoms.append(g.buffer(1.15))
-        elif cls in ("service", "minor", "tertiary"):
-            minor_geoms.append(g.buffer(2.7 if cls != "service" else 1.9))
-        elif cls in ("primary", "secondary"):
-            main_geoms.append(g.buffer(4.1))
-        elif cls == "motorway":
-            mw_geoms.append(g.buffer(5.5 if not p.get("ramp") else 3.4))
-        elif cls in ("rail", "transit"):
-            rail_geoms.append(g.buffer(2.6))
+        subcls = p.get("subclass")
+        is_elev = (p.get("brunnel") == "bridge") or (int(p.get("layer", 0)) > 0)
+
+        for ls in _iter_linestrings(g):
+            # Lake Zurich steamer pier gangways stay on G_PLATFORM_PIER
+            if is_elev and lake_poly.buffer(1.5).contains(ls.centroid):
+                pier_gangways.append(ls)
+                continue
+
+            if cls in ("rail", "transit"):
+                rail_all_centerlines.append((ls, 2.35))
+                if is_elev:
+                    raw_bridges_rail.append(ls)
+                else:
+                    rail_surf_geoms.append(ls.buffer(2.55))
+                continue
+
+            if is_elev:
+                if cls == "motorway":
+                    raw_bridges_mw.append(ls)
+                elif cls in ("footway", "path", "track"):
+                    if subcls == "steps":
+                        raw_bridges_steps.append(ls)
+                    else:
+                        raw_bridges_foot.append(ls)
+                elif cls in ("primary", "secondary", "tertiary", "minor", "service"):
+                    if _is_main_road(ls, p):
+                        raw_bridges_main_road.append(ls)
+                    else:
+                        raw_bridges_local_road.append(ls)
+                continue
+
+            # Surface ground transportation
+            if cls in ("footway", "path", "track"):
+                foot_geoms.append(ls.buffer(1.15))
+            elif cls == "motorway":
+                hw = 5.4 if not p.get("ramp") else 3.4
+                mw_geoms.append(ls.buffer(hw))
+                road_centerlines_hw.append((ls, hw))
+                surf_road_lines.append(ls)
+            elif cls in ("primary", "secondary", "tertiary", "minor", "service"):
+                if cls == "service":
+                    hw = 2.0
+                    minor_geoms.append(ls.buffer(hw))
+                    road_centerlines_hw.append((ls, hw))
+                elif _is_main_road(ls, p):
+                    hw = 4.65  # 3.35m carriageway half-width + 1.30m raised stone sidewalk!
+                    main_geoms.append(ls.buffer(hw))
+                    road_centerlines_hw.append((ls, hw))
+                    surf_road_lines.append(ls)
+                else:
+                    hw = 2.85
+                    minor_geoms.append(ls.buffer(hw))
+                    road_centerlines_hw.append((ls, hw))
+                    surf_road_lines.append(ls)
 
     _burn(foot_geoms, G_FOOTPATH)
     _burn(minor_geoms, G_STREET_MINOR)
     _burn(main_geoms, G_STREET_MAIN)
     _burn(mw_geoms, G_MOTORWAY)
-    _burn(rail_geoms, G_RAILWAY)
-    _burn([g.buffer(0.6) for g, _ in mvt.get("construct", [])], G_PLATFORM_PIER)
+    _burn(rail_surf_geoms, G_RAILWAY)
+    _burn([g.buffer(0.75) for g, _ in mvt.get("construct", [])] + [g.buffer(1.6) for g in pier_gangways], G_PLATFORM_PIER)
+
+    print("[scene] Computing exact 0.5m vector road & SBB railway distance/tangent fields...")
+    rail_dist, rail_along, _, rail_ang = _rasterize_centerline_field(rail_all_centerlines, max_dist_m=10.0)
+    road_dist, road_along, road_hw, road_ang = _rasterize_centerline_field(road_centerlines_hw, max_dist_m=10.0)
+
+    # Add Bahnhof Kilchberg SBB passenger platforms alongside tracks (E≈2683842..2683892, N≈1241990..1242125)
+    rr_grid, cc_grid = np.meshgrid(np.arange(GRID_H, dtype=np.int32), np.arange(GRID_W, dtype=np.int32), indexing="ij")
+    e_grid_1d = E_MIN + (np.arange(GRID_W, dtype=np.float64) + 0.5) * GRID_RES
+    n_grid_1d = N_MAX - (np.arange(GRID_H, dtype=np.float64) + 0.5) * GRID_RES
+    bhf_r0 = int(np.clip((N_MAX - 1242125.0) / GRID_RES, 0, GRID_H))
+    bhf_r1 = int(np.clip((N_MAX - 1241990.0) / GRID_RES, 0, GRID_H))
+    bhf_c0 = int(np.clip((2683835.0 - E_MIN) / GRID_RES, 0, GRID_W))
+    bhf_c1 = int(np.clip((2683898.0 - E_MIN) / GRID_RES, 0, GRID_W))
+    sub_rd = rail_dist[bhf_r0:bhf_r1, bhf_c0:bhf_c1]
+    bhf_plat = (sub_rd >= 1.55) & (sub_rd <= 4.25)
+    sem[bhf_r0:bhf_r1, bhf_c0:bhf_c1][bhf_plat] = G_PLATFORM_PIER
 
     # Swimming pools & Lake Zurich on top
     pool_geoms = [g for g, p in mvt.get("water", []) if p.get("class") == "pool"]
     _burn(pool_geoms, G_POOL)
     sem[lake_mask] = G_LAKE
+
+    # Clean geometric Swiss yellow pedestrian crosswalk zones detected from SWISSIMAGE on streets
+    r_ch = ortho[:, :, 0].astype(np.float32)
+    g_ch = ortho[:, :, 1].astype(np.float32)
+    b_ch = ortho[:, :, 2].astype(np.float32)
+    raw_yel = (
+        ((sem == G_STREET_MAIN) | (sem == G_STREET_MINOR))
+        & (r_ch > 134.0)
+        & (g_ch > 118.0)
+        & ((r_ch - b_ch) >= 20.0)
+        & ((g_ch - b_ch) >= 12.0)
+    )
+    lbl_xw, n_xw = ndimage.label(ndimage.binary_dilation(raw_yel, iterations=2))
+    crosswalk_mask = np.zeros((GRID_H, GRID_W), dtype=np.bool_)
+    if n_xw > 0:
+        objs_xw = ndimage.find_objects(lbl_xw)
+        for idx_x, sl in enumerate(objs_xw, 1):
+            if sl is None:
+                continue
+            sub_x = lbl_xw[sl] == idx_x
+            area_x = float(sub_x.sum()) * (GRID_RES ** 2)
+            if 3.2 <= area_x <= 75.0:
+                yr, xc = np.nonzero(sub_x)
+                cr = int(round(sl[0].start + float(yr.mean())))
+                cc = int(round(sl[1].start + float(xc.mean())))
+                s_cent = float(road_along[cr, cc])
+                r_lo, r_hi = max(0, cr - 12), min(GRID_H, cr + 13)
+                c_lo, c_hi = max(0, cc - 12), min(GRID_W, cc + 13)
+                ds = np.abs(road_along[r_lo:r_hi, c_lo:c_hi].astype(np.float32) - s_cent)
+                in_road = (sem[r_lo:r_hi, c_lo:c_hi] == G_STREET_MAIN) | (sem[r_lo:r_hi, c_lo:c_hi] == G_STREET_MINOR)
+                rd_sub = road_dist[r_lo:r_hi, c_lo:c_hi].astype(np.float32)
+                hw_sub = np.minimum(3.2, road_hw[r_lo:r_hi, c_lo:c_hi].astype(np.float32) * 0.72)
+                crosswalk_mask[r_lo:r_hi, c_lo:c_hi] |= in_road & (ds <= 1.85) & (rd_sub <= hw_sub)
+
+    # -------------------------------------------------------------------------
+    # Build 3D Elevated Viaducts & Bridges (Dorfstrasse Horseshoe Viaduct,
+    # Bahnhofstrasse Bridge, Spiral Stairs, A3 Overpasses & SBB Rail Bridges!)
+    # -------------------------------------------------------------------------
+    print("[scene] Constructing 3D elevated viaducts, concrete piers & bridge decks...")
+    bridge_cls = np.zeros((GRID_H, GRID_W), dtype=np.uint8)
+    bridge_z = np.zeros((GRID_H, GRID_W), dtype=np.float32)
+    bridge_sdist = np.zeros((GRID_H, GRID_W), dtype=np.float16)
+    bridge_along = np.zeros((GRID_H, GRID_W), dtype=np.float16)
+    bridge_hw = np.zeros((GRID_H, GRID_W), dtype=np.float16)
+    bridge_ang = np.zeros((GRID_H, GRID_W), dtype=np.float16)
+    bridge_id = np.zeros((GRID_H, GRID_W), dtype=np.uint8)
+    viaduct_piers: list[dict] = []
+
+    def _merge_group(lines: list[LineString]) -> list[LineString]:
+        if not lines:
+            return []
+        u = unary_union(lines)
+        if u.geom_type == "LineString":
+            return [u] if u.length > 0.2 else []
+        return _iter_linestrings(linemerge(u))
+
+    # Process main bridges before steps so viaduct deck elevation is ready for connecting stairs!
+    bridge_groups = [
+        (BR_RAIL_BRIDGE, 3.05, False, _merge_group(raw_bridges_rail)),
+        (BR_FOOTBRIDGE, 1.65, False, _merge_group(raw_bridges_foot)),
+        (BR_ROAD_VIADUCT, 4.35, True, _merge_group(raw_bridges_local_road)),
+        (BR_ROAD_VIADUCT, 5.55, True, _merge_group(raw_bridges_main_road)),  # 11.1m-wide Dorfstrasse Viaduct & main A3 bridges!
+        (BR_MOTORWAY, 5.80, True, _merge_group(raw_bridges_mw)),
+        (BR_STEPS, 1.65, False, _merge_group(raw_bridges_steps)),
+    ]
+
+    cur_bid = 0
+    for b_code, deck_hw, do_extend, merged_list in bridge_groups:
+        for base_ls in merged_list:
+            if not base_ls.intersects(diorama_poly):
+                continue
+            ls = _extend_bridge_ramp(base_ls, surf_road_lines, dem, dsm) if do_extend else base_ls
+            total_l = float(ls.length)
+            if total_l < 3.0:
+                continue
+            cur_bid = min(254, cur_bid + 1)
+
+            n_samp = max(5, int(math.ceil(total_l / 0.20)) + 1)
+            s_arr = np.linspace(0.0, total_l, n_samp, dtype=np.float64)
+            c_arr = np.asarray([ls.interpolate(float(s)).coords[0] for s in s_arr], dtype=np.float64)
+            de = np.gradient(c_arr[:, 0])
+            dn = np.gradient(c_arr[:, 1])
+            dlen = np.maximum(1e-6, np.hypot(de, dn))
+            tx_b, ty_b = de / dlen, dn / dlen
+            nx_b, ny_b = ty_b, -tx_b  # Right-hand normal
+            ang_b = np.arctan2(ty_b, tx_b).astype(np.float32)
+
+            scols = np.clip(((c_arr[:, 0] - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
+            srows = np.clip(((N_MAX - c_arr[:, 1]) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
+            dem_c = dem[srows, scols].astype(np.float64)
+            dsm_c = dsm[srows, scols].astype(np.float64)
+
+            if b_code == BR_STEPS:
+                # Connect low ground end smoothly to elevated bridge deck (or DSM) at high end!
+                r0_s, c0_s = srows[0], scols[0]
+                r1_s, c1_s = srows[-1], scols[-1]
+                nb0 = bridge_z[max(0, r0_s - 4) : min(GRID_H, r0_s + 5), max(0, c0_s - 4) : min(GRID_W, c0_s + 5)]
+                nb1 = bridge_z[max(0, r1_s - 4) : min(GRID_H, r1_s + 5), max(0, c1_s - 4) : min(GRID_W, c1_s + 5)]
+                z0 = float(nb0.max()) if nb0.max() > 100.0 else float(max(dem_c[0], min(dsm_c[0], dem_c[0] + 6.5)))
+                z1 = float(nb1.max()) if nb1.max() > 100.0 else float(max(dem_c[-1], min(dsm_c[-1], dem_c[-1] + 6.5)))
+                z_prof = np.linspace(z0, z1, n_samp)
+            else:
+                z0 = float(dem_c[0])
+                z1 = float(dem_c[-1])
+                # If bridge terminates at diorama edge mid-span, use DSM height
+                if not diorama_poly.buffer(-3.0).contains(Point(c_arr[0])):
+                    z0 = float(min(dsm_c[0], dem_c[0] + 8.0))
+                if not diorama_poly.buffer(-3.0).contains(Point(c_arr[-1])):
+                    z1 = float(min(dsm_c[-1], dem_c[-1] + 8.0))
+
+                z_lin = np.linspace(z0, z1, n_samp)
+                # Use real swissSURFACE3D bridge deck height, clamped against overhanging tree crowns!
+                z_raw = np.clip(dsm_c, np.minimum(dem_c, z_lin), np.maximum(z_lin + 4.8, dem_c + 9.2))
+                z_smooth = ndimage.gaussian_filter1d(ndimage.median_filter(z_raw, size=9), sigma=16.0, mode="nearest")
+
+                # Guarantee minimum vertical clearance (>= 5.1m) directly over railways, motorways & underpass roads
+                under_sem = sem[srows, scols]
+                over_corridor = np.isin(under_sem, [G_RAILWAY, G_MOTORWAY, G_STREET_MAIN, G_STREET_MINOR])
+                if over_corridor.any():
+                    min_clear = dem_c + np.where(over_corridor, 5.1, 0.0)
+                    min_clear = ndimage.gaussian_filter1d(np.maximum(z_smooth, min_clear), sigma=14.0, mode="nearest")
+                    z_smooth = np.maximum(z_smooth, min_clear)
+
+                # Smoothly pin exact abutment ends over outer 3.5m so road/rail transitions seamlessly
+                taper = np.minimum(1.0, np.minimum(s_arr, total_l - s_arr) / 3.5)
+                z_prof = (1.0 - taper) * z_lin + taper * np.maximum(z_smooth, dem_c)
+
+            # Rasterize bridge strip inside tight bounding box
+            min_e, min_n, max_e, max_n = ls.bounds
+            pad = deck_hw + 1.2
+            c_lo = max(0, int(math.floor((min_e - pad - E_MIN) / GRID_RES)))
+            c_hi = min(GRID_W, int(math.ceil((max_e + pad - E_MIN) / GRID_RES)))
+            r_lo = max(0, int(math.floor((N_MAX - (max_n + pad)) / GRID_RES)))
+            r_hi = min(GRID_H, int(math.ceil((N_MAX - (min_n - pad)) / GRID_RES)))
+            if c_hi <= c_lo or r_hi <= r_lo:
+                continue
+
+            ge_2d, gn_2d = np.meshgrid(e_grid_1d[c_lo:c_hi], n_grid_1d[r_lo:r_hi])
+            ge_f = ge_2d.ravel()
+            gn_f = gn_2d.ravel()
+
+            # Nearest centerline vertex k in memory-safe chunks
+            best_k = np.empty(len(ge_f), dtype=np.int32)
+            best_d2 = np.full(len(ge_f), 1e18, dtype=np.float64)
+            STEP_P = 8192
+            for p0 in range(0, len(ge_f), STEP_P):
+                p1 = min(len(ge_f), p0 + STEP_P)
+                dx = ge_f[p0:p1, None] - c_arr[None, :, 0]
+                dy = gn_f[p0:p1, None] - c_arr[None, :, 1]
+                d2 = dx * dx + dy * dy
+                kk = np.argmin(d2, axis=1)
+                best_k[p0:p1] = kk
+                best_d2[p0:p1] = d2[np.arange(p1 - p0), kk]
+
+            # Exact longitudinal & signed lateral projection onto centerline tangent
+            de_p = ge_f - c_arr[best_k, 0]
+            dn_p = gn_f - c_arr[best_k, 1]
+            along_off = de_p * tx_b[best_k] + dn_p * ty_b[best_k]
+            s_exact = s_arr[best_k] + along_off
+            sdist_exact = de_p * nx_b[best_k] + dn_p * ny_b[best_k]
+
+            inside_deck = (
+                (np.abs(sdist_exact) <= deck_hw)
+                & (s_exact >= -0.25)
+                & (s_exact <= total_l + 0.25)
+            )
+            if inside_deck.any():
+                sub_r, sub_c = np.unravel_index(np.nonzero(inside_deck)[0], ge_2d.shape)
+                gr_i = r_lo + sub_r
+                gc_i = c_lo + sub_c
+                z_here = z_prof[best_k[inside_deck]].astype(np.float32)
+
+                # Only write elevated bridge where it rises above terrain (or over corridor) and beats lower bridge
+                dem_here = dem[gr_i, gc_i]
+                take = (z_here >= dem_here + 0.18) & (z_here >= bridge_z[gr_i, gc_i] - 0.05)
+                if b_code == BR_STEPS:
+                    take &= bridge_cls[gr_i, gc_i] == 0
+                if take.any():
+                    tr_i, tc_i = gr_i[take], gc_i[take]
+                    idx_in = np.nonzero(inside_deck)[0][take]
+                    bridge_cls[tr_i, tc_i] = b_code
+                    bridge_z[tr_i, tc_i] = z_here[take]
+                    bridge_sdist[tr_i, tc_i] = sdist_exact[idx_in].astype(np.float16)
+                    bridge_along[tr_i, tc_i] = s_exact[idx_in].astype(np.float16)
+                    bridge_hw[tr_i, tc_i] = np.float16(deck_hw)
+                    bridge_ang[tr_i, tc_i] = ang_b[best_k[idx_in]].astype(np.float16)
+                    bridge_id[tr_i, tc_i] = cur_bid
+
+            # Place concrete viaduct support piers every ~21m where clearance >= 2.8m and clear of rail/road!
+            if b_code in (BR_ROAD_VIADUCT, BR_MOTORWAY) and total_l >= 24.0:
+                for sp_s in np.arange(12.0, total_l - 10.0, 21.0):
+                    ki = int(np.argmin(np.abs(s_arr - sp_s)))
+                    pe_c, pn_c = float(c_arr[ki, 0]), float(c_arr[ki, 1])
+                    pc_i = int(np.clip((pe_c - E_MIN) / GRID_RES, 2, GRID_W - 3))
+                    pr_i = int(np.clip((N_MAX - pn_c) / GRID_RES, 2, GRID_H - 3))
+                    z_dk = float(z_prof[ki])
+                    z_gd = float(dem[pr_i, pc_i])
+                    if (z_dk - z_gd) < 2.8:
+                        continue
+                    nb_sem = sem[pr_i - 3 : pr_i + 4, pc_i - 3 : pc_i + 4]
+                    if np.isin(nb_sem, [G_RAILWAY, G_MOTORWAY, G_STREET_MAIN, G_STREET_MINOR, G_LAKE, G_STREAM]).any():
+                        continue
+                    viaduct_piers.append({
+                        "e": round(pe_c, 2),
+                        "n": round(pn_c, 2),
+                        "z_bot": round(z_gd, 2),
+                        "z_top": round(z_dk - 1.25, 2),
+                        "nx": round(float(nx_b[ki]), 4),
+                        "ny": round(float(ny_b[ki]), 4),
+                        "offset": round(deck_hw * 0.56, 2),
+                        "bid": int(cur_bid),
+                    })
+
+    # Place SBB overhead steel catenary portals every ~52m along the railway corridor (clear of bridges!)
+    catenary_portals: list[dict] = []
+    rail_chains = sorted(_merge_group([ls for ls, _ in rail_all_centerlines]), key=lambda g: -g.length)
+    bridge_clear_zone = ndimage.binary_dilation(
+        np.isin(bridge_cls, [BR_ROAD_VIADUCT, BR_MOTORWAY, BR_FOOTBRIDGE, BR_STEPS]),
+        iterations=14,
+    )
+    placed_cat_pts: list[tuple[float, float]] = []
+    for rls in rail_chains[:4]:
+        if rls.length < 120.0:
+            continue
+        for cs in np.arange(26.0, rls.length - 20.0, 52.0):
+            pt = rls.interpolate(float(cs)).coords[0]
+            if not diorama_poly.buffer(-6.0).contains(Point(pt)):
+                continue
+            if any(math.hypot(pt[0] - q[0], pt[1] - q[1]) < 34.0 for q in placed_cat_pts):
+                continue
+            cc_i = int(np.clip((pt[0] - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            cr_i = int(np.clip((N_MAX - pt[1]) / GRID_RES, 0, GRID_H - 1))
+            if bridge_clear_zone[cr_i, cc_i]:
+                continue
+            p_prev = rls.interpolate(max(0.0, float(cs) - 2.0)).coords[0]
+            p_next = rls.interpolate(min(float(rls.length), float(cs) + 2.0)).coords[0]
+            dx_c, dy_c = p_next[0] - p_prev[0], p_next[1] - p_prev[1]
+            dl_c = max(1e-6, math.hypot(dx_c, dy_c))
+            nx_c, ny_c = dy_c / dl_c, -dx_c / dl_c
+            z_b = float(bridge_z[cr_i, cc_i]) if bridge_cls[cr_i, cc_i] == BR_RAIL_BRIDGE else float(dem[cr_i, cc_i])
+            placed_cat_pts.append(pt)
+            catenary_portals.append({
+                "e": round(float(pt[0]), 2),
+                "n": round(float(pt[1]), 2),
+                "z": round(z_b, 2),
+                "nx": round(nx_c, 4),
+                "ny": round(ny_c, 4),
+                "span_hw": 4.2,
+            })
+
+    print(
+        f"[scene] Built {cur_bid} elevated 3D bridges/viaducts, "
+        f"{len(viaduct_piers)} concrete viaduct piers & {len(catenary_portals)} SBB catenary portals!"
+    )
 
     # Collect street names & housenumbers for building metadata matching
     street_pts = []
@@ -372,18 +879,17 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
             place_pts.append((c.x, c.y, nm))
 
     # 5. Parse CityGML 3D LOD2 buildings (RoofSurface + WallSurface triangles)
-    print("[scene] Extracting 3D LOD2 CityGML triangles & sampling 10cm SWISSIMAGE roof colors...")
+    print("[scene] Extracting 3D LOD2 CityGML triangles & sampling clean roof colors...")
     ns_bldg = "{http://www.opengis.net/citygml/building/2.0}"
     ns_gml = "{http://www.opengis.net/gml}"
     ns_gen = "{http://www.opengis.net/citygml/generics/2.0}"
 
-    tri_verts = []      # (N, 3, 3) float32
-    tri_normals = []    # (N, 3) float32
-    tri_bldg_idx = []   # (N,) int32
-    tri_surf_type = []  # 0=Wall, 1=Roof
-    tri_rgb = []        # (N, 3) uint8
+    tri_verts = []
+    tri_normals = []
+    tri_bldg_idx = []
+    tri_surf_type = []
+    tri_rgb = []
     buildings_meta = []
-    bldg_footprints_2d = []
 
     seen_gml_ids = set()
     diorama_prep_box = diorama_poly.bounds
@@ -398,14 +904,15 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                         elem.clear()
                         continue
 
-                    # Quick check first posList
                     first_pos = elem.find(".//" + ns_gml + "posList")
                     if first_pos is None or not first_pos.text:
                         elem.clear()
                         continue
                     fvals = [float(v) for v in first_pos.text.split()[:3]]
-                    if not (diorama_prep_box[0] - 30 <= fvals[0] <= diorama_prep_box[2] + 30 and
-                            diorama_prep_box[1] - 30 <= fvals[1] <= diorama_prep_box[3] + 30):
+                    if not (
+                        diorama_prep_box[0] - 30 <= fvals[0] <= diorama_prep_box[2] + 30
+                        and diorama_prep_box[1] - 30 <= fvals[1] <= diorama_prep_box[3] + 30
+                    ):
                         elem.clear()
                         continue
 
@@ -420,10 +927,8 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                         elem.clear()
                         continue
 
-                    # Extract roof and wall rings
                     b_tris_v = []
                     b_tris_st = []
-                    roof_sample_rgbs = []
 
                     for st_code, st_tag in ((1, "RoofSurface"), (0, "WallSurface")):
                         for surf in elem.findall(".//" + ns_bldg + st_tag):
@@ -433,10 +938,9 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                                 coords = np.fromstring(pos.text, sep=" ", dtype=np.float64)
                                 if coords.size < 12 or coords.size % 3 != 0:
                                     continue
-                                pts = coords.reshape(-1, 3)[:-1]  # Drop closing vertex
+                                pts = coords.reshape(-1, 3)[:-1]
                                 if len(pts) < 3:
                                     continue
-                                # Fan triangulate ring (almost all swisstopo rings are already 3-vertex triangles!)
                                 v0 = pts[0]
                                 for i in range(1, len(pts) - 1):
                                     b_tris_v.append((v0, pts[i], pts[i + 1]))
@@ -446,7 +950,7 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                         elem.clear()
                         continue
 
-                    b_arr = np.asarray(b_tris_v, dtype=np.float64)  # (M, 3, 3)
+                    b_arr = np.asarray(b_tris_v, dtype=np.float64)
                     cx = float(b_arr[:, :, 0].mean())
                     cy = float(b_arr[:, :, 1].mean())
                     if not diorama_poly.contains(Point(cx, cy)):
@@ -460,9 +964,7 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                     zmax = float(b_arr[:, :, 2].max())
                     emin, emax = float(b_arr[:, :, 0].min()), float(b_arr[:, :, 0].max())
                     nmin, nmax = float(b_arr[:, :, 1].min()), float(b_arr[:, :, 1].max())
-                    bldg_footprints_2d.append(box(emin - 0.5, nmin - 0.5, emax + 0.5, nmax + 0.5))
 
-                    # Compute normals and sample SWISSIMAGE DOP10 roof colors
                     st_arr = np.asarray(b_tris_st, dtype=np.uint8)
                     e1 = b_arr[:, 1, :] - b_arr[:, 0, :]
                     e2 = b_arr[:, 2, :] - b_arr[:, 0, :]
@@ -476,7 +978,6 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                         elem.clear()
                         continue
 
-                    # Orient roof normals upward (nz >= 0), wall normals outward from building center
                     roof_m = st_arr == 1
                     flip_r = roof_m & (norms[:, 2] < 0)
                     norms[flip_r] *= -1.0
@@ -488,52 +989,26 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                     flip_w = wall_m & (dot_out < 0)
                     norms[flip_w] *= -1.0
 
-                    # Sample SWISSIMAGE RGB at roof triangle centroids
                     rc = tri_centers[roof_m]
                     if len(rc) > 0:
                         cols = np.clip(((rc[:, 0] - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
                         rows = np.clip(((N_MAX - rc[:, 1]) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
-                        sampled = ortho[rows, cols]  # (K, 3)
-                        med_roof = np.median(sampled, axis=0).astype(np.uint8)
+                        sampled = ortho[rows, cols].astype(np.float32)
+                        # Reject overhanging green tree branches unless >60% of roof is eco-green
+                        not_tree = (sampled[:, 1] - sampled[:, 0]) <= 7.0
+                        if not_tree.sum() >= max(1, int(0.40 * len(sampled))):
+                            med_roof = np.median(sampled[not_tree], axis=0).astype(np.uint8)
+                        else:
+                            med_roof = np.median(sampled, axis=0).astype(np.uint8)
                     else:
                         med_roof = np.array([175, 110, 88], dtype=np.uint8)
 
                     t_rgb = np.empty((len(b_arr), 3), dtype=np.uint8)
                     if roof_m.any():
-                        cols = np.clip(((tri_centers[roof_m, 0] - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
-                        rows = np.clip(((N_MAX - tri_centers[roof_m, 1]) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
-                        # Blend 65% building median roof color + 35% per-triangle ortho color for cohesive roofs!
-                        per_tri = ortho[rows, cols].astype(np.float32)
-                        t_rgb[roof_m] = np.clip(0.62 * med_roof.astype(np.float32) + 0.38 * per_tri, 0, 255).astype(np.uint8)
+                        t_rgb[roof_m] = med_roof
 
-                    # Wall base color: warm Swiss plaster / limestone / brick / sandstone tuned to building type & roof
                     r_r, r_g, r_b = int(med_roof[0]), int(med_roof[1]), int(med_roof[2])
-                    if objektart == "Hochkamin":
-                        wall_col = (168, 92, 72)   # Historic red-ochre industrial brick smokestack
-                    elif objektart == "Lagertank":
-                        wall_col = (212, 216, 220) # Brushed steel / white silo
-                    elif objektart in ("Sakrales Gebaeude", "Sakraler Turm"):
-                        wall_col = (234, 228, 212) # Warm historic church limestone/plaster
-                    elif objektart == "Treibhaus":
-                        wall_col = (182, 214, 224) # Glass greenhouse
-                    else:
-                        # Subtle deterministic variation of Swiss facade tones (cream, warm stucco, pale ochre, modern white)
-                        h_seed = (int(cx * 7 + cy * 13) % 7)
-                        facade_palette = [
-                            (235, 229, 216),  # Warm Swiss chalk plaster
-                            (228, 218, 198),  # Cream sand stucco
-                            (240, 238, 233),  # Crisp modernist white (villas / Lindt HoC)
-                            (218, 204, 182),  # Ochre village plaster
-                            (208, 212, 215),  # Cool limestone grey
-                            (225, 208, 194),  # Rose-warm plaster
-                            (186, 156, 126),  # Timber / chalet upper facade
-                        ]
-                        # Large modern flat-roofed buildings lean crisp architectural white/limestone
-                        if (emax - emin) * (nmax - nmin) > 1800 and abs(r_r - r_b) < 22:
-                            wall_col = (238, 235, 228)
-                        else:
-                            wall_col = facade_palette[h_seed]
-                    t_rgb[wall_m] = wall_col
+                    t_rgb[wall_m] = (220, 214, 202)
 
                     tri_verts.append(b_arr.astype(np.float32))
                     tri_normals.append(norms.astype(np.float32))
@@ -541,7 +1016,6 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                     tri_surf_type.append(st_arr)
                     tri_rgb.append(t_rgb)
 
-                    # Nearest address & neighborhood
                     in_k = bool(kpoly.contains(Point(cx, cy)))
                     buildings_meta.append({
                         "idx": b_idx,
@@ -559,7 +1033,6 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                     })
                     elem.clear()
 
-    # Enrich buildings_meta with nearest street, housenumber, and neighborhood using vectorized lookup
     if buildings_meta:
         be = np.array([b["e"] for b in buildings_meta])
         bn = np.array([b["n"] for b in buildings_meta])
@@ -590,38 +1063,98 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     all_rgb = np.concatenate(tri_rgb, axis=0)
     print(f"[scene] Extracted {len(buildings_meta)} 3D buildings ({len(all_verts)} triangles)!")
 
-    # 6. Extract real individual trees from 0.5m LiDAR CHM (outside building footprints)
-    print("[scene] Extracting real LiDAR tree crowns & moored Lake Zurich boats...")
-    bldg_mask = rasterize(
-        [(g.buffer(1.2), 1) for g in bldg_footprints_2d],
-        out_shape=(GRID_H, GRID_W),
-        transform=tfm,
-        dtype=np.uint8,
-    ) > 0
+    np.savez_compressed(
+        bldg_npz,
+        verts=all_verts,
+        normals=all_norms,
+        bldg_idx=all_bidx,
+        surf_type=all_stype,
+        rgb=all_rgb,
+    )
+    _ensure_v2_rasters(cache_dir, bldg_npz, force=True)
 
-    # Vegetation index from 10cm->0.5m SWISSIMAGE RGB
-    r_ch = ortho[:, :, 0].astype(np.float32)
-    g_ch = ortho[:, :, 1].astype(np.float32)
-    b_ch = ortho[:, :, 2].astype(np.float32)
-    greenness = g_ch - 0.52 * r_ch - 0.42 * b_ch
-    is_veg = (greenness > 6.0) | ((g_ch > r_ch) & (g_ch > b_ch) & (g_ch > 32.0))
+    # 6. Extract exact individual real LiDAR trees & garden hedges (strictly clear of buildings, bridges, rail & roads!)
+    print("[scene] Extracting individual 3D LiDAR tree entities, species & garden hedges...")
+    exact_roof_mask = np.load(cache_dir / "bldg_roof_mask_05m.npy")
+    bldg_excl = ndimage.binary_dilation(exact_roof_mask, iterations=2)
+    bridge_excl = ndimage.binary_dilation(bridge_cls > 0, iterations=4)  # 2.0m strict buffer around every viaduct/bridge!
+    hard_surface_excl = np.isin(
+        sem,
+        [G_LAKE, G_POOL, G_PITCH, G_STREET_MINOR, G_STREET_MAIN, G_MOTORWAY, G_RAILWAY, G_PLATFORM_PIER, G_PARKING],
+    )
+    non_veg = bldg_excl | bridge_excl | hard_surface_excl
 
-    canopy_chm = ndimage.gaussian_filter(chm, sigma=1.1)
-    valid_tree = diorama_mask & (~bldg_mask) & (~lake_mask) & (canopy_chm >= 2.2) & is_veg
-    local_max = (canopy_chm == ndimage.maximum_filter(canopy_chm, size=9)) & valid_tree
-    tr_rows, tr_cols = np.nonzero(local_max)
+    greenness = g_ch - 0.50 * r_ch - 0.44 * b_ch
+    lum = 0.299 * r_ch + 0.587 * g_ch + 0.114 * b_ch
+    # Note: SWISSIMAGE is early-spring (leaf-off for deciduous trees), so tall CHM outside non_veg is genuine tree canopy!
+    is_veg_low = (greenness > 3.5) | ((g_ch > r_ch * 0.96) & (g_ch > 24.0) & (lum < 155.0))
 
-    tree_e = E_MIN + (tr_cols + 0.5) * GRID_RES
-    tree_n = N_MAX - (tr_rows + 0.5) * GRID_RES
-    tree_z = dem[tr_rows, tr_cols]
-    tree_h = np.clip(chm[tr_rows, tr_cols], 2.2, 32.0)
-    tree_rad = np.clip(1.1 + 0.24 * tree_h, 1.4, 6.2).astype(np.float32)
-    tree_rgb = ortho[tr_rows, tr_cols]
-    print(f"[scene] Detected {len(tree_e)} real LiDAR trees across Kilchberg ZH!")
+    canopy_chm = ndimage.gaussian_filter(chm, sigma=0.85)
+    valid_tree = diorama_mask & (~non_veg) & (canopy_chm >= 2.0) & ((canopy_chm >= 2.8) | is_veg_low)
+
+    # Multi-scale crown peak detection: tighter spacing (2.5m) for smaller garden/fruit trees, 3.5m for large park trees
+    max_small = canopy_chm == ndimage.maximum_filter(canopy_chm, size=5)
+    max_large = canopy_chm == ndimage.maximum_filter(canopy_chm, size=7)
+    peaks = valid_tree & (
+        ((canopy_chm < 7.5) & max_small)
+        | ((canopy_chm >= 7.5) & max_large)
+    )
+    tr_rows, tr_cols = np.nonzero(peaks)
+
+    tree_e = (E_MIN + (tr_cols + 0.5) * GRID_RES).astype(np.float32)
+    tree_n = (N_MAX - (tr_rows + 0.5) * GRID_RES).astype(np.float32)
+    tree_z = dem[tr_rows, tr_cols].astype(np.float32)
+    tree_h = np.clip(chm[tr_rows, tr_cols], 2.0, 30.0).astype(np.float32)
+
+    # Measure local canopy compactness around each peak to distinguish slender cypresses/conifers from broad oaks
+    chm_ave = ndimage.uniform_filter(chm, size=7)[tr_rows, tr_cols]
+    compact_ratio = chm_ave / np.maximum(tree_h, 1.0)
+    tree_rad = np.clip((0.95 + 0.215 * tree_h) * np.clip(0.75 + 0.42 * compact_ratio, 0.72, 1.15), 1.30, 5.10).astype(np.float32)
+
+    # Classify species from leaf-off March SWISSIMAGE + crown geometry:
+    # 0 = Lush Emerald Broadleaf (Oak / Beech / Sycamore)
+    # 1 = Sunlit Warm-Lime Broadleaf (Linden / Maple / Orchard)
+    # 2 = Alpine Spruce / Fir Conifer (already deep evergreen in early-spring SWISSIMAGE!)
+    # 3 = Slender Cypress / Lombardy Poplar (slender crown along villas & cemetery)
+    # 4 = Copper Beech / Blutbuche (majestic Zürichsee parkland estates)
+    tr_r = r_ch[tr_rows, tr_cols]
+    tr_g = g_ch[tr_rows, tr_cols]
+    tr_b = b_ch[tr_rows, tr_cols]
+    tr_lum = lum[tr_rows, tr_cols]
+    tr_hash = ((tr_cols.astype(np.int64) * 73856093) ^ (tr_rows.astype(np.int64) * 19349663)) & 0xFFFF
+
+    is_evergreen = ((tr_g > tr_r + 4.5) & (tr_lum < 86.0)) | ((sem[tr_rows, tr_cols] == G_FOREST) & ((tr_hash % 5) == 0))
+    is_slender = (compact_ratio < 0.56) & (tree_h >= 5.5) & (~(sem[tr_rows, tr_cols] == G_FOREST))
+    is_copper = (
+        (~is_evergreen)
+        & (~is_slender)
+        & (tree_h >= 9.5)
+        & (((tr_r > tr_g * 1.18) & (tr_r > 68.0)) | ((sem[tr_rows, tr_cols] == G_PARK_CEMETERY) & ((tr_hash % 19) == 3)) | ((tr_hash % 43) == 7))
+    )
+
+    tree_species = np.where(
+        is_slender,
+        3,
+        np.where(
+            is_evergreen,
+            2,
+            np.where(
+                is_copper,
+                4,
+                np.where((tr_hash & 1) == 0, 0, 1),
+            ),
+        ),
+    ).astype(np.uint8)
+    # Narrow radius on slender cypresses & conifers so silhouettes read unmistakably
+    tree_rad = np.where(tree_species == 3, np.clip(tree_h * 0.14, 0.95, 2.15), tree_rad).astype(np.float32)
+    tree_rad = np.where(tree_species == 2, np.clip(tree_rad * 0.84, 1.25, 3.85), tree_rad).astype(np.float32)
+
+    # Trimmed garden hedges & low shrubs (0.85m <= chm < 2.25m, strictly outside roads/bridges/buildings)
+    hedge_mask = diorama_mask & (~non_veg) & (chm >= 0.85) & (chm < 2.25) & is_veg_low
+    print(f"[scene] Extracted {len(tree_e):,} individual 3D trees & {int(hedge_mask.sum()):,} hedge cells across Kilchberg ZH!")
 
     # 7. Detect real moored boats on Lake Zurich from SWISSIMAGE DOP10
     offshore_zone = diorama_mask & lake_mask & (dist_offshore_m > 10.0) & (dist_offshore_m < 240.0) & (sem != G_PLATFORM_PIER)
-    lum = 0.30 * r_ch + 0.59 * g_ch + 0.11 * b_ch
     bg_lum = ndimage.median_filter(lum, size=25)
     boat_cand = offshore_zone & ((lum - bg_lum) > 34.0) & (lum > 95.0)
     lbl, n_comp = ndimage.label(boat_cand)
@@ -644,10 +1177,9 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                     mc = sl[1].start + float(cc.mean())
                     be_pt = E_MIN + (mc + 0.5) * GRID_RES
                     bn_pt = N_MAX - (mr + 0.5) * GRID_RES
-                    # Orientation via covariance
                     if len(cc) >= 5:
                         cov = np.cov(cc, -rr)
-                        eigvals, eigvecs = np.linalg.eigh(cov)
+                        _, eigvecs = np.linalg.eigh(cov)
                         vx, vy = eigvecs[:, -1]
                         angle = float(math.degrees(math.atan2(vy, vx)))
                     else:
@@ -671,23 +1203,40 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
         kpoly_mask=kpoly_mask,
         lake_mask=lake_mask,
         bathy_z=bathy_z,
-        tree_e=tree_e.astype(np.float32),
-        tree_n=tree_n.astype(np.float32),
-        tree_z=tree_z.astype(np.float32),
-        tree_h=tree_h.astype(np.float32),
-        tree_rad=tree_rad.astype(np.float32),
-        tree_rgb=tree_rgb,
+        rail_dist=rail_dist,
+        rail_along=rail_along,
+        rail_ang=rail_ang,
+        road_dist=road_dist,
+        road_along=road_along,
+        road_hw=road_hw,
+        road_ang=road_ang,
+        crosswalk_mask=crosswalk_mask.astype(np.uint8),
+        bridge_cls=bridge_cls,
+        bridge_z=bridge_z,
+        bridge_sdist=bridge_sdist,
+        bridge_along=bridge_along,
+        bridge_hw=bridge_hw,
+        bridge_ang=bridge_ang,
+        bridge_id=bridge_id,
+        hedge_mask=hedge_mask.astype(np.uint8),
+        tree_e=tree_e,
+        tree_n=tree_n,
+        tree_z=tree_z,
+        tree_h=tree_h,
+        tree_rad=tree_rad,
+        tree_species=tree_species,
     )
-    np.savez_compressed(
-        bldg_npz,
-        verts=all_verts,
-        normals=all_norms,
-        bldg_idx=all_bidx,
-        surf_type=all_stype,
-        rgb=all_rgb,
+    meta_json.write_text(
+        json.dumps(
+            {
+                "buildings": buildings_meta,
+                "boats": boats,
+                "viaduct_piers": viaduct_piers,
+                "catenary_portals": catenary_portals,
+            },
+            indent=2,
+        )
     )
-    meta_json.write_text(json.dumps({"buildings": buildings_meta, "boats": boats}, indent=2))
-    _ensure_v2_rasters(cache_dir, bldg_npz)
     print(f"[scene] Saved extracted scene -> {scene_npz.name}, {bldg_npz.name}, {meta_json.name}")
     return scene_npz
 

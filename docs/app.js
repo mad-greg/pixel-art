@@ -864,29 +864,59 @@
     buf.cctx.putImageData(buf.img, 0, 0);
   }
 
-  function drawIsoBox(buf, cx, cy, tx, ty, halfLen, halfWid, heightPx, zBase, colors, drawShadow = true) {
-    // Isometric ground cross-axis compressed vertically by sin(30°)=0.55
-    const nx = -ty * 0.72;
-    const ny = tx * 0.52;
+  function drawLinePx(buf, x0, y0, x1, y1, rgb, alpha = 255) {
+    let ix0 = Math.round(x0), iy0 = Math.round(y0);
+    const ix1 = Math.round(x1), iy1 = Math.round(y1);
+    const dx = Math.abs(ix1 - ix0), dy = Math.abs(iy1 - iy0);
+    const sx = ix0 < ix1 ? 1 : -1, sy = iy0 < iy1 ? 1 : -1;
+    let err = dx - dy;
+    for (let guard = 0; guard < 256; guard++) {
+      setPx(buf, ix0, iy0, rgb, alpha);
+      if (ix0 === ix1 && iy0 === iy1) break;
+      const e2 = err * 2;
+      if (e2 > -dy) { err -= dy; ix0 += sx; }
+      if (e2 < dx) { err += dx; iy0 += sy; }
+    }
+  }
+
+  // Exact 2:1 orthographic isometric ground basis matching IsometricCamera (pitch=30°).
+  // Given a screen-space direction (tx, ty), recovers the true un-foreshortened ground unit vector,
+  // its 90° perpendicular, and projects both back to screen space so vehicles never shear or gap.
+  function makeIsoBasis(cx, cy, tx, ty) {
+    const gx = tx;
+    const gy = ty * 2.0;
+    const gLen = Math.hypot(gx, gy) || 1;
+    const ux = gx / gLen;
+    const uy = gy / gLen;
+    const fx = ux, fy = uy * 0.5;     // Forward unit vector in screen px per world px
+    const rx = -uy, ry = ux * 0.5;    // Right-hand perpendicular in screen px per world px
     const pt = (s, w, z) => [
-      cx + tx * s + nx * w,
-      cy + ty * s + ny * w - z,
+      cx + fx * s + rx * w,
+      cy + fy * s + ry * w - z * 0.866,
     ];
+    return {
+      fx, fy, rx, ry, pt,
+      visSide: ry >= 0 ? 1 : -1,
+      visEnd: fy >= 0 ? 1 : -1,
+    };
+  }
+
+  function drawIsoBox(buf, cx, cy, tx, ty, halfLen, halfWid, heightPx, zBase, colors, drawShadow = true, basisOverride = null) {
+    const B = basisOverride || makeIsoBasis(cx, cy, tx, ty);
+    const { pt, visSide, visEnd } = B;
 
     if (drawShadow) {
       fillPolyPx(buf, [
-        pt(-halfLen - 1, -halfWid - 1, -1),
-        pt(halfLen + 1, -halfWid - 1, -1),
-        pt(halfLen + 1, halfWid + 1, -1),
-        pt(-halfLen - 1, halfWid + 1, -1),
-      ], [16, 20, 28], 110);
+        pt(-halfLen - 1.2, -halfWid - 1.2, -0.5),
+        pt(halfLen + 1.2, -halfWid - 1.2, -0.5),
+        pt(halfLen + 1.2, halfWid + 1.2, -0.5),
+        pt(-halfLen - 1.2, halfWid + 1.2, -0.5),
+      ], [14, 18, 26], 115);
     }
 
     const z0 = zBase;
     const z1 = zBase + heightPx;
-    // Determine which side & end faces point toward the viewer (+Y on screen)
-    const visSide = ny >= 0 ? 1 : -1;
-    const visEnd = ty >= 0 ? 1 : -1;
+    const alpha = colors.emissive ? 254 : 255;
 
     // Side wall
     fillPolyPx(buf, [
@@ -894,7 +924,7 @@
       pt(halfLen, visSide * halfWid, z0),
       pt(halfLen, visSide * halfWid, z1),
       pt(-halfLen, visSide * halfWid, z1),
-    ], colors.side, colors.emissive ? 254 : 255);
+    ], colors.side, alpha);
 
     // Front or rear end wall
     fillPolyPx(buf, [
@@ -902,7 +932,7 @@
       pt(visEnd * halfLen, halfWid, z0),
       pt(visEnd * halfLen, halfWid, z1),
       pt(visEnd * halfLen, -halfWid, z1),
-    ], colors.front, colors.emissive ? 254 : 255);
+    ], colors.front, alpha);
 
     // Roof
     fillPolyPx(buf, [
@@ -910,126 +940,274 @@
       pt(halfLen, -halfWid, z1),
       pt(halfLen, halfWid, z1),
       pt(-halfLen, halfWid, z1),
-    ], colors.roof, colors.emissive ? 254 : 255);
+    ], colors.roof, alpha);
 
-    return { pt, visSide, visEnd };
+    return B;
   }
 
-  function getVehicleSprite(type, variant, angleIdx, mode) {
-    const key = `${type}:${variant}:${angleIdx}:${mode}`;
+  function getVehicleSprite(type, variant, angleIdx, mode, angleSteps = 32) {
+    const key = `${type}:${variant}:${angleIdx}:${angleSteps}:${mode}`;
     if (spriteCache[key]) return spriteCache[key];
 
-    const ang = (angleIdx / 32) * Math.PI * 2;
+    const ang = (angleIdx / angleSteps) * Math.PI * 2;
     const tx = Math.cos(ang);
     const ty = Math.sin(ang);
     const isNight = mode === 'night';
-    const winCol = isNight ? [255, 218, 118] : [48, 66, 90];
+    const winCol = isNight ? [255, 220, 126] : [42, 58, 82];
+    const cabGlass = isNight ? [120, 148, 184] : [30, 44, 66];
     const winAlpha = isNight ? 254 : 255;
 
     let buf;
     if (type === 'car') {
-      buf = createPixelBuffer(34, 30);
-      const cx = 17, cy = 17;
+      buf = createPixelBuffer(38, 34);
+      const cx = 19, cy = 19;
       const pal = CAR_PALETTES[variant % CAR_PALETTES.length];
-      const lower = drawIsoBox(buf, cx, cy, tx, ty, 8.5, 4.0, 3.5, 0, pal, true);
-      drawIsoBox(buf, cx - tx * 0.8, cy - ty * 0.8, tx, ty, 4.6, 3.4, 3.0, 3.5, {
+      const B = makeIsoBasis(cx, cy, tx, ty);
+      // Ground shadow + lower chassis
+      drawIsoBox(buf, cx, cy, tx, ty, 9.2, 4.2, 3.6, 0.8, pal, true, B);
+      // Dark wheel arches along visible side
+      const vs = B.visSide * 4.25;
+      for (const ws of [-5.5, 5.5]) {
+        const wp = B.pt(ws, vs, 1.0);
+        setPx(buf, wp[0], wp[1], [28, 32, 38], 255);
+        setPx(buf, wp[0] + 1, wp[1], [28, 32, 38], 255);
+      }
+      // Slightly set-back cabin with dark windshield & rear glass
+      const cab = makeIsoBasis(cx - B.fx * 1.0, cy - B.fy * 1.0, tx, ty);
+      drawIsoBox(buf, cx, cy, tx, ty, 4.8, 3.5, 3.2, 4.4, {
         roof: pal.roof,
         side: winCol,
-        front: winCol,
+        front: cabGlass,
         emissive: isNight,
-      }, false);
-      // Headlights & taillights
-      const hlL = lower.pt(8.8, -2.4, 2.0);
-      const hlR = lower.pt(8.8, 2.4, 2.0);
-      setPx(buf, hlL[0], hlL[1], [255, 244, 188], 254);
-      setPx(buf, hlR[0], hlR[1], [255, 244, 188], 254);
-      const tlL = lower.pt(-8.8, -2.4, 2.0);
-      const tlR = lower.pt(-8.8, 2.4, 2.0);
-      setPx(buf, tlL[0], tlL[1], [232, 48, 42], 254);
-      setPx(buf, tlR[0], tlR[1], [232, 48, 42], 254);
+      }, false, cab);
+      // Crisp twin headlights & red taillights
+      for (const wy of [-2.4, 2.4]) {
+        const hl = B.pt(9.4, wy, 2.4);
+        setPx(buf, hl[0], hl[1], [255, 248, 198], 254);
+        const tl = B.pt(-9.4, wy, 2.4);
+        setPx(buf, tl[0], tl[1], [236, 46, 40], 254);
+      }
       applySelOutAndShade(buf, mode);
       spriteCache[key] = { canvas: buf.c, cx, cy };
       return spriteCache[key];
     }
 
     if (type === 'bus') {
-      buf = createPixelBuffer(64, 52);
-      const cx = 32, cy = 29;
-      // ZVV white & cobalt-blue lakefront bus
-      drawIsoBox(buf, cx, cy, tx, ty, 21.0, 4.8, 4.2, 0, {
-        roof: [46, 98, 178], side: [38, 84, 158], front: [44, 92, 168],
-      }, true);
-      const upper = drawIsoBox(buf, cx, cy, tx, ty, 21.0, 4.8, 6.4, 4.2, {
-        roof: [232, 234, 236], side: [216, 218, 222], front: [224, 226, 230],
-      }, false);
-      // Passenger windows along visible side
-      for (let s = -16; s <= 15; s += 5.2) {
+      buf = createPixelBuffer(72, 58);
+      const cx = 36, cy = 33;
+      const B = makeIsoBasis(cx, cy, tx, ty);
+      // ZVV Zurich white & cobalt-blue bus
+      drawIsoBox(buf, cx, cy, tx, ty, 22.5, 5.2, 4.2, 1.0, {
+        roof: [46, 98, 182], side: [36, 82, 162], front: [44, 92, 174],
+      }, true, B);
+      drawIsoBox(buf, cx, cy, tx, ty, 22.5, 5.2, 7.0, 5.2, {
+        roof: [236, 238, 240], side: [218, 222, 226], front: [228, 230, 234],
+      }, false, B);
+      // Roof AC pod
+      drawIsoBox(buf, cx, cy, tx, ty, 8.5, 3.2, 1.8, 12.2, {
+        roof: [208, 212, 218], side: [182, 188, 196], front: [194, 198, 206],
+      }, false, B);
+      // Dark wheel wells
+      const vs = B.visSide * 5.25;
+      for (const ws of [-13.5, 13.5]) {
         fillPolyPx(buf, [
-          upper.pt(s - 1.8, upper.visSide * 4.9, 5.4),
-          upper.pt(s + 1.8, upper.visSide * 4.9, 5.4),
-          upper.pt(s + 1.8, upper.visSide * 4.9, 9.0),
-          upper.pt(s - 1.8, upper.visSide * 4.9, 9.0),
+          B.pt(ws - 2.2, vs, 0.5), B.pt(ws + 2.2, vs, 0.5),
+          B.pt(ws + 2.2, vs, 3.0), B.pt(ws - 2.2, vs, 3.0),
+        ], [26, 30, 36], 255);
+      }
+      // Panoramic passenger windows along visible side
+      for (let s = -17.5; s <= 17.5; s += 5.4) {
+        fillPolyPx(buf, [
+          B.pt(s - 2.0, vs, 6.2), B.pt(s + 2.0, vs, 6.2),
+          B.pt(s + 2.0, vs, 10.6), B.pt(s - 2.0, vs, 10.6),
         ], winCol, winAlpha);
       }
-      const hl = upper.pt(21.3, 0, 2.5);
-      setPx(buf, hl[0], hl[1], [255, 246, 192], 254);
+      // Front panoramic windshield if front end is visible
+      if (B.visEnd > 0) {
+        fillPolyPx(buf, [
+          B.pt(22.6, -4.2, 5.8), B.pt(22.6, 4.2, 5.8),
+          B.pt(22.6, 4.2, 10.8), B.pt(22.6, -4.2, 10.8),
+        ], cabGlass, 255);
+      }
+      for (const wy of [-3.2, 3.2]) {
+        const hl = B.pt(22.8, wy, 3.0);
+        setPx(buf, hl[0], hl[1], [255, 248, 198], 254);
+        const tl = B.pt(-22.8, wy, 3.0);
+        setPx(buf, tl[0], tl[1], [236, 46, 40], 254);
+      }
       applySelOutAndShade(buf, mode);
       spriteCache[key] = { canvas: buf.c, cx, cy };
       return spriteCache[key];
     }
 
     if (type === 'sbb_dpz' || type === 'sbb_ic') {
-      buf = createPixelBuffer(104, 84);
-      const cx = 52, cy = 48;
-      const isLoco = variant === 0;
+      // Master-crafted SBB RABe 511 KISS (sbb_dpz) & SBB IC 2000 (sbb_ic) double-deck trains
+      // variant: 0 = Lead Cab Car, 1 = Middle Coach, 2 = Tail Cab Car
+      buf = createPixelBuffer(128, 96);
+      const cx = 64, cy = 58;
+      const B = makeIsoBasis(cx, cy, tx, ty);
+      const isLead = variant === 0;
+      const isTail = variant === 2;
       const isDpz = type === 'sbb_dpz';
-      const baseColors = isLoco
-        ? { roof: [76, 80, 88], side: [188, 44, 38], front: [204, 48, 42] }
-        : (isDpz
-          ? { roof: [78, 84, 94], side: [44, 78, 146], front: [208, 210, 214] }
-          : { roof: [92, 96, 104], side: [222, 222, 218], front: [198, 200, 204] });
+      const HLEN = 38.0; // 19.0 m at 0.25 m/px -> zero gaps at 19.5 m step with gangways!
+      const HWID = 5.6;
+      const vs = B.visSide * (HWID + 0.08);
 
-      const body = drawIsoBox(buf, cx, cy, tx, ty, 33.0, 5.4, 15.0, 0, baseColors, true);
-      if (!isLoco) {
-        // White horizontal stripe on DPZ or red doors on coaches
-        const vs = body.visSide * 5.5;
-        if (isDpz) {
-          fillPolyPx(buf, [
-            body.pt(-32, vs, 6.2), body.pt(32, vs, 6.2),
-            body.pt(32, vs, 9.0), body.pt(-32, vs, 9.0),
-          ], [228, 228, 224], 255);
+      // 1. Dark rail shadow & underframe skirt + two bogies with steel wheel dots
+      drawIsoBox(buf, cx, cy, tx, ty, HLEN - 1.5, HWID - 0.5, 2.4, 0.2, {
+        roof: [40, 44, 52], side: [34, 38, 46], front: [36, 40, 48],
+      }, true, B);
+      for (const bs of [-25.0, 25.0]) {
+        // Steel bogie frame & 2 axle wheels
+        for (const ws of [-4.2, 4.2]) {
+          const wp = B.pt(bs + ws, vs, 1.2);
+          setPx(buf, wp[0], wp[1], [118, 126, 138], 255);
+          setPx(buf, wp[0], wp[1] + 1, [74, 80, 90], 255);
         }
-        // SBB red entry doors near bogies
-        for (const ds of [-23.0, 23.0]) {
-          fillPolyPx(buf, [
-            body.pt(ds - 2.2, vs, 1.5), body.pt(ds + 2.2, vs, 1.5),
-            body.pt(ds + 2.2, vs, 11.5), body.pt(ds - 2.2, vs, 11.5),
-          ], [198, 46, 40], 255);
-        }
-        // Upper & lower deck pixel windows!
-        const zRows = isDpz ? [[2.8, 5.6], [9.8, 13.0]] : [[6.8, 11.2]];
-        for (const [za, zb] of zRows) {
-          for (let s = -17.5; s <= 17.5; s += 5.0) {
-            fillPolyPx(buf, [
-              body.pt(s - 1.7, vs, za), body.pt(s + 1.7, vs, za),
-              body.pt(s + 1.7, vs, zb), body.pt(s - 1.7, vs, zb),
-            ], winCol, winAlpha);
-          }
-        }
-      } else {
-        // Locomotive cab windshield & twin Swiss headlights
-        const hl1 = body.pt(33.4, -2.5, 4.0);
-        const hl2 = body.pt(33.4, 2.5, 4.0);
-        setPx(buf, hl1[0], hl1[1], [255, 248, 200], 254);
-        setPx(buf, hl2[0], hl2[1], [255, 248, 200], 254);
-        // Silver roof pantograph
-        const p0 = body.pt(-10, 0, 15.5);
-        const p1 = body.pt(-4, 0, 19.5);
-        const p2 = body.pt(2, 0, 15.5);
-        setPx(buf, p0[0], p0[1], [196, 202, 210], 255);
-        setPx(buf, p1[0], p1[1], [216, 220, 228], 255);
-        setPx(buf, p2[0], p2[1], [196, 202, 210], 255);
       }
+
+      // 2. Articulated dark rubber gangway bellows at coupled ends (bridges coaches seamlessly!)
+      const drawGangway = (endSign) => {
+        const g0 = endSign * (HLEN - 1.0);
+        const g1 = endSign * (HLEN + 3.2);
+        const sMin = Math.min(g0, g1), sMax = Math.max(g0, g1);
+        const gMid = (sMin + sMax) * 0.5;
+        const gB = makeIsoBasis(cx + B.fx * gMid, cy + B.fy * gMid, tx, ty);
+        drawIsoBox(buf, cx, cy, tx, ty, (sMax - sMin) * 0.5, HWID - 1.3, 12.6, 2.6, {
+          roof: [46, 50, 58], side: [38, 42, 50], front: [42, 46, 54],
+        }, false, gB);
+      };
+      if (!isLead) drawGangway(1);
+      if (!isTail) drawGangway(-1);
+
+      // 3. Main double-deck carbody shell (sleek SBB white/light-silver with dark roof)
+      const bodyLen = (isLead || isTail) ? HLEN - 3.0 : HLEN;
+      const bodyShift = isLead ? -3.0 : (isTail ? 3.0 : 0.0);
+      const bodyB = makeIsoBasis(cx + B.fx * bodyShift, cy + B.fy * bodyShift, tx, ty);
+      const shellPal = isDpz
+        ? { roof: [112, 118, 128], side: [232, 234, 236], front: [212, 214, 218] }
+        : { roof: [104, 110, 120], side: [236, 236, 232], front: [214, 214, 210] };
+      drawIsoBox(buf, cx, cy, tx, ty, bodyLen, HWID, 14.2, 2.4, shellPal, false, bodyB);
+
+      // 4. SBB Livery Bands, Anthracite Window Stripes, Bold SBB Red Doors & Dual-Deck Windows!
+      const sStart = isTail ? -HLEN + 7.5 : -HLEN + 1.5;
+      const sEnd = isLead ? HLEN - 7.5 : HLEN - 1.5;
+
+      // Upper & lower dark anthracite window ribbon (iconic SBB KISS / IC 2000 look!)
+      const bandColor = isDpz ? [44, 52, 66] : [36, 40, 48];
+      fillPolyPx(buf, [
+        B.pt(sStart, vs, 3.8), B.pt(sEnd, vs, 3.8),
+        B.pt(sEnd, vs, 7.4), B.pt(sStart, vs, 7.4),
+      ], bandColor, 255);
+      fillPolyPx(buf, [
+        B.pt(sStart, vs, 10.0), B.pt(sEnd, vs, 10.0),
+        B.pt(sEnd, vs, 14.0), B.pt(sStart, vs, 14.0),
+      ], bandColor, 255);
+
+      // ZVV cobalt-blue lower accent stripe on S-Bahn DPZ / KISS, or yellow 1st-class band on IC 2000
+      if (isDpz) {
+        fillPolyPx(buf, [
+          B.pt(sStart, vs, 2.5), B.pt(sEnd, vs, 2.5),
+          B.pt(sEnd, vs, 3.8), B.pt(sStart, vs, 3.8),
+        ], [36, 86, 168], 255);
+      } else {
+        // Yellow 1st-class band above upper windows on lead/IC coach
+        fillPolyPx(buf, [
+          B.pt(sStart, vs, 14.1), B.pt(sEnd, vs, 14.1),
+          B.pt(sEnd, vs, 15.1), B.pt(sStart, vs, 15.1),
+        ], [234, 194, 42], 255);
+      }
+
+      // Bold SBB red double-leaf entry doors near coach thirds
+      const doorPositions = isLead ? [-24.5, 16.5] : (isTail ? [-16.5, 24.5] : [-25.5, 25.5]);
+      for (const ds of doorPositions) {
+        fillPolyPx(buf, [
+          B.pt(ds - 3.2, vs, 2.6), B.pt(ds + 3.2, vs, 2.6),
+          B.pt(ds + 3.2, vs, 13.8), B.pt(ds - 3.2, vs, 13.8),
+        ], [206, 40, 38], 255);
+        // Narrow door window
+        fillPolyPx(buf, [
+          B.pt(ds - 1.3, vs, 6.2), B.pt(ds + 1.3, vs, 6.2),
+          B.pt(ds + 1.3, vs, 11.4), B.pt(ds - 1.3, vs, 11.4),
+        ], winCol, winAlpha);
+      }
+
+      // Individual glowing dual-deck passenger windows between doors
+      for (let s = sStart + 3.0; s <= sEnd - 3.0; s += 5.4) {
+        if (doorPositions.some(ds => Math.abs(s - ds) < 4.8)) continue;
+        // Lower deck window
+        fillPolyPx(buf, [
+          B.pt(s - 1.8, vs, 4.3), B.pt(s + 1.8, vs, 4.3),
+          B.pt(s + 1.8, vs, 7.0), B.pt(s - 1.8, vs, 7.0),
+        ], winCol, winAlpha);
+        // Upper deck window
+        fillPolyPx(buf, [
+          B.pt(s - 1.8, vs, 10.5), B.pt(s + 1.8, vs, 10.5),
+          B.pt(s + 1.8, vs, 13.5), B.pt(s - 1.8, vs, 13.5),
+        ], winCol, winAlpha);
+      }
+
+      // 5. Aerodynamic Sloped SBB Red Cab Nose (Lead +1 or Tail -1)
+      if (isLead || isTail) {
+        const dir = isLead ? 1 : -1;
+        const nBase = dir * (HLEN - 6.0);
+        const nTip = dir * (HLEN + 4.0);
+        const nTop = dir * (HLEN - 1.0);
+        // Red aerodynamic nose side wedge
+        fillPolyPx(buf, [
+          B.pt(nBase, vs, 2.4), B.pt(nTip, vs * 0.72, 3.0),
+          B.pt(nTip, vs * 0.72, 7.6), B.pt(nTop, vs * 0.88, 15.8),
+          B.pt(nBase, vs, 16.6),
+        ], [196, 38, 36], 255);
+        // Sloped nose front face & panoramic dark cab windshield
+        fillPolyPx(buf, [
+          B.pt(nTip, -HWID * 0.72, 3.0), B.pt(nTip, HWID * 0.72, 3.0),
+          B.pt(nTip, HWID * 0.72, 7.6), B.pt(nTip, -HWID * 0.72, 7.6),
+        ], [216, 44, 40], 255);
+        fillPolyPx(buf, [
+          B.pt(nTip, -HWID * 0.72, 7.6), B.pt(nTip, HWID * 0.72, 7.6),
+          B.pt(nTop, HWID * 0.88, 15.4), B.pt(nTop, -HWID * 0.88, 15.4),
+        ], cabGlass, 255);
+        // Red nose crown merging into roof
+        fillPolyPx(buf, [
+          B.pt(nTop, -HWID * 0.88, 15.4), B.pt(nTop, HWID * 0.88, 15.4),
+          B.pt(nBase, HWID, 16.6), B.pt(nBase, -HWID, 16.6),
+        ], [186, 38, 36], 255);
+
+        // Iconic Swiss 3-point LED headlights (lead) or twin red taillights (tail)
+        const lampCol = isLead ? [255, 250, 206] : [242, 46, 42];
+        for (const wy of [-2.8, 2.8]) {
+          const lp = B.pt(nTip + dir * 0.5, wy, 4.6);
+          setPx(buf, lp[0], lp[1], lampCol, 254);
+          setPx(buf, lp[0] + (isLead ? 0 : 0), lp[1] + 1, lampCol, 254);
+        }
+        if (isLead) {
+          const topLamp = B.pt(nTop + dir * 0.4, 0, 14.6);
+          setPx(buf, topLamp[0], topLamp[1], [255, 250, 210], 254);
+        }
+      }
+
+      // 6. Roof HVAC pods & Detailed Silver Scissor Pantograph on Lead/Tail Cab Cars
+      drawIsoBox(buf, cx, cy, tx, ty, 11.0, 3.2, 1.4, 16.6, {
+        roof: [148, 154, 164], side: [122, 128, 138], front: [134, 140, 150],
+      }, false, bodyB);
+      if (isLead || isTail) {
+        const pCenter = isLead ? -14.0 : 14.0;
+        const pBaseA = B.pt(pCenter - 5.0, 0, 17.6);
+        const pBaseB = B.pt(pCenter + 5.0, 0, 17.6);
+        const pKnee = B.pt(pCenter + (isLead ? -7.5 : 7.5), 0, 20.6);
+        const pHeadL = B.pt(pCenter, -3.6, 23.2);
+        const pHeadR = B.pt(pCenter, 3.6, 23.2);
+        const pHeadM = B.pt(pCenter, 0, 23.2);
+        // Red ceramic roof insulators
+        setPx(buf, pBaseA[0], pBaseA[1], [198, 54, 48], 255);
+        setPx(buf, pBaseB[0], pBaseB[1], [198, 54, 48], 255);
+        // Silver articulated Z-arm pantograph & carbon collector bar
+        drawLinePx(buf, pBaseB[0], pBaseB[1], pKnee[0], pKnee[1], [204, 212, 222], 255);
+        drawLinePx(buf, pKnee[0], pKnee[1], pHeadM[0], pHeadM[1], [224, 230, 238], 255);
+        drawLinePx(buf, pHeadL[0], pHeadL[1], pHeadR[0], pHeadR[1], [164, 172, 184], 255);
+      }
+
       applySelOutAndShade(buf, mode);
       spriteCache[key] = { canvas: buf.c, cx, cy };
       return spriteCache[key];
@@ -1294,27 +1472,28 @@
     for (const tr of (animData.trains || [])) {
       const headFrac = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
       if (headFrac < 0 || headFrac > 1.08) continue;
-      const coachStepFrac = 20.5 / tr.length_m; // 20.5 m per SBB coach + coupler
+      const coachStepFrac = 19.5 / tr.length_m; // 19.5 m exact SBB coach pitch -> seamless articulated gangways!
       const nCars = tr.carriages || 4;
-      // Draw from rear coach to locomotive in back-to-front screen Y order
+      // Draw from rear coach to lead cab in back-to-front screen Y order
       const units = [];
       for (let cIdx = 0; cIdx < nCars; cIdx++) {
         const cFrac = headFrac - cIdx * coachStepFrac;
         if (cFrac < 0.005 || cFrac > 0.995) continue;
         const pos = samplePathAt(tr.pts, cFrac, worldW, worldH);
         if (pos && !pos.occ) {
-          units.push({ cIdx, pos });
+          const variant = cIdx === 0 ? 0 : (cIdx === nCars - 1 ? 2 : 1);
+          units.push({ cIdx, variant, pos });
         }
       }
       units.sort((a, b) => a.pos.wy - b.pos.wy);
       for (const u of units) {
-        const angIdx = ((Math.round((Math.atan2(u.pos.ty, u.pos.tx) / (Math.PI * 2)) * 32) % 32) + 32) % 32;
-        const sp = getVehicleSprite(tr.kind, u.cIdx === 0 ? 0 : 1, angIdx, currentMode);
+        const angIdx = ((Math.round((Math.atan2(u.pos.ty, u.pos.tx) / (Math.PI * 2)) * 64) % 64) + 64) % 64;
+        const sp = getVehicleSprite(tr.kind, u.variant, angIdx, currentMode, 64);
         blitWorldSprite(sp, u.pos.wx, u.pos.wy, wScale);
       }
     }
 
-    // 5. Waving Swiss Flags & Lindt 43.6 m Hochkamin Rising Pixel Steam
+    // 5. Waving Swiss Flags, Lindt 43.6 m Hochkamin Rising Pixel Steam & Gliding Lake Zurich Gulls
     if (animData.ambient) {
       const waveStep = Math.floor(tSec * 5.0) % 4;
       for (let fIdx = 0; fIdx < (animData.ambient.swiss_flags || []).length; fIdx++) {
@@ -1351,6 +1530,26 @@
             ? `rgba(148,164,196,${(alpha * 0.55).toFixed(2)})`
             : (isSunset ? `rgba(248,214,196,${(alpha * 0.72).toFixed(2)})` : `rgba(242,240,236,${(alpha * 0.72).toFixed(2)})`);
           drawPixelRectWorld(pxWorld - sz * 0.5 * wScale, pyWorld - sz * 0.4 * wScale, sz, sz * 0.75, puffCol, wScale);
+        }
+      }
+
+      // Gliding Lake Zurich Gulls over Bendlikon Bay & Schooren (day & alpenglow)
+      if (!isNight && animData.ambient.gulls) {
+        const gullCol = isSunset ? '#ffe6cf' : '#f4f6fa';
+        const tipCol = isSunset ? '#b49284' : '#8a94a6';
+        for (let gIdx = 0; gIdx < animData.ambient.gulls.length; gIdx++) {
+          const g = animData.ambient.gulls[gIdx];
+          const ang = tSec * (g.speed || 0.25) + (g.phase || 0) * Math.PI * 2;
+          const gx = (g.cx + Math.cos(ang) * g.rx) * worldW;
+          const gy = (g.cy + Math.sin(ang) * g.ry) * worldH;
+          const flap = Math.sin(tSec * 7.5 + gIdx * 1.9);
+          const wy = (flap > 0.25 ? -1.4 : (flap < -0.25 ? 1.2 : 0)) * wScale;
+          // Crisp 5px pixel V-wing gull
+          drawPixelRectWorld(gx - 3.0 * wScale, gy + wy, 1.5, 1.2, tipCol, wScale);
+          drawPixelRectWorld(gx - 1.6 * wScale, gy + wy * 0.4, 1.8, 1.2, gullCol, wScale);
+          drawPixelRectWorld(gx, gy, 1.6, 1.4, gullCol, wScale);
+          drawPixelRectWorld(gx + 1.6 * wScale, gy + wy * 0.4, 1.8, 1.2, gullCol, wScale);
+          drawPixelRectWorld(gx + 3.0 * wScale, gy + wy, 1.5, 1.2, tipCol, wScale);
         }
       }
     }

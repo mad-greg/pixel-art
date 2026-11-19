@@ -177,8 +177,11 @@ def _catmull_rom_closed_or_open(ctrl: list[tuple[float, float]], step_m: float =
 
 
 def _build_obstacle_surface(scene: SceneData) -> np.ndarray:
-    """Build 0.5 m foreground obstacle elevation grid (trees + 3D LOD2 building roofs)."""
+    """Build 0.5 m foreground obstacle elevation grid (trees + 3D LOD2 building roofs + 3D bridges)."""
     obs_z = (scene.dem + scene.chm).astype(np.float32)
+    if hasattr(scene, "bridge_z") and hasattr(scene, "bridge_class"):
+        has_br = scene.bridge_class > 0
+        obs_z[has_br] = np.maximum(obs_z[has_br], scene.bridge_z[has_br] + 1.0)
     # Stamp exact 3D building roof elevations onto roof triangles' bounding footprints
     roof_tris = scene.verts[scene.surf_type == 1]
     for tri in roof_tris:
@@ -197,6 +200,18 @@ def _sample_ground_z(dem: np.ndarray, e: np.ndarray, n: np.ndarray) -> np.ndarra
     rows = np.clip(((N_MAX - n) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
     z = dem[rows, cols].astype(np.float64)
     return ndimage.gaussian_filter1d(z, sigma=2.0, mode="nearest") if len(z) >= 5 else z
+
+
+def _sample_road_z(scene: SceneData, e: np.ndarray, n: np.ndarray) -> np.ndarray:
+    """Sample road elevation taking the higher of bare-earth DEM and 3D elevated bridge/viaduct deck."""
+    cols = np.clip(((e - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
+    rows = np.clip(((N_MAX - n) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
+    z = scene.dem[rows, cols].astype(np.float64)
+    if hasattr(scene, "bridge_z") and hasattr(scene, "bridge_class"):
+        br_z = scene.bridge_z[rows, cols].astype(np.float64)
+        br_m = scene.bridge_class[rows, cols] > 0
+        z = np.where(br_m, np.maximum(z, br_z), z)
+    return ndimage.gaussian_filter1d(z, sigma=1.6, mode="nearest") if len(z) >= 5 else z
 
 
 def _compute_occlusion(
@@ -319,7 +334,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, e_nb, n_nb, z_nb, vehicle_h=3.8),
         })
 
-    # 2. Road Network: Seestrasse (with ZVV Route 161 Bus + Cars), A3 Motorway, and Village Streets
+    # 2. Road Network: Seestrasse (ZVV Route 161 Bus + Cars), Dorfstrasse Viaduct, A3 Motorway, and Village Streets
     roads_out = []
     prim_geoms = get_clipped("primary")
     see_spine = _stitch_longest_path(prim_geoms, (2683371.0, 1243254.0), (2684410.0, 1241104.0), snap_tol=6.0)
@@ -329,7 +344,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             ("seestrasse_nb", LineString(list(reversed(list(see_spine.coords)))), 0.37),
         ]:
             er, nr, lr = _resample_smooth_line(ls_dir, step_m=3.2, offset_right_m=1.9)
-            zr = _sample_ground_z(scene.dem, er, nr) + 0.35
+            zr = _sample_road_z(scene, er, nr) + 0.35
             roads_out.append({
                 "id": dir_id,
                 "kind": "seestrasse",
@@ -341,12 +356,33 @@ def export_animations(mpp_full: float = 0.25) -> Path:
                 "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, er, nr, zr, vehicle_h=1.9),
             })
 
+    # Dedicated Dorfstrasse Horseshoe Viaduct route (Seestrasse Bendlikon -> up Dorfstrasse viaduct -> Dorf!)
+    minor_all = get_clipped("minor")
+    dorf_spine = _stitch_longest_path(minor_all, (2684040.0, 1241872.0), (2683620.0, 1241920.0), snap_tol=6.0)
+    if dorf_spine is not None and dorf_spine.length >= 180.0:
+        for dir_id, ls_dir, phase0, has_b in [
+            ("dorfstrasse_viaduct_up", dorf_spine, 0.14, True),
+            ("dorfstrasse_viaduct_dn", LineString(list(reversed(list(dorf_spine.coords)))), 0.62, False),
+        ]:
+            ed, nd, ld = _resample_smooth_line(ls_dir, step_m=2.6, offset_right_m=1.55)
+            zd = _sample_road_z(scene, ed, nd) + 0.35
+            roads_out.append({
+                "id": dir_id,
+                "kind": "village",
+                "length_m": round(ld, 1),
+                "speed_mps": 8.2,
+                "has_bus": has_b,
+                "car_count": 2,
+                "phase": phase0,
+                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, ed, nd, zd, vehicle_h=2.0),
+            })
+
     mw_geoms = sorted(get_clipped("motorway"), key=lambda g: -g.length)
     for idx_m, mg in enumerate(mw_geoms[:2]):
         if mg.length < 300.0:
             continue
         em, nm, lm = _resample_smooth_line(mg, step_m=3.5, offset_right_m=0.0)
-        zm = _sample_ground_z(scene.dem, em, nm) + 0.35
+        zm = _sample_road_z(scene, em, nm) + 0.35
         roads_out.append({
             "id": f"a3_motorway_{idx_m}",
             "kind": "motorway",
@@ -358,10 +394,10 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, em, nm, zm, vehicle_h=2.0),
         })
 
-    minor_geoms = [g for g in sorted(get_clipped("minor"), key=lambda s: -s.length) if g.length >= 370.0][:5]
+    minor_geoms = [g for g in sorted(minor_all, key=lambda s: -s.length) if g.length >= 370.0][:5]
     for idx_v, vg in enumerate(minor_geoms):
         ev, nv, lv = _resample_smooth_line(vg, step_m=3.2, offset_right_m=1.4)
-        zv = _sample_ground_z(scene.dem, ev, nv) + 0.35
+        zv = _sample_road_z(scene, ev, nv) + 0.35
         roads_out.append({
             "id": f"village_st_{idx_v}",
             "kind": "village",
@@ -375,7 +411,6 @@ def export_animations(mpp_full: float = 0.25) -> Path:
 
     # 3. Lake Zurich ZSG Passenger Steamer (docking at Bendlikon Pier!) & Leisure Sailboats
     ships_out = []
-    # Steamer route over open water, curving smoothly alongside Bendlikon ZSG Pier (E=2684176, N=1241902)
     steamer_ctrl = [
         (2683865.0, 1243195.0),
         (2683965.0, 1242820.0),
@@ -403,7 +438,6 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, None, es_st, ns_st, zs_st),
     })
 
-    # Offshore leisure sailboats & classic wooden motorboat cruising open Lake Zurich
     boat_loops = [
         ("sailboat_1", "sailboat", 3.1, 0.05, [
             (2684360.0, 1242080.0), (2684490.0, 1241890.0), (2684435.0, 1241690.0), (2684305.0, 1241860.0),
@@ -432,7 +466,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, None, eb, nb, zb),
         })
 
-    # 4. Subtle 90s Pixel-Art Ambient Micro-Animations (Lindt Chimney Steam, Waving Swiss Flags, Lake Sparkles)
+    # 4. Subtle 90s Pixel-Art Ambient Micro-Animations (Chimney Steam, Swiss Flags, Lake Sparkles & Gliding Gulls)
     def proj_uv(e_pt: float, n_pt: float, z_pt: float) -> list[float]:
         px, py, _ = cam.project(np.array([e_pt]), np.array([n_pt]), np.array([z_pt]))
         return [round(float((px[0] + shift_x) / W_full), 5), round(float((py[0] + shift_y) / H_full), 5)]
@@ -445,7 +479,13 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         {"name": "Bahnhof / Gemeindehaus", "uv": proj_uv(2683786.0, 1242048.0, 455.8)},
     ]
 
-    # Sample 70 open-water lake shimmer points strictly inside diorama_mask & >18m from shore
+    # Gliding white Lake Zurich gulls circling above Bendlikon Bay & Schooren shore
+    gulls_out = [
+        {"uv": proj_uv(2684240.0, 1241920.0, 434.0), "rx": 48, "ry": 22, "spd": 0.42, "ph": 0.1},
+        {"uv": proj_uv(2684360.0, 1241560.0, 438.0), "rx": 54, "ry": 24, "spd": 0.36, "ph": 0.55},
+        {"uv": proj_uv(2684050.0, 1242560.0, 436.0), "rx": 42, "ry": 19, "spd": 0.48, "ph": 0.82},
+    ]
+
     open_water = scene.lake_mask & scene.diorama_mask
     open_water = ndimage.binary_erosion(open_water, iterations=35)
     wr, wc = np.nonzero(open_water)
@@ -473,6 +513,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "chimney_steam": {"name": "Lindt Hochkamin (43.6 m)", "uv": chimney_uv},
             "swiss_flags": flags_out,
             "lake_glints": glints_out,
+            "gulls": gulls_out,
         },
     }
     out_p = DOCS_DIR / "data" / "kilchberg_animations.json"
