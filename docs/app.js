@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '4.3';
+  const ASSET_VER = '4.4';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -2056,24 +2056,233 @@
     }
   }
 
+  function drawLakeWaves(glints, ships, worldW, worldH, wScale, tSec, mode) {
+    // Master-crafted 90s pixel-art rolling Lake Zurich wave trains!
+    // Spawns sweeping, curved, multi-tone isometric wavelets across both open-water glint anchors
+    // and Lake Zurich ship lanes (~500 living waves drifting smoothly along the NE->SW lake breeze).
+    const isNight = mode === 'night';
+    const isSunset = mode === 'sunset';
+    const s = scale * wScale;
+    const hStep = Math.max(1.2, s * 1.35);
+
+    const troughCol = isNight
+      ? 'rgba(8, 18, 42, 0.45)'
+      : (isSunset ? 'rgba(42, 34, 62, 0.36)' : 'rgba(12, 54, 78, 0.38)');
+    const bodyCol = isNight
+      ? 'rgba(72, 114, 168, 0.48)'
+      : (isSunset ? 'rgba(232, 158, 108, 0.48)' : 'rgba(86, 174, 198, 0.50)');
+    const crestCol = isNight
+      ? 'rgba(168, 206, 248, 0.68)'
+      : (isSunset ? 'rgba(255, 214, 146, 0.74)' : 'rgba(218, 246, 255, 0.76)');
+    const sparkCol = isNight
+      ? 'rgba(224, 240, 255, 0.90)'
+      : (isSunset ? 'rgba(255, 246, 204, 0.92)' : 'rgba(255, 255, 255, 0.92)');
+
+    // Build deterministic open-water wave centers once (guaranteed 100% over Lake Zurich water!)
+    if (!drawLakeWaves._anchors) {
+      const anchors = [];
+      for (let i = 0; i < glints.length; i++) {
+        const g = glints[i];
+        anchors.push([g[0], g[1], g[2]]);
+        // Add 4 staggered neighbors within open water around each verified glint anchor
+        for (let k = 1; k <= 4; k++) {
+          const a = g[2] * 29.3 + k * 1.57;
+          const r = 0.0045 + k * 0.0028;
+          anchors.push([g[0] + Math.cos(a) * r, g[1] + Math.sin(a) * r * 0.55, (g[2] + k * 0.21) % 1]);
+        }
+      }
+      // Also distribute wave anchors evenly along the open-water ZSG steamer & sailboat paths
+      for (let si = 0; si < (ships || []).length; si++) {
+        const pts = ships[si].pts || [];
+        const step = Math.max(4, Math.floor(pts.length / 28));
+        for (let pi = 2; pi < pts.length - 2; pi += step) {
+          const p = pts[pi];
+          const seed = ((si * 37 + pi * 13) % 997) / 997;
+          anchors.push([p[0], p[1], seed]);
+          anchors.push([p[0] + 0.008 * Math.cos(seed * 18), p[1] + 0.005 * Math.sin(seed * 18), (seed + 0.43) % 1]);
+        }
+      }
+      drawLakeWaves._anchors = anchors;
+    }
+
+    const anchors = drawLakeWaves._anchors;
+    // Gentle rolling drift perpendicular to the isometric wave crest (WNW -> ESE / SW breeze)
+    const driftVx = -32.0 * wScale;
+    const driftVy = 15.0 * wScale;
+    const tilt = -0.32; // isometric NE-SW wave ridge angle
+
+    for (let i = 0; i < anchors.length; i++) {
+      const a = anchors[i];
+      const seed = a[2];
+      const cycleSec = 4.6 + (i % 7) * 0.42;
+      const age = (((tSec / cycleSec) + seed * 5.3) % 1 + 1) % 1;
+      const amp = Math.sin(age * Math.PI);
+      if (amp < 0.16) continue;
+
+      const wx = a[0] * worldW + driftVx * (age - 0.5);
+      const wy = a[1] * worldH + driftVy * (age - 0.5);
+      const sx = offsetX + wx * scale;
+      const sy = offsetY + wy * scale;
+      if (sx < -45 || sx > canvas.width + 45 || sy < -25 || sy > canvas.height + 25) continue;
+
+      const halfLen = (11.5 + (i % 5) * 2.8) * (0.45 + 0.55 * amp) * s;
+      const segW = Math.max(2, Math.round(halfLen * 0.58));
+      const hh = Math.max(1, Math.round(hStep));
+
+      ctx.save();
+      ctx.globalAlpha = Math.min(1.0, amp * 1.15);
+
+      // 1. Curved dark-teal trough shadow beneath the wave
+      ctx.fillStyle = troughCol;
+      ctx.fillRect(Math.round(sx - halfLen * 0.78), Math.round(sy + hh * 1.1), Math.max(3, Math.round(halfLen * 1.56)), hh);
+
+      // 2. Tapered isometric wave wings (5-step sculpted pixel-art crest arch!)
+      ctx.fillStyle = bodyCol;
+      ctx.fillRect(Math.round(sx - halfLen), Math.round(sy - halfLen * tilt + hh * 0.5), segW, hh);
+      ctx.fillRect(Math.round(sx + halfLen - segW), Math.round(sy + halfLen * tilt + hh * 0.5), segW, hh);
+
+      // 3. Bright turquoise-white foam crest along center ridge
+      ctx.fillStyle = crestCol;
+      ctx.fillRect(Math.round(sx - halfLen * 0.62), Math.round(sy - hh * 0.15), Math.max(3, Math.round(halfLen * 1.24)), hh);
+
+      // 4. Dancing sun/moonlight specular glint at peak swell
+      if (amp > 0.68) {
+        const spW = Math.max(2, Math.round(halfLen * 0.45));
+        ctx.fillStyle = sparkCol;
+        ctx.fillRect(Math.round(sx - spW * 0.5), Math.round(sy - hh * 0.55), spW, Math.max(1, Math.round(hh * 0.85)));
+      }
+      ctx.restore();
+    }
+  }
+
+  function draw3DCyclist(pos, colorIdx, wScale, mode, tSec) {
+    // Crisp 90s pixel-art cyclist with two wheels, frame, bright jersey, helmet & animated pedaling!
+    const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
+    if (b.cx < -28 || b.cx > canvas.width + 28 || b.cy < -28 || b.cy > canvas.height + 28) return;
+
+    const isNight = mode === 'night';
+    const jerseys = ['#e53e3e', '#2b6cb0', '#ecc94b', '#319795', '#ed8936', '#f7fafc'];
+    const jerseyHex = jerseys[colorIdx % jerseys.length];
+    const pedal = Math.sin(tSec * 11.5 + colorIdx * 1.7);
+    const lw = Math.max(1.0, Math.min(1.8, b.s * 0.65));
+
+    // Grounded shadow
+    const sh = b.proj(0, 0, 0);
+    vCtx.fillStyle = isNight ? 'rgba(6,10,20,0.58)' : 'rgba(18,24,32,0.40)';
+    vCtx.fillRect(sh[0] - 3.2 * b.s, sh[1] + 0.5 * b.s, 6.4 * b.s, 2.2 * b.s);
+
+    // Front & rear bicycle wheels
+    const wRear = b.proj(-3.1, 0, 1.5);
+    const wFront = b.proj(3.2, 0, 1.5);
+    const wRad = Math.max(1.3, 1.6 * b.s);
+    vCtx.strokeStyle = isNight ? '#586880' : '#1a202c';
+    vCtx.lineWidth = lw;
+    vCtx.beginPath();
+    vCtx.arc(wRear[0], wRear[1], wRad, 0, Math.PI * 2);
+    vCtx.stroke();
+    vCtx.beginPath();
+    vCtx.arc(wFront[0], wFront[1], wRad, 0, Math.PI * 2);
+    vCtx.stroke();
+
+    // Bicycle frame + handlebars
+    const seat = b.proj(-1.4, 0, 3.5);
+    const bar = b.proj(2.4, 0, 3.9);
+    vCtx.strokeStyle = shadeHex('#d8e2ee', 1.0, mode);
+    vCtx.beginPath();
+    vCtx.moveTo(wRear[0], wRear[1]);
+    vCtx.lineTo(seat[0], seat[1]);
+    vCtx.lineTo(bar[0], bar[1]);
+    vCtx.lineTo(wFront[0], wFront[1]);
+    vCtx.stroke();
+
+    // Animated pedaling leg
+    const foot = b.proj(0.2 + pedal * 0.85, 0.35, 1.6 - pedal * 0.6);
+    vCtx.strokeStyle = isNight ? '#2a3548' : '#2d3748';
+    vCtx.lineWidth = Math.max(1.1, 1.3 * b.s);
+    vCtx.beginPath();
+    vCtx.moveTo(seat[0], seat[1]);
+    vCtx.lineTo(foot[0], foot[1]);
+    vCtx.stroke();
+
+    // Leaning rider torso (bright cycling jersey!)
+    const shoulder = b.proj(1.3, 0, 6.4);
+    vCtx.strokeStyle = shadeHex(jerseyHex, 1.05, mode);
+    vCtx.lineWidth = Math.max(1.8, 2.5 * b.s);
+    vCtx.beginPath();
+    vCtx.moveTo(seat[0], seat[1]);
+    vCtx.lineTo(shoulder[0], shoulder[1]);
+    vCtx.stroke();
+
+    // Helmeted head
+    const head = b.proj(1.8, 0, 7.8);
+    const hRad = Math.max(1.2, 1.45 * b.s);
+    vCtx.fillStyle = shadeHex('#f7fafc', 1.05, mode);
+    vCtx.beginPath();
+    vCtx.arc(head[0], head[1], hRad, 0, Math.PI * 2);
+    vCtx.fill();
+
+    // Tiny bike headlight at night
+    if (isNight) {
+      const hl = b.proj(3.5, 0, 3.5);
+      vCtx.fillStyle = '#fff9c4';
+      vCtx.fillRect(hl[0] - 1.0, hl[1] - 1.0, 2.0, 2.0);
+    }
+  }
+
+  function draw3DPedestrian(pos, colorIdx, wScale, mode, tSec) {
+    // Crisp 90s miniature walking villager with alternating striding legs, jacket & head!
+    const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
+    if (b.cx < -16 || b.cx > canvas.width + 16 || b.cy < -16 || b.cy > canvas.height + 16) return;
+
+    const isNight = mode === 'night';
+    const jackets = ['#c53030', '#2b6cb0', '#2f855a', '#d69e2e', '#805ad5', '#dd6b20', '#e2e8f0', '#38a169'];
+    const jacketHex = jackets[colorIdx % jackets.length];
+    const stride = Math.sin(tSec * 6.8 + colorIdx * 2.3);
+
+    // Tiny grounded shadow
+    const sh = b.proj(0, 0, 0);
+    vCtx.fillStyle = isNight ? 'rgba(6,10,20,0.52)' : 'rgba(18,24,32,0.36)';
+    vCtx.fillRect(sh[0] - 1.5 * b.s, sh[1] + 0.2 * b.s, 3.2 * b.s, 1.5 * b.s);
+
+    // Alternating striding legs
+    const hip = b.proj(0, 0, 2.9);
+    const f1 = b.proj(stride * 1.25, -0.48, 0.2);
+    const f2 = b.proj(-stride * 1.25, 0.48, 0.2);
+    vCtx.strokeStyle = isNight ? '#1f293a' : '#2a3444';
+    vCtx.lineWidth = Math.max(1.0, 1.2 * b.s);
+    vCtx.beginPath();
+    vCtx.moveTo(hip[0], hip[1]);
+    vCtx.lineTo(f1[0], f1[1]);
+    vCtx.moveTo(hip[0], hip[1]);
+    vCtx.lineTo(f2[0], f2[1]);
+    vCtx.stroke();
+
+    // Torso / jacket
+    const neck = b.proj(0, 0, 5.6);
+    vCtx.strokeStyle = shadeHex(jacketHex, 1.05, mode);
+    vCtx.lineWidth = Math.max(1.8, 2.3 * b.s);
+    vCtx.beginPath();
+    vCtx.moveTo(hip[0], hip[1]);
+    vCtx.lineTo(neck[0], neck[1]);
+    vCtx.stroke();
+
+    // Head
+    const head = b.proj(0, 0, 6.9);
+    const hRad = Math.max(1.1, 1.25 * b.s);
+    vCtx.fillStyle = shadeHex('#f0c8a0', 1.0, mode);
+    vCtx.beginPath();
+    vCtx.arc(head[0], head[1], hRad, 0, Math.PI * 2);
+    vCtx.fill();
+  }
+
   function drawAnimations(worldW, worldH, tSec) {
     const wScale = worldW / (animData.canvas_width || 12331);
     const isNight = currentMode === 'night';
     const isSunset = currentMode === 'sunset';
 
-    // 1. Subtle Lake Zurich Pixel Water Glints
+    // 1. Living, Rolling 90s Pixel-Art Lake Zurich Waves & Sun-Crests
     if (animData.ambient && animData.ambient.lake_glints) {
-      const glintCol = isNight ? 'rgba(156,188,236,0.55)' : (isSunset ? 'rgba(255,204,132,0.68)' : 'rgba(226,244,252,0.65)');
-      for (let i = 0; i < animData.ambient.lake_glints.length; i++) {
-        const g = animData.ambient.lake_glints[i];
-        const wave = Math.sin(tSec * 2.1 + g[2] * 31.4);
-        if (wave > 0.72) {
-          const wx = Math.round(g[0] * worldW);
-          const wy = Math.round(g[1] * worldH);
-          const wPx = wave > 0.90 ? 4 : 2;
-          drawPixelRectWorld(wx, wy, wPx, 1.4, glintCol, wScale);
-        }
-      }
+      drawLakeWaves(animData.ambient.lake_glints, animData.ships, worldW, worldH, wScale, tSec, currentMode);
     }
 
     // 2. Lake Zurich ZSG Steamer & Sailboats (with crisp pixel V-wakes!)
@@ -2111,32 +2320,99 @@
       blitWorldSprite(sp, pos.wx, pos.wy, wScale);
     }
 
-    // 3. Road Cars & ZVV Lakefront/Viaduct Buses (continuous 3D shaded & sorted back-to-front!)
+    // 3. Road Cars, ZVV Buses, Cyclists & Sidewalk Pedestrians (zero-overlap lane flow & back-to-front sorted!)
     const roadDrawList = [];
     for (let rIdx = 0; rIdx < (animData.roads || []).length; rIdx++) {
       const rd = animData.roads[rIdx];
-      const cyc = rd.length_m / Math.max(1.0, rd.speed_mps);
       const busCount = rd.bus_count != null ? rd.bus_count : (rd.has_bus ? 1 : 0);
       const carCount = rd.car_count || 3;
       const totalVehicles = carCount + busCount;
+      // Shared lane flow speed guarantees faster cars NEVER pass through slower cars or buses!
+      // Gentle bounded spacing oscillation keeps traffic organic while preserving safe headway.
+      const laneSpeed = Math.max(1.0, rd.speed_mps * (busCount > 0 ? 0.88 : 0.96));
+      const cyc = rd.length_m / laneSpeed;
+      const maxJitter = Math.min(0.011, 0.24 / Math.max(1, totalVehicles));
       for (let vIdx = 0; vIdx < totalVehicles; vIdx++) {
         const isBus = vIdx < busCount;
-        const vSpeedMul = isBus ? 0.84 : (0.93 + ((vIdx * 7 + rIdx * 3) % 5) * 0.04);
-        const frac = ((((tSec * vSpeedMul) / cyc) + (rd.phase || 0) + vIdx / totalVehicles) % 1 + 1) % 1;
+        const jitter = Math.sin(tSec * 0.28 + vIdx * 2.17 + rIdx * 1.3) * maxJitter;
+        const frac = ((((tSec / cyc) + (rd.phase || 0) + vIdx / totalVehicles + jitter) % 1) + 1) % 1;
         if (frac < 0.012 || frac > 0.988) continue;
         const pos = samplePathAt(rd.pts, frac, worldW, worldH, 3);
         if (!pos || (!depthPixels && pos.occ)) continue;
-        roadDrawList.push({ isBus, pos, colorIdx: vIdx + rIdx * 3 });
+        roadDrawList.push({ type: isBus ? 'bus' : 'car', pos, colorIdx: vIdx + rIdx * 3 });
+      }
+
+      // Cyclists & Sidewalk Pedestrians on Seestrasse, Dorfstrasse & Village Streets (never on A3 motorway!)
+      if (rd.kind !== 'motorway') {
+        const isMain = rd.kind === 'seestrasse';
+        const nCyclists = isMain ? 10 : 4;
+        const nPeds = isMain ? 18 : 8;
+        const bikeCyc = rd.length_m / 4.8;
+        const pedCyc = rd.length_m / 1.35;
+
+        for (let bIdx = 0; bIdx < nCyclists; bIdx++) {
+          const frac = ((((tSec / bikeCyc) + (rd.phase || 0) * 0.7 + (bIdx + 0.35) / nCyclists) % 1) + 1) % 1;
+          if (frac < 0.015 || frac > 0.985) continue;
+          const base = samplePathAt(rd.pts, frac, worldW, worldH, 3);
+          if (!base || (!depthPixels && base.occ)) continue;
+          // Shift slightly toward right curb / bike lane
+          const isoY = 0.55;
+          const gx = base.tx;
+          const gy = base.ty / isoY;
+          const gm = Math.hypot(gx, gy) || 1;
+          const rx = -gy / gm;
+          const ry = (gx / gm) * isoY;
+          const latPx = (isMain ? 7.5 : 4.2) * wScale;
+          roadDrawList.push({
+            type: 'cyclist',
+            pos: { ...base, wx: base.wx + rx * latPx, wy: base.wy + ry * latPx },
+            colorIdx: bIdx + rIdx * 5,
+          });
+        }
+
+        for (let pIdx = 0; pIdx < nPeds; pIdx++) {
+          const dir = (pIdx % 2 === 0) ? 1 : -1;
+          const rawF = ((dir * (tSec / pedCyc) + (rd.phase || 0) * 1.3 + (pIdx + 0.17) / nPeds) % 1 + 1) % 1;
+          if (rawF < 0.015 || rawF > 0.985) continue;
+          const base = samplePathAt(rd.pts, rawF, worldW, worldH, 3);
+          if (!base || (!depthPixels && base.occ)) continue;
+          const isoY = 0.55;
+          const gx = base.tx;
+          const gy = base.ty / isoY;
+          const gm = Math.hypot(gx, gy) || 1;
+          const rx = -gy / gm;
+          const ry = (gx / gm) * isoY;
+          const latPx = (isMain ? 13.5 : 7.8) * wScale;
+          roadDrawList.push({
+            type: 'ped',
+            pos: {
+              ...base,
+              wx: base.wx + rx * latPx,
+              wy: base.wy + ry * latPx,
+              tx: base.tx * dir,
+              ty: base.ty * dir,
+            },
+            colorIdx: pIdx + rIdx * 7,
+          });
+        }
       }
     }
     roadDrawList.sort((a, b) => a.pos.wy - b.pos.wy);
     for (const v of roadDrawList) {
-      const padW = (v.isBus ? (isNight ? 58 : 38) : (isNight ? 40 : 26)) * wScale;
+      const padW = (
+        v.type === 'bus' ? (isNight ? 58 : 38)
+          : v.type === 'car' ? (isNight ? 40 : 26)
+            : v.type === 'cyclist' ? 16 : 12
+      ) * wScale;
       drawDepthMasked(v.pos.wx, v.pos.wy, padW, v.pos.d16, worldW, worldH, () => {
-        if (v.isBus) {
+        if (v.type === 'bus') {
           draw3DBus(v.pos, wScale, currentMode);
-        } else {
+        } else if (v.type === 'car') {
           draw3DCar(v.pos, v.colorIdx, wScale, currentMode);
+        } else if (v.type === 'cyclist') {
+          draw3DCyclist(v.pos, v.colorIdx, wScale, currentMode, tSec);
+        } else {
+          draw3DPedestrian(v.pos, v.colorIdx, wScale, currentMode, tSec);
         }
       });
     }
