@@ -729,21 +729,25 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                     z1 = float(min(dsm_c[-1], dem_c[-1] + 8.0))
 
                 z_lin = np.linspace(z0, z1, n_samp)
-                # Use real swissSURFACE3D bridge deck height, clamped against overhanging tree crowns!
-                z_raw = np.clip(dsm_c, np.minimum(dem_c, z_lin), np.maximum(z_lin + 4.8, dem_c + 9.2))
-                z_smooth = ndimage.gaussian_filter1d(ndimage.median_filter(z_raw, size=9), sigma=16.0, mode="nearest")
+                if b_code == BR_RAIL_BRIDGE:
+                    # Railway bridges are strictly flat/linear between abutments; the road dips underneath!
+                    z_prof = z_lin
+                else:
+                    # Use real swissSURFACE3D bridge deck height, clamped against overhanging tree crowns!
+                    z_raw = np.clip(dsm_c, np.minimum(dem_c, z_lin), np.maximum(z_lin + 4.8, dem_c + 9.2))
+                    z_smooth = ndimage.gaussian_filter1d(ndimage.median_filter(z_raw, size=9), sigma=16.0, mode="nearest")
 
-                # Guarantee minimum vertical clearance (>= 5.1m) directly over railways, motorways & underpass roads
-                under_sem = sem[srows, scols]
-                over_corridor = np.isin(under_sem, [G_RAILWAY, G_MOTORWAY, G_STREET_MAIN, G_STREET_MINOR])
-                if over_corridor.any():
-                    min_clear = dem_c + np.where(over_corridor, 5.1, 0.0)
-                    min_clear = ndimage.gaussian_filter1d(np.maximum(z_smooth, min_clear), sigma=14.0, mode="nearest")
-                    z_smooth = np.maximum(z_smooth, min_clear)
+                    # Guarantee minimum vertical clearance (>= 5.1m) directly over railways, motorways & underpass roads
+                    under_sem = sem[srows, scols]
+                    over_corridor = np.isin(under_sem, [G_RAILWAY, G_MOTORWAY, G_STREET_MAIN, G_STREET_MINOR])
+                    if over_corridor.any():
+                        min_clear = dem_c + np.where(over_corridor, 5.1, 0.0)
+                        min_clear = ndimage.gaussian_filter1d(np.maximum(z_smooth, min_clear), sigma=14.0, mode="nearest")
+                        z_smooth = np.maximum(z_smooth, min_clear)
 
-                # Smoothly pin exact abutment ends over outer 3.5m so road/rail transitions seamlessly
-                taper = np.minimum(1.0, np.minimum(s_arr, total_l - s_arr) / 3.5)
-                z_prof = (1.0 - taper) * z_lin + taper * np.maximum(z_smooth, dem_c)
+                    # Smoothly pin exact abutment ends over outer 3.5m so road/rail transitions seamlessly
+                    taper = np.minimum(1.0, np.minimum(s_arr, total_l - s_arr) / 3.5)
+                    z_prof = (1.0 - taper) * z_lin + taper * np.maximum(z_smooth, dem_c)
 
             # Rasterize bridge strip inside tight bounding box
             min_e, min_n, max_e, max_n = ls.bounds
