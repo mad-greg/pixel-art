@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '4.9';
+  const ASSET_VER = '5.0';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -179,6 +179,7 @@
   }
 
   function panBy(dx, dy) {
+    if (followTarget) setFollowMode(null);
     offsetX += dx;
     offsetY += dy;
     clampOffsets();
@@ -456,7 +457,8 @@
   viewport.addEventListener('contextmenu', (e) => e.preventDefault());
 
   viewport.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.viewport-ui')) return;
+    if (e.target.closest('.viewport-ui') || e.target.closest('.exit-cinema-btn')) return;
+    if (followTarget) setFollowMode(null);
     e.preventDefault();
     viewport.focus({ preventScroll: true });
     if (activePointers.size === 0) {
@@ -612,12 +614,13 @@
     fitToScreen();
   });
 
-  // Keyboard Pan (Arrows / WASD) & Zoom (+ / - / 0)
+  // Keyboard Pan (Arrows / WASD), Zoom (+ / - / 0) & Masterpiece Shortcuts (1/2/3, F, H, M, Space, Esc)
   window.addEventListener('keydown', (e) => {
     if (!document.getElementById('modal-overlay').classList.contains('hidden')) {
       if (e.key === 'Escape') document.getElementById('modal-overlay').classList.add('hidden');
       return;
     }
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     const step = e.shiftKey ? 320 : 140;
     if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { e.preventDefault(); panBy(step, 0); }
     else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { e.preventDefault(); panBy(-step, 0); }
@@ -625,7 +628,18 @@
     else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { e.preventDefault(); panBy(0, -step); }
     else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomAt(1.35, canvas.width / 2, canvas.height / 2); }
     else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomAt(1 / 1.35, canvas.width / 2, canvas.height / 2); }
-    else if (e.key === '0') { e.preventDefault(); fitToScreen(); }
+    else if (e.key === '0') { e.preventDefault(); if (followTarget) setFollowMode(null); fitToScreen(); }
+    else if (e.key === '1') { const b = document.getElementById('btn-mode-day'); if (b) b.click(); }
+    else if (e.key === '2') { const b = document.getElementById('btn-mode-sunset'); if (b) b.click(); }
+    else if (e.key === '3') { const b = document.getElementById('btn-mode-night'); if (b) b.click(); }
+    else if (e.key === 'f' || e.key === 'F') { const b = document.getElementById('btn-follow'); if (b) b.click(); }
+    else if (e.key === 'h' || e.key === 'H') { setCinemaMode(!cinemaMode); }
+    else if (e.key === 'm' || e.key === 'M') { const b = document.getElementById('btn-toggle-sound'); if (b) b.click(); }
+    else if (e.key === ' ') { e.preventDefault(); const b = document.getElementById('btn-toggle-anim'); if (b) b.click(); }
+    else if (e.key === 'Escape') {
+      if (cinemaMode) setCinemaMode(false);
+      else if (followTarget) setFollowMode(null);
+    }
   });
 
   // ---------------------------------------------------------------------------
@@ -2619,10 +2633,185 @@
       }
     }
 
+    // 5b. v5.0 Masterpiece Living Atmosphere (Lake Glints, Harbor Beacons, SBB Signal, Cloud Shadows, Fireflies & Bell Ripples)
+    drawAtmosphereAndLife(worldW, worldH, wScale, tSec, isNight, isSunset);
+
     // 6. Update Spatial Distance-Attenuated Kilchberg Soundscape
     if (soundEnabled) {
       updateSoundscape(worldW, worldH, tSec);
     }
+  }
+
+  // Deterministic pseudo-random helper for sparkling lake glints & fireflies
+  function hash01(n) {
+    const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+    return s - Math.floor(s);
+  }
+
+  // Precomputed park/meadow anchors for nighttime fireflies (real Kilchberg parks & lake meadows)
+  const FIREFLY_GROVES = [
+    [0.24, 0.42], [0.27, 0.34], [0.33, 0.48], [0.39, 0.65],
+    [0.44, 0.63], [0.51, 0.56], [0.56, 0.53], [0.64, 0.49],
+    [0.71, 0.43], [0.77, 0.37], [0.47, 0.41], [0.35, 0.32],
+  ];
+
+  function drawAtmosphereAndLife(worldW, worldH, wScale, tSec, isNight, isSunset) {
+    const s = scale * wScale;
+    ctx.save();
+
+    // A. Open-Lake Sun / Moon Water Glints (strictly clipped to eroded pure waterMask!)
+    if (waterMask && waterW > 0 && waterH > 0) {
+      const glintCol = isNight ? '#cddcf4' : (isSunset ? '#ffe2a8' : '#f4fbff');
+      const px = Math.max(1.2, 1.5 * s);
+      for (let i = 0; i < 84; i++) {
+        // Concentrate across the Lake Zurich open water wedge (u: 0.42..0.98, v: 0.34..0.96)
+        const gu = 0.42 + hash01(i * 3.1 + 1) * 0.56;
+        const gv = 0.34 + hash01(i * 5.7 + 2) * 0.62;
+        const mx = Math.floor(gu * waterW);
+        const my = Math.floor(gv * waterH);
+        if (mx < 0 || mx >= waterW || my < 0 || my >= waterH || !waterMask[my * waterW + mx]) continue;
+        const sx = gu * worldW * scale + offsetX;
+        const sy = gv * worldH * scale + offsetY;
+        if (sx < -8 || sx > canvas.width + 8 || sy < -8 || sy > canvas.height + 8) continue;
+        const pulse = Math.sin(tSec * (1.8 + hash01(i * 9.3) * 2.2) + i * 2.41);
+        if (pulse < 0.52) continue;
+        const a = ((pulse - 0.52) / 0.48) * (isNight ? 0.42 : (isSunset ? 0.72 : 0.62));
+        ctx.globalAlpha = a;
+        ctx.fillStyle = glintCol;
+        const rx = Math.round(sx);
+        const ry = Math.round(sy);
+        // Crisp 1-pixel diamond sparkle (horizontal 3px + vertical 1px)
+        ctx.fillRect(rx - Math.round(px), ry, Math.max(2, Math.round(px * 2.4)), Math.max(1, Math.round(px * 0.75)));
+        if (pulse > 0.82) {
+          ctx.fillRect(rx, ry - Math.round(px * 0.6), Math.max(1, Math.round(px * 0.8)), Math.max(2, Math.round(px * 2.0)));
+        }
+      }
+    }
+
+    // B. Harbor Navigation Beacons at Bendlikon ZSG Steamer Pier & Schooren Seebad Pier (Alpenglow & Night)
+    if (isNight || isSunset) {
+      const piers = [
+        { u: 0.5855, v: 0.5815, col: '#ffb84d', glow: 'rgba(255,184,77,0.28)', freq: 1.4 }, // Bendlikon ZSG Pier
+        { u: 0.4205, v: 0.7195, col: '#6ee7b7', glow: 'rgba(110,231,183,0.26)', freq: 1.9 }, // Schooren Seebad Pier
+      ];
+      for (const p of piers) {
+        const sx = p.u * worldW * scale + offsetX;
+        const sy = p.v * worldH * scale + offsetY;
+        if (sx < -32 || sx > canvas.width + 32 || sy < -32 || sy > canvas.height + 32) continue;
+        const blink = 0.45 + 0.55 * Math.pow(0.5 + 0.5 * Math.sin(tSec * p.freq), 2.5);
+        const r = Math.max(3.5, 5.5 * s);
+        ctx.globalAlpha = (isNight ? 0.85 : 0.45) * blink;
+        ctx.fillStyle = p.glow;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r * 1.9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = (isNight ? 0.98 : 0.65) * blink;
+        ctx.fillStyle = p.col;
+        const dot = Math.max(2, Math.round(2.2 * s));
+        ctx.fillRect(Math.round(sx - dot * 0.5), Math.round(sy - dot * 0.5), dot, dot);
+        // Subtle vertical pixel reflection on the water below the pier beacon!
+        if (isNight) {
+          for (let k = 1; k <= 4; k++) {
+            const waveX = Math.sin(tSec * 3.1 + k * 1.7) * 1.4 * s;
+            ctx.globalAlpha = (0.36 - k * 0.07) * blink;
+            ctx.fillRect(Math.round(sx + waveX - dot * 0.5), Math.round(sy + k * 2.8 * s), dot, Math.max(1, Math.round(1.2 * s)));
+          }
+        }
+      }
+    }
+
+    // C. Bahnhof Kilchberg SBB Railway Signal Light (emerald green -> Swiss red when train is near station!)
+    {
+      const sigU = 0.5978;
+      const sigV = 0.4755;
+      const sx = sigU * worldW * scale + offsetX;
+      const sy = sigV * worldH * scale + offsetY;
+      if (sx > -20 && sx < canvas.width + 20 && sy > -20 && sy < canvas.height + 20) {
+        let trainNear = false;
+        for (const tr of (animData.trains || [])) {
+          const hf = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
+          if (Math.abs(hf - tr.stop_frac) < 0.065) { trainNear = true; break; }
+        }
+        const sigCol = trainNear ? '#ff3b3b' : '#22e584';
+        const sigGlow = trainNear ? 'rgba(255,59,59,0.28)' : 'rgba(34,229,132,0.26)';
+        const dot = Math.max(1.8, 1.8 * s);
+        if (isNight || isSunset) {
+          ctx.globalAlpha = isNight ? 0.85 : 0.45;
+          ctx.fillStyle = sigGlow;
+          ctx.beginPath();
+          ctx.arc(sx, sy, dot * 2.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = isNight ? 0.98 : 0.82;
+        ctx.fillStyle = sigCol;
+        ctx.fillRect(Math.round(sx - dot * 0.5), Math.round(sy - dot * 0.5), Math.max(2, Math.round(dot)), Math.max(2, Math.round(dot)));
+      }
+    }
+
+    // D. Subtle Swiss Church Bell Acoustic Ripples (when Reformierte Kirche / St. Elisabeth bells peal in Day/Sunset!)
+    if (!isNight) {
+      const bellCycle = tSec % 52;
+      if (bellCycle < 20) {
+        const bellEnv = bellCycle < 2.2 ? (bellCycle / 2.2) : (bellCycle > 17.0 ? (20 - bellCycle) / 3.0 : 1.0);
+        const spires = [[0.29272, 0.3162], [0.40667, 0.3425]];
+        ctx.strokeStyle = isSunset ? '#ffd89b' : '#fff3c4';
+        ctx.lineWidth = Math.max(1.0, 1.2 * s);
+        for (let si = 0; si < spires.length; si++) {
+          const sx = spires[si][0] * worldW * scale + offsetX;
+          const sy = (spires[si][1] - 0.004) * worldH * scale + offsetY;
+          if (sx < -80 || sx > canvas.width + 80 || sy < -80 || sy > canvas.height + 80) continue;
+          for (let rIdx = 0; rIdx < 2; rIdx++) {
+            const phase = ((tSec * 0.48 + rIdx * 0.5 + si * 0.25) % 1);
+            const rad = (5 + phase * 26) * s;
+            ctx.globalAlpha = (1 - phase) * 0.34 * bellEnv;
+            ctx.beginPath();
+            ctx.ellipse(sx, sy, rad, rad * 0.62, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // E. Nighttime Park Fireflies (gentle warm-gold pixel glints drifting through Kilchberg's parks!)
+    if (isNight) {
+      const dot = Math.max(1.5, 1.4 * s);
+      for (let i = 0; i < 30; i++) {
+        const g = FIREFLY_GROVES[i % FIREFLY_GROVES.length];
+        const baseU = g[0] + (hash01(i * 4.3 + 7) - 0.5) * 0.045;
+        const baseV = g[1] + (hash01(i * 6.1 + 3) - 0.5) * 0.045;
+        const fu = baseU + Math.sin(tSec * 0.35 + i * 2.1) * 0.0045;
+        const fv = baseV + Math.cos(tSec * 0.42 + i * 1.7) * 0.0038;
+        const sx = fu * worldW * scale + offsetX;
+        const sy = fv * worldH * scale + offsetY;
+        if (sx < -10 || sx > canvas.width + 10 || sy < -10 || sy > canvas.height + 10) continue;
+        const glow = Math.pow(0.5 + 0.5 * Math.sin(tSec * (1.5 + hash01(i * 2.9) * 1.6) + i * 3.7), 3.0);
+        if (glow < 0.15) continue;
+        ctx.globalAlpha = glow * 0.82;
+        ctx.fillStyle = '#ffe57f';
+        ctx.fillRect(Math.round(sx), Math.round(sy), Math.max(1.5, Math.round(dot)), Math.max(1.5, Math.round(dot)));
+      }
+    }
+
+    // F. Soft Drifting Swiss Cloud Shadows (Midday & Alpenglow — gentle SW->NE atmospheric motion!)
+    if (!isNight) {
+      const cloudCol = isSunset ? 'rgba(34, 24, 52, 0.065)' : 'rgba(22, 38, 66, 0.055)';
+      ctx.globalAlpha = 1.0;
+      ctx.fillStyle = cloudCol;
+      for (let c = 0; c < 6; c++) {
+        const cu = ((tSec * 0.0042 + c * 0.19 + hash01(c * 11.3) * 0.08) % 1.35) - 0.18;
+        const cv = 0.16 + (c % 3) * 0.24 + Math.sin(tSec * 0.05 + c) * 0.03 - cu * 0.14;
+        const sx = cu * worldW * scale + offsetX;
+        const sy = cv * worldH * scale + offsetY;
+        const rx = (340 + (c % 3) * 140) * scale * wScale;
+        const ry = rx * 0.42;
+        if (sx + rx < 0 || sx - rx > canvas.width || sy + ry < 0 || sy - ry > canvas.height) continue;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, rx, ry, -0.32, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
   }
 
   // ---- SPATIAL KILCHBERG SOUNDSCAPE ENGINE (Real Field Recordings + Web Audio Spatial Mixer) ----
@@ -2920,15 +3109,109 @@
     applyChannelSpatial('bells', bestBell.level, bestBell.brightness, bestBell.pan);
   }
 
+  let followTarget = null; // null | 'train' | 'boat'
+  let cinemaMode = false;
+
+  function getAnimTimeSec() {
+    return fixedAnimTime !== null ? fixedAnimTime : performance.now() * 0.001;
+  }
+
+  function setFollowMode(mode) {
+    followTarget = mode;
+    const btn = document.getElementById('btn-follow');
+    if (btn) {
+      btn.textContent = mode === 'train' ? 'Follow: Train' : (mode === 'boat' ? 'Follow: Boat' : 'Follow: Off');
+      btn.classList.toggle('active', !!mode);
+    }
+    if (mode) {
+      if (!showAnimations) {
+        showAnimations = true;
+        const ba = document.getElementById('btn-toggle-anim');
+        if (ba) { ba.textContent = 'Live: On'; ba.classList.add('active'); }
+        requestAnimationFrame(animLoop);
+      }
+      if (scale < 1.5) {
+        scale = 2.0;
+        updateZoomReadout();
+      }
+      updateFollowCamera(getAnimTimeSec(), true);
+      scheduleDraw();
+    }
+  }
+
+  function setCinemaMode(enabled) {
+    cinemaMode = !!enabled;
+    document.body.classList.toggle('cinema-mode', cinemaMode);
+    const btn = document.getElementById('btn-cinema');
+    if (btn) btn.classList.toggle('active', cinemaMode);
+    setTimeout(() => { resizeViewport(); scheduleDraw(); }, 30);
+  }
+
+  function updateFollowCamera(tSec, snap) {
+    if (!followTarget || !animData) return;
+    const { width: worldW, height: worldH } = getWorldSize();
+    let targetPos = null;
+    if (followTarget === 'train' && (animData.trains || []).length) {
+      // Pick whichever SBB train is currently inside the visible Kilchberg track (0.05..0.95)
+      for (const tr of animData.trains) {
+        const hf = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
+        const midF = hf - (38.0 / tr.length_m);
+        if (midF > 0.04 && midF < 0.96) {
+          targetPos = samplePathAt(tr.pts, midF, worldW, worldH, 2);
+          if (targetPos) break;
+        }
+      }
+    } else if (followTarget === 'boat' && (animData.boats || []).length) {
+      // Follow the flagship ZSG Lake Zurich steamer!
+      const b = animData.boats.find((x) => x.kind === 'steamer') || animData.boats[0];
+      if (b) {
+        const cyc = (b.length_m / Math.max(0.5, b.speed_mps)) + (b.dwell_sec || 0);
+        const f = b.stop_frac != null
+          ? evalWithStationStop(tSec, b.length_m, b.speed_mps, b.stop_frac, b.dwell_sec || 0, b.phase || 0)
+          : (((tSec / cyc) + (b.phase || 0)) % 1 + 1) % 1;
+        targetPos = samplePathAt(b.pts, Math.max(0.02, Math.min(0.98, f)), worldW, worldH, 2);
+      }
+    }
+    if (!targetPos) return;
+    const desiredX = canvas.width * 0.5 - targetPos.wx * scale;
+    const desiredY = canvas.height * 0.5 - targetPos.wy * scale;
+    if (snap) {
+      offsetX = desiredX;
+      offsetY = desiredY;
+    } else {
+      offsetX += (desiredX - offsetX) * 0.14;
+      offsetY += (desiredY - offsetY) * 0.14;
+    }
+    clampOffsets();
+  }
+
   let lastAnimPaint = 0;
   function animLoop(nowMs) {
     if (showAnimations && animData && !document.hidden) {
       if (nowMs - lastAnimPaint >= 33 && !drawScheduled) {
         lastAnimPaint = nowMs;
+        if (followTarget) updateFollowCamera(getAnimTimeSec(), false);
         draw();
       }
       requestAnimationFrame(animLoop);
     }
+  }
+
+  const btnFollow = document.getElementById('btn-follow');
+  if (btnFollow) {
+    btnFollow.addEventListener('click', () => {
+      const next = !followTarget ? 'train' : (followTarget === 'train' ? 'boat' : null);
+      setFollowMode(next);
+    });
+  }
+
+  const btnCinema = document.getElementById('btn-cinema');
+  if (btnCinema) {
+    btnCinema.addEventListener('click', () => setCinemaMode(!cinemaMode));
+  }
+  const btnExitCinema = document.getElementById('btn-exit-cinema');
+  if (btnExitCinema) {
+    btnExitCinema.addEventListener('click', () => setCinemaMode(false));
   }
 
   const btnToggleAnim = document.getElementById('btn-toggle-anim');
@@ -3007,6 +3290,9 @@
     showPins = false;
     const btnPins = document.getElementById('btn-toggle-pins');
     if (btnPins) btnPins.classList.remove('active');
+  }
+  if (urlParams.get('cinema') === '1') {
+    setCinemaMode(true);
   }
   const initMode = ['day', 'sunset', 'night'].includes(urlParams.get('mode')) ? urlParams.get('mode') : 'day';
   if (initMode !== 'day') {
@@ -3122,6 +3408,11 @@
       draw();
     } else {
       fitToScreen();
+    }
+    const qFollow = urlParams.get('follow');
+    if (qFollow === 'train' || qFollow === 'boat') {
+      setFollowMode(qFollow);
+      draw();
     }
     if (showAnimations && animData) {
       requestAnimationFrame(animLoop);

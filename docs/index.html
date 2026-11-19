@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=4.0" />
+  <link rel="stylesheet" href="styles.css?v=5.0" />
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -37,11 +37,13 @@
         <button id="btn-zoom-fit" class="icon-btn text-btn" title="Fit full municipality (0)">Fit</button>
       </div>
 
-      <button id="btn-toggle-anim" class="toggle-btn active" title="Toggle moving SBB trains, cars, ZSG lake ships &amp; micro-animations">Live: On</button>
-      <button id="btn-toggle-sound" class="toggle-btn" title="Toggle spatial Lake Zurich &amp; Kilchberg soundscape (trains, buses, cars, birds, boat &amp; waves)">Sound: Off</button>
+      <button id="btn-toggle-anim" class="toggle-btn active" title="Toggle moving SBB trains, cars, ZSG lake ships &amp; micro-animations (Space)">Live: On</button>
+      <button id="btn-toggle-sound" class="toggle-btn" title="Toggle spatial Lake Zurich &amp; Kilchberg soundscape (M)">Sound: Off</button>
+      <button id="btn-follow" class="toggle-btn" title="Follow live SBB S-Bahn train or ZSG Lake Zurich steamer (F)">Follow: Off</button>
       <button id="btn-wheel-mode" class="toggle-btn" title="Switch mouse/trackpad scroll between Zoom and Two-Finger Pan">Scroll: Zoom</button>
       <button id="btn-toggle-pins" class="toggle-btn active" title="Toggle landmark pins">Pins</button>
       <button id="btn-toggle-loupe" class="toggle-btn" title="Toggle 6x pixel-grid magnifier">6× Loupe</button>
+      <button id="btn-cinema" class="toggle-btn" title="Full-screen Cinema Mode — hide UI chrome (H)">Cinema</button>
     </div>
   </header>
 
@@ -50,6 +52,7 @@
       <canvas id="diorama-canvas"></canvas>
       <div id="pins-layer" class="pins-layer"></div>
       <canvas id="loupe-canvas" class="loupe-canvas hidden" width="228" height="228"></canvas>
+      <button id="btn-exit-cinema" class="exit-cinema-btn" title="Exit Cinema Mode (H / Esc)">Exit Cinema</button>
 
       <div class="hud-coords viewport-ui" id="hud-coords">
         <span id="coord-lv95">LV95 E 2'683'780 · N 1'241'890</span>
@@ -120,6 +123,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=4.9"></script>
+  <script src="app.js?v=5.0"></script>
 </body>
 </html>

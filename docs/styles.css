@@ -533,3 +533,43 @@ html, body {
     top: 10px;
   }
 }
+
+/* Full-screen Cinema Mode (H key or Cinema button) */
+.exit-cinema-btn {
+  display: none;
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 40;
+  background: rgba(15, 22, 34, 0.82);
+  backdrop-filter: blur(8px);
+  color: #e6edf7;
+  border: 1px solid rgba(130, 160, 200, 0.35);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.exit-cinema-btn:hover {
+  background: rgba(24, 36, 54, 0.94);
+  border-color: rgba(226, 184, 92, 0.7);
+}
+body.cinema-mode .topbar,
+body.cinema-mode .sidebar,
+body.cinema-mode .viewport-ui,
+body.cinema-mode .pins-layer {
+  display: none !important;
+}
+body.cinema-mode .workspace {
+  height: 100vh !important;
+  grid-template-columns: 1fr !important;
+  grid-template-rows: 1fr !important;
+}
+body.cinema-mode .exit-cinema-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
