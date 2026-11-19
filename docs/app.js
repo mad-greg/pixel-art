@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '4.7';
+  const ASSET_VER = '4.8';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -2247,123 +2247,122 @@
   }
 
   function draw3DCyclist(pos, colorIdx, wScale, mode, tSec) {
-    // Crisp 90s pixel-art cyclist with two wheels, frame, bright jersey, helmet & animated pedaling!
+    // Crisp, pixel-grid-snapped 90s isometric pixel-art cyclist (matches exact 0.25 m/px diorama grid!)
     const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
     if (b.cx < -28 || b.cx > canvas.width + 28 || b.cy < -28 || b.cy > canvas.height + 28) return;
 
     const isNight = mode === 'night';
-    const jerseys = ['#e53e3e', '#2b6cb0', '#ecc94b', '#319795', '#ed8936', '#f7fafc'];
+    const jerseys = ['#d9382e', '#2563eb', '#eab308', '#0d9488', '#ea580c', '#16a34a'];
+    const helmets = ['#f4f7fa', '#ef4444', '#facc15', '#38bdf8', '#f4f7fa', '#fb923c'];
     const jerseyHex = jerseys[colorIdx % jerseys.length];
-    const pedal = Math.sin(tSec * 11.5 + colorIdx * 1.7);
-    const lw = Math.max(1.0, Math.min(1.8, b.s * 0.65));
+    const helmetHex = helmets[(colorIdx * 3 + 1) % helmets.length];
+    const pedal = Math.sin(tSec * 11.0 + colorIdx * 1.7);
+    const pSz = Math.max(1.0, b.s); // 1 diorama world pixel on screen
 
-    // Grounded shadow
-    const sh = b.proj(0, 0, 0);
-    vCtx.fillStyle = isNight ? 'rgba(6,10,20,0.58)' : 'rgba(18,24,32,0.40)';
-    vCtx.fillRect(sh[0] - 3.2 * b.s, sh[1] + 0.5 * b.s, 6.4 * b.s, 2.2 * b.s);
+    // Helper: snap crisp pixel block at local (l, w, z) to exact pixel grid
+    const pix = (l, w, z, pw, ph, col) => {
+      const [x, y] = b.proj(l, w, z);
+      vCtx.fillStyle = col;
+      vCtx.fillRect(
+        Math.round(x - pw * 0.5 * pSz),
+        Math.round(y - ph * 0.5 * pSz),
+        Math.max(1, Math.round(pw * pSz)),
+        Math.max(1, Math.round(ph * pSz)),
+      );
+    };
 
-    // Front & rear bicycle wheels
-    const wRear = b.proj(-3.1, 0, 1.5);
-    const wFront = b.proj(3.2, 0, 1.5);
-    const wRad = Math.max(1.3, 1.6 * b.s);
-    vCtx.strokeStyle = isNight ? '#586880' : '#1a202c';
-    vCtx.lineWidth = lw;
-    vCtx.beginPath();
-    vCtx.arc(wRear[0], wRear[1], wRad, 0, Math.PI * 2);
-    vCtx.stroke();
-    vCtx.beginPath();
-    vCtx.arc(wFront[0], wFront[1], wRad, 0, Math.PI * 2);
-    vCtx.stroke();
+    const tireCol = isNight ? '#3a4658' : '#181e26';
+    const hubCol = shadeHex('#b8c4d0', 1.0, mode);
+    const frameCol = shadeHex('#dce4ee', 1.04, mode);
+    const shortsCol = shadeHex('#202834', 0.95, mode);
+    const skinCol = shadeHex('#ecc29c', 1.02, mode);
+    const jLit = shadeHex(jerseyHex, 1.15, mode);
+    const jDark = shadeHex(jerseyHex, 0.76, mode);
+    const helmCol = shadeHex(helmetHex, 1.08, mode);
 
-    // Bicycle frame + handlebars
-    const seat = b.proj(-1.4, 0, 3.5);
-    const bar = b.proj(2.4, 0, 3.9);
-    vCtx.strokeStyle = shadeHex('#d8e2ee', 1.0, mode);
-    vCtx.beginPath();
-    vCtx.moveTo(wRear[0], wRear[1]);
-    vCtx.lineTo(seat[0], seat[1]);
-    vCtx.lineTo(bar[0], bar[1]);
-    vCtx.lineTo(wFront[0], wFront[1]);
-    vCtx.stroke();
+    // 1. Grounded pixel drop shadow
+    pix(0.0, 0.4, 0.0, 6.4, 1.6, isNight ? 'rgba(6,10,20,0.52)' : 'rgba(18,24,32,0.34)');
 
-    // Animated pedaling leg
-    const foot = b.proj(0.2 + pedal * 0.85, 0.35, 1.6 - pedal * 0.6);
-    vCtx.strokeStyle = isNight ? '#2a3548' : '#2d3748';
-    vCtx.lineWidth = Math.max(1.1, 1.3 * b.s);
-    vCtx.beginPath();
-    vCtx.moveTo(seat[0], seat[1]);
-    vCtx.lineTo(foot[0], foot[1]);
-    vCtx.stroke();
+    // 2. Crisp isometric pixel wheels (rear & front: dark tire ring + bright hub pixel)
+    for (const wl of [-2.5, 2.6]) {
+      pix(wl, 0, 1.25, 2.3, 2.5, tireCol);
+      pix(wl, 0, 1.25, 1.0, 1.0, hubCol);
+    }
 
-    // Leaning rider torso (bright cycling jersey!)
-    const shoulder = b.proj(1.3, 0, 6.4);
-    vCtx.strokeStyle = shadeHex(jerseyHex, 1.05, mode);
-    vCtx.lineWidth = Math.max(1.8, 2.5 * b.s);
-    vCtx.beginPath();
-    vCtx.moveTo(seat[0], seat[1]);
-    vCtx.lineTo(shoulder[0], shoulder[1]);
-    vCtx.stroke();
+    // 3. Bicycle diamond frame, fork, saddle & handlebars
+    pix(-1.1, 0, 2.1, 2.7, 0.85, frameCol); // rear stay / bottom bracket
+    pix(0.5, 0, 2.9, 2.9, 0.85, frameCol);  // top tube
+    pix(2.0, 0, 2.5, 0.9, 2.3, frameCol);   // front fork
+    pix(-1.2, 0, 3.4, 1.4, 0.75, tireCol);  // saddle
+    pix(2.1, 0, 3.8, 1.2, 0.8, tireCol);    // handlebars
 
-    // Helmeted head
-    const head = b.proj(1.8, 0, 7.8);
-    const hRad = Math.max(1.2, 1.45 * b.s);
-    vCtx.fillStyle = shadeHex('#f7fafc', 1.05, mode);
-    vCtx.beginPath();
-    vCtx.arc(head[0], head[1], hRad, 0, Math.PI * 2);
-    vCtx.fill();
+    // 4. Animated pedaling legs (cycling shorts + calf + shoe)
+    const pUp = pedal * 0.65;
+    pix(-0.8, 0.15, 3.1, 1.5, 1.4, shortsCol);
+    pix(-0.1 + pUp * 0.5, 0.2, 2.0 - pUp * 0.5, 0.95, 1.35, skinCol);
+    pix(0.1 + pUp * 0.6, 0.2, 1.1 - pUp * 0.6, 1.1, 0.8, tireCol);
 
-    // Tiny bike headlight at night
+    // 5. Sculpted leaning rider torso (vibrant 2-tone NW-sunlit jersey + outstretched arm gripping handlebars!)
+    pix(-0.1, 0, 4.7, 2.3, 2.0, jDark);
+    pix(0.0, -0.2, 5.2, 2.0, 1.3, jLit);    // sunlit upper back/shoulder highlight
+    pix(1.3, 0.1, 4.4, 1.6, 0.95, jLit);    // upper arm reaching forward
+    pix(2.0, 0.1, 3.9, 0.85, 0.85, skinCol); // hand on handlebar
+
+    // 6. Proportional pixel-art face & sleek aerodynamic cycling helmet
+    pix(1.1, 0.1, 6.2, 1.25, 1.15, skinCol); // face
+    pix(1.0, 0.0, 6.9, 1.85, 1.0, helmCol);  // sleek helmet shell
+    pix(1.45, 0.0, 6.5, 1.15, 0.5, tireCol); // sunglasses / helmet visor
+
+    // 7. Tiny warm bike headlight at night
     if (isNight) {
-      const hl = b.proj(3.5, 0, 3.5);
-      vCtx.fillStyle = '#fff9c4';
-      vCtx.fillRect(hl[0] - 1.0, hl[1] - 1.0, 2.0, 2.0);
+      pix(2.9, 0, 3.3, 1.1, 1.1, '#fff9c4');
     }
   }
 
   function draw3DPedestrian(pos, colorIdx, wScale, mode, tSec) {
-    // Crisp 90s miniature walking villager with alternating striding legs, jacket & head!
+    // Crisp, pixel-grid-snapped 90s isometric walking villager!
     const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
-    if (b.cx < -16 || b.cx > canvas.width + 16 || b.cy < -16 || b.cy > canvas.height + 16) return;
+    if (b.cx < -18 || b.cx > canvas.width + 18 || b.cy < -18 || b.cy > canvas.height + 18) return;
 
     const isNight = mode === 'night';
-    const jackets = ['#c53030', '#2b6cb0', '#2f855a', '#d69e2e', '#805ad5', '#dd6b20', '#e2e8f0', '#38a169'];
+    const jackets = ['#c53030', '#2b6cb0', '#2f855a', '#d69e2e', '#6b46c1', '#dd6b20', '#cbd5e0', '#2c7a7b'];
+    const hairCols = ['#2d241c', '#5c4028', '#8a6842', '#3a3430', '#b89458'];
     const jacketHex = jackets[colorIdx % jackets.length];
+    const hairHex = hairCols[(colorIdx * 2 + 1) % hairCols.length];
     const stride = Math.sin(tSec * 6.8 + colorIdx * 2.3);
+    const pSz = Math.max(1.0, b.s);
 
-    // Tiny grounded shadow
-    const sh = b.proj(0, 0, 0);
-    vCtx.fillStyle = isNight ? 'rgba(6,10,20,0.52)' : 'rgba(18,24,32,0.36)';
-    vCtx.fillRect(sh[0] - 1.5 * b.s, sh[1] + 0.2 * b.s, 3.2 * b.s, 1.5 * b.s);
+    const pix = (l, w, z, pw, ph, col) => {
+      const [x, y] = b.proj(l, w, z);
+      vCtx.fillStyle = col;
+      vCtx.fillRect(
+        Math.round(x - pw * 0.5 * pSz),
+        Math.round(y - ph * 0.5 * pSz),
+        Math.max(1, Math.round(pw * pSz)),
+        Math.max(1, Math.round(ph * pSz)),
+      );
+    };
 
-    // Alternating striding legs
-    const hip = b.proj(0, 0, 2.9);
-    const f1 = b.proj(stride * 1.25, -0.48, 0.2);
-    const f2 = b.proj(-stride * 1.25, 0.48, 0.2);
-    vCtx.strokeStyle = isNight ? '#1f293a' : '#2a3444';
-    vCtx.lineWidth = Math.max(1.0, 1.2 * b.s);
-    vCtx.beginPath();
-    vCtx.moveTo(hip[0], hip[1]);
-    vCtx.lineTo(f1[0], f1[1]);
-    vCtx.moveTo(hip[0], hip[1]);
-    vCtx.lineTo(f2[0], f2[1]);
-    vCtx.stroke();
+    const pantsCol = shadeHex('#2a3444', 0.92, mode);
+    const jLit = shadeHex(jacketHex, 1.10, mode);
+    const jDark = shadeHex(jacketHex, 0.78, mode);
+    const skinCol = shadeHex('#eabfa0', 1.0, mode);
+    const hairCol = shadeHex(hairHex, 0.95, mode);
 
-    // Torso / jacket
-    const neck = b.proj(0, 0, 5.6);
-    vCtx.strokeStyle = shadeHex(jacketHex, 1.05, mode);
-    vCtx.lineWidth = Math.max(1.8, 2.3 * b.s);
-    vCtx.beginPath();
-    vCtx.moveTo(hip[0], hip[1]);
-    vCtx.lineTo(neck[0], neck[1]);
-    vCtx.stroke();
+    // 1. Grounded pixel shadow
+    pix(0, 0.3, 0, 2.4, 1.2, isNight ? 'rgba(6,10,20,0.48)' : 'rgba(18,24,32,0.34)');
 
-    // Head
-    const head = b.proj(0, 0, 6.9);
-    const hRad = Math.max(1.1, 1.25 * b.s);
-    vCtx.fillStyle = shadeHex('#f0c8a0', 1.0, mode);
-    vCtx.beginPath();
-    vCtx.arc(head[0], head[1], hRad, 0, Math.PI * 2);
-    vCtx.fill();
+    // 2. Alternating striding legs
+    pix(stride * 0.85, -0.35, 1.3, 0.95, 2.0, pantsCol);
+    pix(-stride * 0.85, 0.35, 1.3, 0.95, 2.0, pantsCol);
+
+    // 3. Two-tone shaded jacket torso
+    pix(0, 0, 3.6, 1.8, 2.3, jDark);
+    pix(0, -0.2, 4.1, 1.5, 1.4, jLit);
+
+    // 4. Proportional pixel head (skin face + hair crown)
+    pix(0, 0, 5.4, 1.3, 1.2, skinCol);
+    pix(0, 0, 6.0, 1.4, 0.75, hairCol);
   }
 
   function drawAnimations(worldW, worldH, tSec) {
@@ -2639,14 +2638,16 @@
   const soundChannels = {};
 
   const SOUND_TRACKS = {
-    lake_waves: { file: 'lake_waves.mp3', baseGain: 0.46, maxHz: 6200 },
-    birds:      { file: 'birds.mp3',      baseGain: 0.34, maxHz: 11000 },
-    crickets:   { file: 'crickets.mp3',   baseGain: 0.30, maxHz: 10500 },
-    train:      { file: 'train.mp3',      baseGain: 0.52, maxHz: 8500 },
-    traffic:    { file: 'traffic.mp3',    baseGain: 0.32, maxHz: 5800 },
-    bus:        { file: 'bus.mp3',        baseGain: 0.36, maxHz: 3600 },
-    boat:       { file: 'boat.mp3',       baseGain: 0.40, maxHz: 4800 },
+    lake_waves: { file: 'lake_waves.mp3', baseGain: 0.22, maxHz: 3400 },
+    birds:      { file: 'birds.mp3',      baseGain: 0.11, maxHz: 4600 },
+    crickets:   { file: 'crickets.mp3',   baseGain: 0.10, maxHz: 4800 },
+    train:      { file: 'train.mp3',      baseGain: 0.26, maxHz: 4200 },
+    traffic:    { file: 'traffic.mp3',    baseGain: 0.11, maxHz: 3200 },
+    bus:        { file: 'bus.mp3',        baseGain: 0.14, maxHz: 2400 },
+    boat:       { file: 'boat.mp3',       baseGain: 0.18, maxHz: 3000 },
+    bells:      { file: 'bells.mp3',      baseGain: 0.22, maxHz: 3400 },
   };
+  const SOUND_MASTER_LEVEL = 0.48;
 
   async function initSoundscape() {
     if (soundReady || soundLoading) return;
@@ -2657,11 +2658,11 @@
       const AC = window.AudioContext || window.webkitAudioContext;
       audioCtx = new AC();
       const comp = audioCtx.createDynamicsCompressor();
-      comp.threshold.value = -16;
-      comp.knee.value = 18;
-      comp.ratio.value = 3.5;
-      comp.attack.value = 0.015;
-      comp.release.value = 0.25;
+      comp.threshold.value = -18;
+      comp.knee.value = 20;
+      comp.ratio.value = 3.0;
+      comp.attack.value = 0.02;
+      comp.release.value = 0.28;
 
       audioMasterGain = audioCtx.createGain();
       audioMasterGain.gain.value = 0.0001;
@@ -2681,8 +2682,8 @@
 
           const lpf = audioCtx.createBiquadFilter();
           lpf.type = 'lowpass';
-          lpf.frequency.value = 1800;
-          lpf.Q.value = 0.55;
+          lpf.frequency.value = 1200;
+          lpf.Q.value = 0.50;
 
           const panner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
           const gain = audioCtx.createGain();
@@ -2696,7 +2697,6 @@
             lpf.connect(gain);
           }
           gain.connect(comp);
-          // Start at staggered random offset so loops never align mechanically
           src.start(0, Math.random() * Math.max(0.5, audioBuf.duration * 0.7));
           soundChannels[key] = { src, lpf, panner, gain, cfg };
         } catch (err) {
@@ -2714,33 +2714,43 @@
       }
       if (soundReady && audioMasterGain) {
         const now = audioCtx.currentTime;
-        audioMasterGain.gain.setTargetAtTime(soundEnabled ? 0.85 : 0.0001, now, 0.22);
+        audioMasterGain.gain.setTargetAtTime(soundEnabled ? SOUND_MASTER_LEVEL : 0.0001, now, 0.25);
       }
     }
   }
 
-  function computeSpatialFactor(u, v, u0, u1, v0, v1, uC, halfVisU, zoomNorm) {
-    // Distance outside visible viewport (isotropic ground-plane aspect 0.44)
+  function computeSpatialFactor(u, v, u0, u1, v0, v1, uC, halfVisU, zoomNorm, maxOffscreenRange) {
+    // True isotropic distance outside visible viewport (canvas aspect 5444/12331 ≈ 0.44)
     const dxOut = u < u0 ? (u0 - u) : (u > u1 ? (u - u1) : 0);
     const dyOut = v < v0 ? (v0 - v) : (v > v1 ? (v - v1) : 0);
     const dOut = Math.hypot(dxOut, dyOut * 0.44);
     const inView = dOut === 0;
 
+    // Hard acoustic horizon: beyond maxOffscreenRange (shrinking as you zoom in!), sound drops cleanly to 0!
+    const effRange = maxOffscreenRange / (0.65 + zoomNorm * 0.85);
+    if (!inView && dOut >= effRange) {
+      return { level: 0, brightness: 0.05, pan: 0, inView: false, dOut };
+    }
+
     // Stereo pan relative to viewport horizontal center
-    const pan = Math.max(-0.85, Math.min(0.85, (u - uC) / Math.max(0.04, halfVisU * 1.15)));
+    const pan = Math.max(-0.85, Math.min(0.85, (u - uC) / Math.max(0.035, halfVisU * 1.1)));
 
-    // Zoom-sensitive distance attenuation:
-    // - When zoomed out (zoomNorm ~ 0.18): gentle wide panorama where all of Kilchberg blends softly
-    // - When zoomed in (zoomNorm ~ 1.5..4.0): sounds inside screen are vivid & bright, while sounds
-    //   beyond the screen drop off rapidly with distance and become low-pass muffled!
-    const distScale = 2.4 + zoomNorm * 8.0;
-    const falloff = inView ? 1.0 : (1.0 / (1.0 + Math.pow(dOut * distScale, 2.0)));
-    const closeBoost = inView ? (0.48 + 0.52 * Math.min(1.0, zoomNorm / 1.35)) : (0.48 * falloff);
+    // Smooth cubic falloff outside visible screen so background sounds are strongly dampened!
+    const normD = inView ? 0 : (dOut / effRange);
+    const offFalloff = inView ? 1.0 : Math.pow(1.0 - normD, 2.8) * 0.24;
+    // Gentle distance-to-center emphasis when inside the screen
+    const centerDist = Math.hypot(u - uC, (v - (v0 + v1) * 0.5) * 0.44) / Math.max(0.05, halfVisU * 1.4);
+    const inFocus = 0.72 + 0.28 * Math.max(0, 1.0 - centerDist);
+
+    // Zoomed-out overview stays soft & distant; zoomed-in visible sources become clearer & warmer
+    const level = inView
+      ? (0.34 + 0.66 * Math.min(1.0, zoomNorm / 1.5)) * inFocus
+      : offFalloff;
     const brightness = inView
-      ? (0.30 + 0.70 * Math.min(1.0, zoomNorm / 1.4))
-      : Math.max(0.07, 0.36 * Math.sqrt(falloff));
+      ? (0.24 + 0.76 * Math.min(1.0, zoomNorm / 1.6))
+      : Math.max(0.05, 0.26 * (1.0 - normD));
 
-    return { level: Math.max(0, Math.min(1, closeBoost)), brightness, pan, inView, dOut };
+    return { level: Math.max(0, Math.min(1, level)), brightness, pan, inView, dOut };
   }
 
   function applyChannelSpatial(key, level, brightness, pan) {
@@ -2748,9 +2758,9 @@
     if (!ch || !audioCtx) return;
     const now = audioCtx.currentTime;
     const targetGain = Math.max(0.0001, level * ch.cfg.baseGain);
-    const targetHz = 520 + brightness * (ch.cfg.maxHz - 520);
-    ch.gain.gain.setTargetAtTime(targetGain, now, 0.14);
-    ch.lpf.frequency.setTargetAtTime(targetHz, now, 0.16);
+    const targetHz = 340 + brightness * (ch.cfg.maxHz - 340);
+    ch.gain.gain.setTargetAtTime(targetGain, now, 0.16);
+    ch.lpf.frequency.setTargetAtTime(targetHz, now, 0.18);
     if (ch.panner) {
       ch.panner.pan.setTargetAtTime(Math.max(-0.85, Math.min(0.85, pan)), now, 0.14);
     }
@@ -2772,14 +2782,13 @@
     const v0 = (-offsetY) / (worldH * scale);
     const v1 = (canvas.height - offsetY) / (worldH * scale);
     const uC = (u0 + u1) * 0.5;
-    const vC = (v0 + v1) * 0.5;
     const halfVisU = Math.max(0.02, (u1 - u0) * 0.5);
     const zoomNorm = Math.max(0.15, Math.min(4.0, scale));
     const isNight = currentMode === 'night';
     const isSunset = currentMode === 'sunset';
 
-    // 1. Swiss SBB Trains (strongest of the 2 live trains, quiet when dwelling at Bahnhof Kilchberg!)
-    let bestTrain = { level: 0, brightness: 0.1, pan: 0 };
+    // 1. Swiss SBB Trains (carries moderately across the village; hushes when dwelling at Bahnhof Kilchberg!)
+    let bestTrain = { level: 0, brightness: 0.08, pan: 0 };
     for (const tr of (animData.trains || [])) {
       const f0 = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
       const f1 = evalWithStationStop(tSec + 0.15, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
@@ -2788,20 +2797,19 @@
       const midF = Math.max(0.01, Math.min(0.99, f0 - (30.0 / tr.length_m)));
       const pos = samplePathAt(tr.pts, midF, worldW, worldH, 2);
       if (!pos) continue;
-      const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm);
-      const speedMul = isMoving ? 1.0 : 0.16; // soft idle hum when stopped at Bahnhof Kilchberg
-      const lvl = sp.level * speedMul;
+      const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.14);
+      const lvl = sp.level * (isMoving ? 1.0 : 0.12);
       if (lvl > bestTrain.level) {
-        bestTrain = { level: lvl, brightness: sp.brightness * (isMoving ? 1.0 : 0.45), pan: sp.pan };
+        bestTrain = { level: lvl, brightness: sp.brightness * (isMoving ? 1.0 : 0.4), pan: sp.pan };
       }
     }
     applyChannelSpatial('train', bestTrain.level, bestTrain.brightness, bestTrain.pan);
 
-    // 2. ZVV Buses & 3. Road Cars Traffic
-    let bestBus = { level: 0, brightness: 0.1, pan: 0 };
-    let carEnergy = 0;
+    // 2. ZVV Buses & 3. Road Cars (strictly localized to the actual individual cars & buses!)
+    let bestBus = { level: 0, brightness: 0.08, pan: 0 };
+    let bestCar = { level: 0, brightness: 0.08, pan: 0 };
+    let carSumLvl = 0;
     let carPanSum = 0;
-    let carBrightMax = 0.12;
     for (let rIdx = 0; rIdx < (animData.roads || []).length; rIdx++) {
       const rd = animData.roads[rIdx];
       const busCount = rd.bus_count != null ? rd.bus_count : (rd.has_bus ? 1 : 0);
@@ -2817,26 +2825,30 @@
         if (frac < 0.015 || frac > 0.985) continue;
         const pos = samplePathAt(rd.pts, frac, worldW, worldH, 2);
         if (!pos) continue;
-        const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm);
+        const sp = computeSpatialFactor(
+          pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm,
+          isBus ? 0.075 : 0.052, // tight local car/bus pass-by radius!
+        );
+        if (sp.level <= 0.002) continue;
         if (isBus) {
           if (sp.level > bestBus.level) bestBus = sp;
         } else {
-          const wMul = rd.kind === 'motorway' ? 0.52 : 0.34;
-          const e = sp.level * wMul;
-          carEnergy += e;
-          carPanSum += sp.pan * e;
-          if (sp.brightness > carBrightMax) carBrightMax = sp.brightness;
+          const wMul = rd.kind === 'motorway' ? 0.85 : 0.65;
+          const cl = sp.level * wMul;
+          carSumLvl += cl * cl; // RMS sum so multiple visible cars gently thicken without overpowering
+          carPanSum += sp.pan * cl;
+          if (cl > bestCar.level) bestCar = { level: cl, brightness: sp.brightness, pan: sp.pan };
         }
       }
     }
-    const nightTrafficMul = isNight ? 0.65 : 1.0;
+    const nightTrafficMul = isNight ? 0.55 : 1.0;
     applyChannelSpatial('bus', bestBus.level * nightTrafficMul, bestBus.brightness, bestBus.pan);
-    const carLevel = Math.min(1.0, Math.sqrt(carEnergy * 0.55)) * nightTrafficMul;
-    const carPan = carEnergy > 0.001 ? (carPanSum / carEnergy) : 0;
-    applyChannelSpatial('traffic', carLevel, carBrightMax, carPan);
+    const carFinalLvl = Math.min(1.0, Math.sqrt(carSumLvl)) * nightTrafficMul;
+    const carPan = bestCar.level > 0.001 ? (carPanSum / Math.max(0.001, Math.sqrt(carSumLvl))) : 0;
+    applyChannelSpatial('traffic', carFinalLvl, bestCar.brightness, carPan);
 
-    // 4. Lake Zurich ZSG Steamer Boat (plus soft sailboats)
-    let bestBoat = { level: 0, brightness: 0.1, pan: 0 };
+    // 4. Lake Zurich ZSG Steamer Boat (localized to the boat on the lake)
+    let bestBoat = { level: 0, brightness: 0.08, pan: 0 };
     for (const ship of (animData.ships || [])) {
       const frac = ship.closed
         ? (((tSec / (ship.length_m / Math.max(0.5, ship.speed_mps))) + (ship.phase || 0)) % 1 + 1) % 1
@@ -2844,38 +2856,68 @@
       if (frac < 0 || frac > 1) continue;
       const pos = samplePathAt(ship.pts, frac, worldW, worldH, 2);
       if (!pos) continue;
-      const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm);
-      const mul = ship.kind === 'zsg_steamer' ? 1.0 : 0.35;
+      const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.09);
+      const mul = ship.kind === 'zsg_steamer' ? 1.0 : 0.28;
       if (sp.level * mul > bestBoat.level) {
         bestBoat = { level: sp.level * mul, brightness: sp.brightness, pan: sp.pan };
       }
     }
     applyChannelSpatial('boat', bestBoat.level, bestBoat.brightness, bestBoat.pan);
 
-    // 5. Lake Zurich Shoreline Waves (tracks closest shoreline point to viewport!)
-    let bestWave = { level: 0, brightness: 0.1, pan: 0 };
+    // 5. Lake Zurich Shoreline Waves (STRICT tight shoreline range: completely silent once you move away from the lake!)
+    let bestWave = { level: 0, brightness: 0.08, pan: 0 };
     const shore = (animData.ambient && animData.ambient.shoreline) || [];
     for (let i = 0; i < shore.length; i += 3) {
-      const sp = computeSpatialFactor(shore[i][0], shore[i][1], u0, u1, v0, v1, uC, halfVisU, zoomNorm);
+      const sp = computeSpatialFactor(shore[i][0], shore[i][1], u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.042);
       if (sp.level > bestWave.level) bestWave = sp;
     }
-    // Gentle organic swell synced subtly to our 5.6s shoreline wave cycle
-    const wavePulse = 0.84 + 0.16 * Math.sin(tSec * (Math.PI * 2 / 5.6));
+    const wavePulse = 0.85 + 0.15 * Math.sin(tSec * (Math.PI * 2 / 5.6));
     applyChannelSpatial('lake_waves', bestWave.level * wavePulse, bestWave.brightness, bestWave.pan);
 
-    // 6. European Songbirds (Day/Alpenglow) & Evening Crickets (Night) in wooded hillside & village gardens
-    const gardenZones = [
-      [0.34, 0.42], [0.46, 0.36], [0.58, 0.34], [0.68, 0.30], [0.42, 0.48], [0.54, 0.44],
+    // 6. Virtual Songbird Tree Perches (14 real wooded groves & parks with gentle intermittent singing!)
+    const treeBirdPerches = [
+      [0.29, 0.34, 0.0], [0.35, 0.43, 0.17], [0.41, 0.36, 0.33], [0.47, 0.46, 0.51],
+      [0.52, 0.39, 0.68], [0.58, 0.43, 0.82], [0.64, 0.35, 0.11], [0.71, 0.33, 0.44],
+      [0.37, 0.58, 0.25], [0.44, 0.55, 0.62], [0.54, 0.52, 0.77], [0.62, 0.48, 0.08],
+      [0.26, 0.45, 0.39], [0.76, 0.28, 0.58],
     ];
-    let bestNature = { level: 0, brightness: 0.1, pan: 0 };
-    for (const [gu, gv] of gardenZones) {
-      const sp = computeSpatialFactor(gu, gv, u0, u1, v0, v1, uC, halfVisU, zoomNorm);
-      if (sp.level > bestNature.level) bestNature = sp;
+    let bestBird = { level: 0, brightness: 0.08, pan: 0 };
+    let bestCricket = { level: 0, brightness: 0.08, pan: 0 };
+    for (const [tu, tv, ph] of treeBirdPerches) {
+      const sp = computeSpatialFactor(tu, tv, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.050);
+      if (sp.level <= 0.002) continue;
+      // Gentle natural intermittent singing cadence per tree (sings softly, then rests)
+      const singCycle = Math.sin(tSec * 0.22 + ph * Math.PI * 2);
+      const singEnv = singCycle > -0.15 ? Math.min(1.0, (singCycle + 0.15) * 1.15) : 0.12;
+      const bLvl = sp.level * singEnv;
+      if (bLvl > bestBird.level) bestBird = { level: bLvl, brightness: sp.brightness, pan: sp.pan };
+      if (sp.level > bestCricket.level) bestCricket = sp;
     }
-    const birdMul = isNight ? 0.0 : (isSunset ? 0.65 : 1.0);
-    const cricketMul = isNight ? 1.0 : (isSunset ? 0.35 : 0.0);
-    applyChannelSpatial('birds', bestNature.level * birdMul, bestNature.brightness, bestNature.pan);
-    applyChannelSpatial('crickets', bestNature.level * cricketMul, bestNature.brightness, bestNature.pan);
+    const birdMul = isNight ? 0.0 : (isSunset ? 0.55 : 1.0);
+    const cricketMul = isNight ? 1.0 : (isSunset ? 0.30 : 0.0);
+    applyChannelSpatial('birds', bestBird.level * birdMul, bestBird.brightness, bestBird.pan);
+    applyChannelSpatial('crickets', bestCricket.level * cricketMul, bestCricket.brightness, bestCricket.pan);
+
+    // 7. Authentic Swiss Church Bells (Reformierte Kirche Kilchberg & Katholische Kirche St. Elisabeth!)
+    // Rings gently in a warm 20-second peal every 52 seconds, carrying softly across the hillside village.
+    const bellCycle = (tSec + 12.0) % 52.0;
+    let bellEnv = 0;
+    if (bellCycle < 20.0) {
+      bellEnv = bellCycle < 2.2 ? (bellCycle / 2.2) : (bellCycle > 17.0 ? ((20.0 - bellCycle) / 3.0) : 1.0);
+    }
+    let bestBell = { level: 0, brightness: 0.08, pan: 0 };
+    if (bellEnv > 0.01 && !isNight) {
+      const churches = [
+        [0.29272, 0.3162], // Reformierte Kirche Kilchberg (550.5 m spire)
+        [0.40667, 0.3425], // Katholische Kirche St. Elisabeth
+      ];
+      for (const [cu, cv] of churches) {
+        const sp = computeSpatialFactor(cu, cv, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.28);
+        const lvl = sp.level * bellEnv * (isSunset ? 1.0 : 0.85);
+        if (lvl > bestBell.level) bestBell = { level: lvl, brightness: sp.brightness, pan: sp.pan };
+      }
+    }
+    applyChannelSpatial('bells', bestBell.level, bestBell.brightness, bestBell.pan);
   }
 
   let lastAnimPaint = 0;
@@ -2914,7 +2956,7 @@
           initSoundscape();
         } else if (audioCtx && audioMasterGain) {
           audioCtx.resume().catch(() => {});
-          audioMasterGain.gain.setTargetAtTime(0.85, audioCtx.currentTime, 0.22);
+          audioMasterGain.gain.setTargetAtTime(SOUND_MASTER_LEVEL, audioCtx.currentTime, 0.25);
           lastAudioUpdateMs = 0;
           const { width, height } = getWorldSize();
           updateSoundscape(width, height, getAnimTimeSec());
@@ -2927,7 +2969,7 @@
 
   document.addEventListener('visibilitychange', () => {
     if (audioCtx && audioMasterGain && soundEnabled) {
-      const target = document.hidden ? 0.0001 : 0.85;
+      const target = document.hidden ? 0.0001 : SOUND_MASTER_LEVEL;
       audioMasterGain.gain.setTargetAtTime(target, audioCtx.currentTime, 0.15);
     }
     if (!document.hidden && showAnimations && animData) {
