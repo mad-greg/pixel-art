@@ -209,9 +209,10 @@ def _sample_road_z(
     e: np.ndarray,
     n: np.ndarray,
     underpass_poly=None,
-) -> np.ndarray:
-    """Sample road elevation taking the higher of bare-earth DEM and 3D elevated bridge/viaduct deck,
-    and sinking elevation beneath railway embankments/tunnels where roads pass underneath."""
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sample road elevation returning (z_vis, z_depth):
+    - z_vis: smooth bare-earth / 3D bridge deck elevation for screen projection (no sudden screen jumps!)
+    - z_depth: sinks by -5.5 m inside railway underpasses/tunnels for 16-bit depth occlusion beneath tracks."""
     cols = np.clip(((e - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
     rows = np.clip(((N_MAX - n) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
     z = scene.dem[rows, cols].astype(np.float64)
@@ -222,13 +223,15 @@ def _sample_road_z(
         z = np.where(on_bridge, np.maximum(z, br_z), z)
     if len(z) >= 5:
         z = ndimage.gaussian_filter1d(z, sigma=1.6, mode="nearest")
+    z_vis = z.copy()
+    z_depth = z.copy()
     if underpass_poly is not None:
         from shapely.prepared import prep
         p_under = prep(underpass_poly)
         for i in range(len(e)):
             if not on_bridge[i] and p_under.contains(Point(float(e[i]), float(n[i]))):
-                z[i] -= 5.0
-    return z
+                z_depth[i] -= 6.0
+    return z_vis, z_depth
 
 
 def _compute_occlusion(
@@ -273,17 +276,19 @@ def _pack_path(
     n: np.ndarray,
     z: np.ndarray,
     vehicle_h: float = 2.2,
+    z_depth: np.ndarray | None = None,
 ) -> list[list[float | int]]:
     px, py, _ = cam.project(e, n, z)
     # Compute exact 16-bit camera depth at mid-vehicle elevation (cleanly clears road/bridge deck under tires,
-    # while properly testing behind foreground trees, buildings, and overhead bridges!)
-    _, _, pd_veh = cam.project(e, n, z + vehicle_h * 0.72)
+    # while properly testing behind foreground trees, buildings, overhead bridges, and railway underpasses!)
+    zd_use = z if z_depth is None else z_depth
+    _, _, pd_veh = cam.project(e, n, zd_use + vehicle_h * 0.72)
     DEPTH_MIN, DEPTH_MAX = -2400.0, 2400.0
     d_u16 = np.clip(np.round((pd_veh - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 65535.0), 0, 65535).astype(np.int32)
     u = (px + shift_x) / W_full
     v = (py + shift_y) / H_full
     if obs_z is not None:
-        occ = _compute_occlusion(obs_z, cam, e, n, z, vehicle_h=vehicle_h)
+        occ = _compute_occlusion(obs_z, cam, e, n, zd_use, vehicle_h=vehicle_h)
     else:
         occ = np.zeros(len(e), dtype=np.uint8)
     return [[round(float(u[i]), 5), round(float(v[i]), 5), int(occ[i]), int(d_u16[i])] for i in range(len(e))]
@@ -364,7 +369,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         if p.get("class") != "rail" and (p.get("brunnel") == "tunnel" or (p.get("layer") is not None and p.get("layer") < 0))
     ]
     rail_occ_geoms = [
-        g.buffer(6.5)
+        g.buffer(7.5)
         for g, p in mvt.get("transportation", [])
         if p.get("class") == "rail" and p.get("brunnel") != "tunnel"
     ]
@@ -379,7 +384,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             ("seestrasse_nb", LineString(list(reversed(list(see_spine.coords)))), 0.37),
         ]:
             er, nr, lr = _resample_smooth_line(ls_dir, step_m=3.2, offset_right_m=1.9)
-            zr = _sample_road_z(scene, er, nr, underpass_poly) + 0.35
+            zr, zr_d = _sample_road_z(scene, er, nr, underpass_poly)
             roads_out.append({
                 "id": dir_id,
                 "kind": "seestrasse",
@@ -389,7 +394,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
                 "bus_count": 2,
                 "car_count": 12,
                 "phase": phase0,
-                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, er, nr, zr, vehicle_h=2.4),
+                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, er, nr, zr + 0.35, vehicle_h=2.4, z_depth=zr_d + 0.35),
             })
 
     # Dedicated Dorfstrasse Horseshoe Viaduct route (Seestrasse Bendlikon -> up Dorfstrasse viaduct -> Dorf!)
@@ -403,7 +408,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             ("dorfstrasse_viaduct_dn", LineString(list(reversed(list(dorf_spine.coords)))), 0.62, True),
         ]:
             ed, nd, ld = _resample_smooth_line(ls_dir, step_m=2.6, offset_right_m=1.55)
-            zd = _sample_road_z(scene, ed, nd, underpass_poly) + 0.35
+            zd, zd_d = _sample_road_z(scene, ed, nd, underpass_poly)
             roads_out.append({
                 "id": dir_id,
                 "kind": "viaduct",
@@ -413,7 +418,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
                 "bus_count": 1,
                 "car_count": 5,
                 "phase": phase0,
-                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, ed, nd, zd, vehicle_h=2.4),
+                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, ed, nd, zd + 0.35, vehicle_h=2.4, z_depth=zd_d + 0.35),
             })
 
     mw_geoms = sorted(get_clipped("motorway"), key=lambda g: -g.length)
@@ -421,7 +426,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         if mg.length < 300.0:
             continue
         em, nm, lm = _resample_smooth_line(mg, step_m=3.5, offset_right_m=0.0)
-        zm = _sample_road_z(scene, em, nm, underpass_poly) + 0.35
+        zm, zm_d = _sample_road_z(scene, em, nm, underpass_poly)
         roads_out.append({
             "id": f"a3_motorway_{idx_m}",
             "kind": "motorway",
@@ -430,7 +435,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "has_bus": False,
             "car_count": 12,
             "phase": idx_m * 0.41,
-            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, em, nm, zm, vehicle_h=2.4),
+            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, em, nm, zm + 0.35, vehicle_h=2.4, z_depth=zm_d + 0.35),
         })
 
     # Prefer wider secondary/tertiary collector streets (Alte Landstrasse, Schorenstrasse, Dorfstrasse)
@@ -442,7 +447,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         is_collector = idx_v < min(3, len(collector_geoms))
         lane_off = 1.35 if is_collector else 0.75
         ev, nv, lv = _resample_smooth_line(vg, step_m=3.2, offset_right_m=lane_off)
-        zv = _sample_road_z(scene, ev, nv, underpass_poly) + 0.35
+        zv, zv_d = _sample_road_z(scene, ev, nv, underpass_poly)
         has_b = is_collector and idx_v in (0, 1)
         roads_out.append({
             "id": f"village_st_{idx_v}",
@@ -453,7 +458,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "bus_count": 1 if has_b else 0,
             "car_count": 4 if is_collector else 2,
             "phase": (idx_v * 0.23) % 1.0,
-            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, ev, nv, zv, vehicle_h=2.2),
+            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, ev, nv, zv + 0.35, vehicle_h=2.2, z_depth=zv_d + 0.35),
         })
 
     # 3. Lake Zurich ZSG Passenger Steamer (docking at Bendlikon Pier!) & Leisure Sailboats

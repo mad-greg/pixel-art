@@ -2997,10 +2997,10 @@ def render_diorama_tiled_hires(
                 # Sample exact 3D occluder depth at 1/4 resolution for this macro window
                 sz = dbuf["zbuf"]
                 sm = dbuf["mat_buf"]
-                dy0 = (y0 + DEPTH_DS - 1) // DEPTH_DS
-                dy1 = min(dh_f, y1 // DEPTH_DS)
-                dx0 = (x0 + DEPTH_DS - 1) // DEPTH_DS
-                dx1 = min(dw_f, x1 // DEPTH_DS)
+                dy0 = y0 // DEPTH_DS
+                dy1 = min(dh_f, (y1 + DEPTH_DS - 1) // DEPTH_DS)
+                dx0 = x0 // DEPTH_DS
+                dx1 = min(dw_f, (x1 + DEPTH_DS - 1) // DEPTH_DS)
                 if dy1 > dy0 and dx1 > dx0:
                     ly0 = dy0 * DEPTH_DS - wy0
                     ly1 = dy1 * DEPTH_DS - wy0

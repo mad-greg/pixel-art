@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '4.2';
+  const ASSET_VER = '4.3';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -1454,9 +1454,16 @@
     const baseDy = (y0 - offsetY) * invWorldScaleY;
 
     let anyVisible = false;
+    const invScale = 1 / scale;
+    const wScaleInv = 12331 / worldW;
     for (let ly = 0; ly < bh; ly++) {
       const dy = Math.floor(baseDy + ly * invWorldScaleY);
       if (dy < 0 || dy >= depthH) continue;
+      // Exact orthographic isometric depth gradient: pixels higher on screen (smaller wy)
+      // are further from the camera (+4.2 depth units per 0.25m world pixel), so the front of
+      // a long bus/train heading NW is properly occluded behind foreground roofs & rails!
+      const wyPix = (y0 + ly - offsetY) * invScale;
+      const rowD16 = vehD16 - (wyPix - wy) * wScaleInv * 4.2;
       const rowOff = dy * depthW;
       const pRow = ly * bw * 4;
       for (let lx = 0; lx < bw; lx++) {
@@ -1467,7 +1474,7 @@
           const di = (rowOff + dx) * 4;
           if (depthPixels[di + 2] > 128) {
             const sceneD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
-            if (vehD16 > sceneD16) {
+            if (rowD16 > sceneD16) {
               d[p + 3] = 0;
               continue;
             }
