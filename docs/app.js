@@ -14,12 +14,12 @@
     { file: '01_lindt_home_of_chocolate.webp', label: 'Lindt Home of Chocolate', lmId: 'lindt_hoc' },
     { file: '02_reformierte_kirche_dorf.webp', label: 'Reformierte Kirche & Graves', lmId: 'reformierte_kirche' },
     { file: '03_bendlikon_harbor_pier.webp', label: 'Bendlikon Pier & Sailboats', lmId: 'bendlikon_pier' },
-    { file: '04_bahnhof_kilchberg_weinberg.webp', label: 'Bahnhof & Vineyards', lmId: 'bahnhof_stockengut' },
+    { file: '04_bahnhof_kilchberg_weinberg.webp', label: 'Bahnhof & Dorfstrasse Viaduct', lmId: 'bahnhof_stockengut' },
     { file: '05_schooren_seebad.webp', label: 'Schooren & Seebad', lmId: 'schooren_seebad' },
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '2.5';
+  const ASSET_VER = '3.1';
 
   // Overview images & optional ultra-high-res 0.25 m/px tile pyramids per lighting mode
   const overviewImages = {};
@@ -201,18 +201,19 @@
     const destW = Math.round(width * scale);
     const destH = Math.round(height * scale);
 
-    // 1. Always draw fast overview image underneath (zero blank flashes while streaming HD tiles)
+    // 1. Always draw exact 2:1 LANCZOS overview image underneath (zero blank flashes & identical colors!)
+    ctx.imageSmoothingQuality = 'high';
     if (ov) {
       const ovRatio = width / ov.width;
-      ctx.imageSmoothingEnabled = (scale * ovRatio) < 0.92;
+      ctx.imageSmoothingEnabled = (scale * ovRatio) < 0.95;
       ctx.drawImage(ov, destX, destY, destW, destH);
     }
 
-    // 2. Stream ultra-crisp 0.25 m/px lossless WebP tiles whenever zoomed past overview density!
+    // 2. Stream ultra-crisp 0.25 m/px lossless WebP tiles seamlessly once zoomed past 2:1 overview density (~50%)!
     let tilesLoaded = 0;
     let tilesVisible = 0;
     const ovWidth = ov ? ov.width : 0;
-    const needTiles = tiled && mf && (!ov || (width * scale) > ovWidth * 0.92);
+    const needTiles = tiled && mf && (!ov || (width * scale) > ovWidth * 0.98);
 
     if (needTiles) {
       const ts = mf.tileSize;
@@ -221,7 +222,7 @@
       const r0 = Math.max(0, Math.floor((-offsetY / scale) / ts));
       const r1 = Math.min(mf.rows - 1, Math.floor(((canvas.height - offsetY) / scale) / ts));
 
-      ctx.imageSmoothingEnabled = scale < 0.92;
+      ctx.imageSmoothingEnabled = scale < 0.95;
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
           tilesVisible++;
@@ -252,7 +253,8 @@
     }
 
     if (showAnimations && animData) {
-      drawAnimations(width, height, performance.now() * 0.001);
+      const animSec = fixedAnimTime !== null ? fixedAnimTime : performance.now() * 0.001;
+      drawAnimations(width, height, animSec);
     }
 
     updatePins(width, height);
@@ -1349,7 +1351,7 @@
     return afterT / travelSec;
   }
 
-  function samplePathAt(pts, frac, worldW, worldH) {
+  function samplePathAt(pts, frac, worldW, worldH, tanWin = 3) {
     const n = pts.length;
     if (n < 2 || frac < 0 || frac > 1) return null;
     const fIdx = frac * (n - 1);
@@ -1360,9 +1362,9 @@
     const wx = (p0[0] + (p1[0] - p0[0]) * t) * worldW;
     const wy = (p0[1] + (p1[1] - p0[1]) * t) * worldH;
 
-    // Smooth tangent across +-2 samples
-    const ia = Math.max(0, i0 - 2);
-    const ib = Math.min(n - 1, i0 + 3);
+    // Wide-chord smooth tangent so multi-carriage trains curve fluidly without wagon snapping!
+    const ia = Math.max(0, i0 - tanWin);
+    const ib = Math.min(n - 1, i0 + 1 + tanWin);
     let dx = (pts[ib][0] - pts[ia][0]) * worldW;
     let dy = (pts[ib][1] - pts[ia][1]) * worldH;
     const mag = Math.hypot(dx, dy) || 1;
@@ -1391,6 +1393,536 @@
     const sh = Math.max(1, Math.round(ph * wScale * scale));
     ctx.fillStyle = fillStyle;
     ctx.fillRect(sx, sy, sw, sh);
+  }
+
+  // ---- CONTINUOUS 3D NW-SUN SHADED VEHICLE RENDERER (Trains, ZVV Buses, Cars) ----
+  // Renders crisp, grounded, smoothly curving 3D isometric vehicles directly in screen space
+  // with NW directional sun shading (matching diorama lighting) & ZERO discrete angle snapping!
+  function shadeHex(hex, factor, mode) {
+    let r = parseInt(hex.slice(1, 3), 16);
+    let g = parseInt(hex.slice(3, 5), 16);
+    let b = parseInt(hex.slice(5, 7), 16);
+    if (mode === 'sunset') {
+      r = Math.min(255, r * 1.12 + 10);
+      g = Math.min(255, g * 0.94 + 4);
+      b = Math.max(0, b * 0.80);
+    } else if (mode === 'night') {
+      r = r * 0.44 + 8;
+      g = g * 0.50 + 12;
+      b = Math.min(255, b * 0.72 + 24);
+    }
+    r = Math.max(0, Math.min(255, Math.round(r * factor)));
+    g = Math.max(0, Math.min(255, Math.round(g * factor)));
+    b = Math.max(0, Math.min(255, Math.round(b * factor)));
+    return `rgb(${r},${g},${b})`;
+  }
+
+  function makeScreenIsoBasis(wx, wy, tx, ty, wScale) {
+    const s = scale * wScale;
+    const cx = offsetX + wx * scale;
+    const cy = offsetY + wy * scale;
+    // Screen-space forward unit vector (tx, ty) and true isometric perpendicular right vector
+    const isoScaleY = 0.55;
+    // Invert vertical foreshortening to find orthogonal ground-plane right vector
+    const gx = tx;
+    const gy = ty / isoScaleY;
+    const gMag = Math.hypot(gx, gy) || 1;
+    const rx = -gy / gMag;
+    const ry = (gx / gMag) * isoScaleY;
+    // Project local (l = forward, w = right, z = up) in 0.25m-px world units to screen (x, y)
+    const proj = (l, w, z) => [
+      cx + (l * tx + w * rx) * s,
+      cy + (l * ty + w * ry - z * 0.84) * s,
+    ];
+    // Directional NW sun illumination for a local horizontal normal (nl, nw)
+    const dirShade = (nl, nw) => {
+      const nx = nl * tx + nw * rx;
+      const ny = nl * ty + nw * ry;
+      const nm = Math.hypot(nx, ny) || 1;
+      // Sun from upper-left (NW): light vector (-0.72, -0.69)
+      const dot = (nx / nm) * (-0.72) + (ny / nm) * (-0.69);
+      return 0.78 + Math.max(-1, Math.min(1, dot)) * 0.26;
+    };
+    return { cx, cy, s, tx, ty, rx, ry, proj, dirShade };
+  }
+
+  function fillPoly(pts, fill, stroke = null, lw = 1) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = lw;
+      ctx.stroke();
+    }
+  }
+
+  function draw3DCar(pos, colorIdx, wScale, mode) {
+    const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
+    if (b.cx < -40 || b.cx > canvas.width + 40 || b.cy < -40 || b.cy > canvas.height + 40) return;
+
+    // Distinct, readable Swiss car palette (clearly pops against cool grey asphalt!)
+    const palette = ['#d63830', '#f4f6f9', '#2b6cb0', '#e6a825', '#2f855a', '#c9d2dc', '#805ad5', '#dd6b20'];
+    const baseHex = palette[colorIdx % palette.length];
+    const isNight = mode === 'night';
+
+    // Crisp 1:1 miniature scale — unmistakably readable while staying cleanly inside village lanes
+    const hl = 9.2;  // half-length
+    const hw = 4.2;  // half-width
+    const zBot = 1.2;
+    const zBelt = 4.4;
+    const zRoof = 7.2;
+
+    // Grounded soft SE drop shadow
+    const shOff = [2.6 * b.s, 2.0 * b.s];
+    const shPts = [
+      b.proj(hl + 1.2, -hw - 0.8, 0),
+      b.proj(hl + 1.2, hw + 0.8, 0),
+      b.proj(-hl - 1.2, hw + 0.8, 0),
+      b.proj(-hl - 1.2, -hw - 0.8, 0),
+    ].map(([x, y]) => [x + shOff[0], y + shOff[1]]);
+    fillPoly(shPts, isNight ? 'rgba(6,10,20,0.62)' : 'rgba(20,26,34,0.44)');
+
+    // Visible side wall (whichever has positive screen-Y normal)
+    const sideSign = b.ry >= 0 ? 1 : -1;
+    const frontVis = b.ty >= 0;
+    const endSign = frontVis ? 1 : -1;
+    const outlineCol = isNight ? 'rgba(10,16,28,0.85)' : 'rgba(26,30,38,0.72)';
+    const lw = Math.max(0.7, Math.min(1.4, b.s * 0.45));
+
+    // Side body wall + cabin greenhouse side
+    const sideShade = b.dirShade(0, sideSign);
+    fillPoly([
+      b.proj(-hl, sideSign * hw, zBot),
+      b.proj(hl, sideSign * hw, zBot),
+      b.proj(hl, sideSign * hw, zBelt),
+      b.proj(-hl, sideSign * hw, zBelt),
+    ], shadeHex(baseHex, sideShade * 0.92, mode), outlineCol, lw);
+
+    // Side dark tinted windows
+    fillPoly([
+      b.proj(-hl * 0.56, sideSign * hw * 0.92, zBelt),
+      b.proj(hl * 0.46, sideSign * hw * 0.92, zBelt),
+      b.proj(hl * 0.26, sideSign * hw * 0.82, zRoof),
+      b.proj(-hl * 0.42, sideSign * hw * 0.82, zRoof),
+    ], isNight ? '#334d6e' : '#26384c', outlineCol, lw * 0.8);
+
+    // Visible front or rear bumper face
+    const endShade = b.dirShade(endSign, 0);
+    fillPoly([
+      b.proj(endSign * hl, -hw, zBot),
+      b.proj(endSign * hl, hw, zBot),
+      b.proj(endSign * hl, hw, zBelt),
+      b.proj(endSign * hl, -hw, zBelt),
+    ], shadeHex(baseHex, endShade * 0.90, mode), outlineCol, lw);
+
+    // Hood & trunk deck
+    fillPoly([
+      b.proj(-hl, -hw, zBelt),
+      b.proj(hl, -hw, zBelt),
+      b.proj(hl, hw, zBelt),
+      b.proj(-hl, hw, zBelt),
+    ], shadeHex(baseHex, 1.04, mode));
+
+    // Windshield & rear glass
+    fillPoly([
+      b.proj(hl * 0.54, -hw * 0.84, zBelt + 0.1),
+      b.proj(hl * 0.54, hw * 0.84, zBelt + 0.1),
+      b.proj(hl * 0.28, hw * 0.78, zRoof),
+      b.proj(hl * 0.28, -hw * 0.78, zRoof),
+    ], isNight ? '#446387' : '#354f68');
+
+    // Sunlit top roof panel
+    fillPoly([
+      b.proj(-hl * 0.44, -hw * 0.78, zRoof),
+      b.proj(hl * 0.28, -hw * 0.78, zRoof),
+      b.proj(hl * 0.28, hw * 0.78, zRoof),
+      b.proj(-hl * 0.44, hw * 0.78, zRoof),
+    ], shadeHex(baseHex, 1.15, mode), outlineCol, lw * 0.8);
+
+    // Headlights (warm beams at night!) & red taillights
+    const hl1 = b.proj(hl + 0.3, -hw * 0.62, zBot + 1.6);
+    const hl2 = b.proj(hl + 0.3, hw * 0.62, zBot + 1.6);
+    const tl1 = b.proj(-hl - 0.3, -hw * 0.62, zBot + 1.8);
+    const tl2 = b.proj(-hl - 0.3, hw * 0.62, zBot + 1.8);
+    const rDot = Math.max(1.2, 1.6 * b.s);
+    if (isNight) {
+      // Soft glowing headlight cone on road
+      fillPoly([
+        hl1, hl2,
+        b.proj(hl + 22, hw * 2.2, 0.2),
+        b.proj(hl + 22, -hw * 2.2, 0.2),
+      ], 'rgba(255,244,186,0.22)');
+    }
+    ctx.fillStyle = isNight ? '#fff8c8' : '#fffbe0';
+    ctx.fillRect(hl1[0] - rDot * 0.5, hl1[1] - rDot * 0.5, rDot, rDot);
+    ctx.fillRect(hl2[0] - rDot * 0.5, hl2[1] - rDot * 0.5, rDot, rDot);
+    ctx.fillStyle = isNight ? '#ff3b30' : '#d62828';
+    ctx.fillRect(tl1[0] - rDot * 0.5, tl1[1] - rDot * 0.5, rDot, rDot);
+    ctx.fillRect(tl2[0] - rDot * 0.5, tl2[1] - rDot * 0.5, rDot, rDot);
+  }
+
+  function draw3DBus(pos, wScale, mode) {
+    // Iconic Zurich ZVV / VBZ blue-and-white bus (Lines 161 & 165 through Kilchberg!)
+    const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
+    if (b.cx < -60 || b.cx > canvas.width + 60 || b.cy < -60 || b.cy > canvas.height + 60) return;
+
+    const isNight = mode === 'night';
+    const hl = 22.0; // ~12 m ZVV city bus
+    const hw = 6.0;
+    const zBot = 1.4;
+    const zBlue = 5.4;
+    const zWinBot = 6.2;
+    const zWinTop = 10.6;
+    const zRoof = 12.2;
+
+    // Grounded SE shadow
+    const shOff = [3.6 * b.s, 2.8 * b.s];
+    fillPoly([
+      b.proj(hl + 1.5, -hw - 1.0, 0),
+      b.proj(hl + 1.5, hw + 1.0, 0),
+      b.proj(-hl - 1.5, hw + 1.0, 0),
+      b.proj(-hl - 1.5, -hw - 1.0, 0),
+    ].map(([x, y]) => [x + shOff[0], y + shOff[1]]), isNight ? 'rgba(6,10,20,0.65)' : 'rgba(18,24,32,0.46)');
+
+    const sideSign = b.ry >= 0 ? 1 : -1;
+    const frontVis = b.ty >= 0;
+    const endSign = frontVis ? 1 : -1;
+    const outlineCol = isNight ? 'rgba(10,16,28,0.88)' : 'rgba(24,30,40,0.78)';
+    const lw = Math.max(0.8, Math.min(1.5, b.s * 0.5));
+
+    // Side wall: ZVV Cobalt Blue lower skirt + Crisp White upper body + Continuous dark/lit windows
+    const sideShade = b.dirShade(0, sideSign);
+    fillPoly([
+      b.proj(-hl, sideSign * hw, zBot),
+      b.proj(hl, sideSign * hw, zBot),
+      b.proj(hl, sideSign * hw, zBlue),
+      b.proj(-hl, sideSign * hw, zBlue),
+    ], shadeHex('#0d5ea6', sideShade, mode), outlineCol, lw);
+
+    fillPoly([
+      b.proj(-hl, sideSign * hw, zBlue),
+      b.proj(hl, sideSign * hw, zBlue),
+      b.proj(hl, sideSign * hw, zRoof),
+      b.proj(-hl, sideSign * hw, zRoof),
+    ], shadeHex('#f2f5f8', sideShade, mode), outlineCol, lw);
+
+    // Side window ribbon with crisp vertical pillars
+    fillPoly([
+      b.proj(-hl + 1.8, sideSign * (hw + 0.05), zWinBot),
+      b.proj(hl - 1.4, sideSign * (hw + 0.05), zWinBot),
+      b.proj(hl - 1.4, sideSign * (hw + 0.05), zWinTop),
+      b.proj(-hl + 1.8, sideSign * (hw + 0.05), zWinTop),
+    ], isNight ? '#ffd978' : '#243a52');
+
+    // End face (front windshield or rear panel)
+    const endShade = b.dirShade(endSign, 0);
+    fillPoly([
+      b.proj(endSign * hl, -hw, zBot),
+      b.proj(endSign * hl, hw, zBot),
+      b.proj(endSign * hl, hw, zBlue),
+      b.proj(endSign * hl, -hw, zBlue),
+    ], shadeHex('#0d5ea6', endShade, mode), outlineCol, lw);
+    fillPoly([
+      b.proj(endSign * hl, -hw, zBlue),
+      b.proj(endSign * hl, hw, zBlue),
+      b.proj(endSign * hl, hw, zRoof),
+      b.proj(endSign * hl, -hw, zRoof),
+    ], shadeHex('#f2f5f8', endShade, mode), outlineCol, lw);
+
+    if (frontVis) {
+      fillPoly([
+        b.proj(hl + 0.06, -hw * 0.85, zWinBot - 0.4),
+        b.proj(hl + 0.06, hw * 0.85, zWinBot - 0.4),
+        b.proj(hl + 0.06, hw * 0.85, zWinTop + 0.4),
+        b.proj(hl + 0.06, -hw * 0.85, zWinTop + 0.4),
+      ], isNight ? '#58789c' : '#243a52');
+    }
+
+    // Crisp sunlit white roof with rooftop HVAC pod + ZVV blue accent stripe
+    fillPoly([
+      b.proj(-hl, -hw, zRoof),
+      b.proj(hl, -hw, zRoof),
+      b.proj(hl, hw, zRoof),
+      b.proj(-hl, hw, zRoof),
+    ], shadeHex('#ffffff', 1.05, mode), outlineCol, lw);
+
+    // Rooftop AC unit (adds unmistakable 3D miniature detail!)
+    fillPoly([
+      b.proj(-7.5, -hw * 0.58, zRoof + 1.4),
+      b.proj(6.5, -hw * 0.58, zRoof + 1.4),
+      b.proj(6.5, hw * 0.58, zRoof + 1.4),
+      b.proj(-7.5, hw * 0.58, zRoof + 1.4),
+    ], shadeHex('#cfd7e0', 1.0, mode), outlineCol, lw * 0.7);
+
+    // Headlight glow at night
+    if (isNight) {
+      fillPoly([
+        b.proj(hl, -hw * 0.7, zBot + 1.5),
+        b.proj(hl, hw * 0.7, zBot + 1.5),
+        b.proj(hl + 30, hw * 2.6, 0.2),
+        b.proj(hl + 30, -hw * 2.6, 0.2),
+      ], 'rgba(255,244,186,0.25)');
+    }
+  }
+
+  function draw3DTrainUnit(pos, kind, variant, wScale, mode, nextPos) {
+    // Museum-grade continuous 3D SBB RABe 511 KISS Double-Decker & SBB Re 460 IC
+    // Rounded 3-facet sunlit roof, directional NW-sun walls, double-deck tinted windows,
+    // red SBB doors, overhead pantograph, and articulated dark rubber gangway bellows!
+    const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
+    if (b.cx < -120 || b.cx > canvas.width + 120 || b.cy < -120 || b.cy > canvas.height + 120) return;
+
+    const isNight = mode === 'night';
+    const isKISS = kind === 'sbb_kiss';
+    const isLead = variant === 0;
+    const isTail = variant === 2;
+
+    const hl = 34.5; // ~17.5 m coach body (pairs with 19.5 m pitch for 2 m articulated gangway!)
+    const hw = 6.8;  // ~3.0 m wide SBB carbody
+    const zBot = 1.6;
+    const zSkirt = 3.8;
+    const zEave = isKISS ? 14.4 : 13.0;
+    const zCrown = isKISS ? 16.8 : 15.2;
+
+    const sideSign = b.ry >= 0 ? 1 : -1;
+    const frontVis = b.ty >= 0;
+    const endSign = frontVis ? 1 : -1;
+    const outlineCol = isNight ? 'rgba(10,16,28,0.90)' : 'rgba(24,28,36,0.82)';
+    const lw = Math.max(0.8, Math.min(1.6, b.s * 0.55));
+
+    // 1. Grounded cast SE shadow along the gravel ballast bed
+    const shOff = [5.4 * b.s, 4.0 * b.s];
+    fillPoly([
+      b.proj(hl + 2.0, -hw - 1.2, 0),
+      b.proj(hl + 2.0, hw + 1.2, 0),
+      b.proj(-hl - 2.0, hw + 1.2, 0),
+      b.proj(-hl - 2.0, -hw - 1.2, 0),
+    ].map(([x, y]) => [x + shOff[0], y + shOff[1]]), isNight ? 'rgba(6,10,20,0.68)' : 'rgba(20,24,32,0.48)');
+
+    // 2. Articulated dark rubber gangway bellows connecting directly to next coach!
+    if (nextPos) {
+      const bNext = makeScreenIsoBasis(nextPos.wx, nextPos.wy, nextPos.tx, nextPos.ty, wScale);
+      const gw = hw * 0.72;
+      fillPoly([
+        b.proj(-hl + 1.0, sideSign * gw, zSkirt),
+        bNext.proj(hl - 1.0, sideSign * gw, zSkirt),
+        bNext.proj(hl - 1.0, sideSign * gw, zEave - 0.6),
+        b.proj(-hl + 1.0, sideSign * gw, zEave - 0.6),
+      ], shadeHex('#2c323b', 0.85, mode), outlineCol, lw * 0.8);
+      fillPoly([
+        b.proj(-hl + 1.0, -gw, zEave - 0.6),
+        bNext.proj(hl - 1.0, -gw, zEave - 0.6),
+        bNext.proj(hl - 1.0, gw, zEave - 0.6),
+        b.proj(-hl + 1.0, gw, zEave - 0.6),
+      ], shadeHex('#3e4652', 0.95, mode), outlineCol, lw * 0.8);
+    }
+
+    // 3. Undercarriage dark bogie skirt
+    const sideShade = b.dirShade(0, sideSign);
+    const bodyHex = isKISS ? '#eef2f6' : ((isLead || isTail) ? '#d92121' : '#f2f5f8');
+    fillPoly([
+      b.proj(-hl, sideSign * hw, zBot),
+      b.proj(hl, sideSign * hw, zBot),
+      b.proj(hl, sideSign * hw, zSkirt),
+      b.proj(-hl, sideSign * hw, zSkirt),
+    ], shadeHex('#2b313a', sideShade, mode), outlineCol, lw);
+
+    // 4. Main sculpted side wall (NW-sun shaded!)
+    const noseL = isLead ? hl - 4.0 : hl;
+    const tailL = isTail ? -hl + 4.0 : -hl;
+    fillPoly([
+      b.proj(-hl, sideSign * hw, zSkirt),
+      b.proj(hl, sideSign * hw, zSkirt),
+      b.proj(noseL, sideSign * hw, zEave),
+      b.proj(tailL, sideSign * hw, zEave),
+    ], shadeHex(bodyHex, sideShade, mode), outlineCol, lw);
+
+    // Iconic SBB black window band + double-deck / single-deck windows + bright red SBB doors!
+    const winColor = isNight ? '#ffd670' : '#5880a4';
+    const bandColor = isNight ? '#1b2432' : '#232a34';
+    if (isKISS) {
+      // Lower-deck dark window ribbon
+      fillPoly([
+        b.proj(-hl + 5.5, sideSign * (hw + 0.06), zSkirt + 1.0),
+        b.proj(hl - 5.5, sideSign * (hw + 0.06), zSkirt + 1.0),
+        b.proj(hl - 5.5, sideSign * (hw + 0.06), zSkirt + 4.0),
+        b.proj(-hl + 5.5, sideSign * (hw + 0.06), zSkirt + 4.0),
+      ], bandColor);
+      // Upper-deck dark window ribbon
+      fillPoly([
+        b.proj(-hl + 4.5, sideSign * (hw + 0.06), zSkirt + 5.4),
+        b.proj(hl - 4.5, sideSign * (hw + 0.06), zSkirt + 5.4),
+        b.proj(hl - 4.5, sideSign * (hw + 0.06), zEave - 1.2),
+        b.proj(-hl + 4.5, sideSign * (hw + 0.06), zEave - 1.2),
+      ], bandColor);
+
+      // Individual crisp window panes along both decks
+      for (let w = -24; w <= 22; w += 8) {
+        fillPoly([
+          b.proj(w, sideSign * (hw + 0.09), zSkirt + 1.3),
+          b.proj(w + 5.2, sideSign * (hw + 0.09), zSkirt + 1.3),
+          b.proj(w + 5.2, sideSign * (hw + 0.09), zSkirt + 3.7),
+          b.proj(w, sideSign * (hw + 0.09), zSkirt + 3.7),
+        ], winColor);
+        fillPoly([
+          b.proj(w, sideSign * (hw + 0.09), zSkirt + 5.8),
+          b.proj(w + 5.2, sideSign * (hw + 0.09), zSkirt + 5.8),
+          b.proj(w + 5.2, sideSign * (hw + 0.09), zEave - 1.5),
+          b.proj(w, sideSign * (hw + 0.09), zEave - 1.5),
+        ], winColor);
+      }
+
+      // Signature SBB bright red boarding doors at 1/4 & 3/4 coach length!
+      const redDoor = shadeHex('#d92121', sideShade * 1.05, mode);
+      for (const dPos of [-20.5, 16.5]) {
+        fillPoly([
+          b.proj(dPos, sideSign * (hw + 0.12), zSkirt),
+          b.proj(dPos + 4.2, sideSign * (hw + 0.12), zSkirt),
+          b.proj(dPos + 4.2, sideSign * (hw + 0.12), zSkirt + 5.2),
+          b.proj(dPos, sideSign * (hw + 0.12), zSkirt + 5.2),
+        ], redDoor);
+      }
+      // Subtle red cant-rail stripe under the roof
+      fillPoly([
+        b.proj(tailL + 1.5, sideSign * (hw + 0.08), zEave - 1.0),
+        b.proj(noseL - 1.5, sideSign * (hw + 0.08), zEave - 1.0),
+        b.proj(noseL - 1.5, sideSign * (hw + 0.08), zEave),
+        b.proj(tailL + 1.5, sideSign * (hw + 0.08), zEave),
+      ], shadeHex('#d92121', sideShade, mode));
+    } else if (!isLead && !isTail) {
+      // SBB IC passenger coach: bold black window band + sky-reflective panes + red boarding doors
+      fillPoly([
+        b.proj(-hl + 5.0, sideSign * (hw + 0.06), zSkirt + 3.0),
+        b.proj(hl - 5.0, sideSign * (hw + 0.06), zSkirt + 3.0),
+        b.proj(hl - 5.0, sideSign * (hw + 0.06), zEave - 1.8),
+        b.proj(-hl + 5.0, sideSign * (hw + 0.06), zEave - 1.8),
+      ], bandColor);
+      for (let w = -25; w <= 23; w += 8.5) {
+        fillPoly([
+          b.proj(w, sideSign * (hw + 0.09), zSkirt + 3.4),
+          b.proj(w + 5.8, sideSign * (hw + 0.09), zSkirt + 3.4),
+          b.proj(w + 5.8, sideSign * (hw + 0.09), zEave - 2.1),
+          b.proj(w, sideSign * (hw + 0.09), zEave - 2.1),
+        ], winColor);
+      }
+      const redDoor = shadeHex('#d92121', sideShade * 1.05, mode);
+      for (const dPos of [-30.0, 26.0]) {
+        fillPoly([
+          b.proj(dPos, sideSign * (hw + 0.12), zSkirt),
+          b.proj(dPos + 4.0, sideSign * (hw + 0.12), zSkirt),
+          b.proj(dPos + 4.0, sideSign * (hw + 0.12), zEave - 1.8),
+          b.proj(dPos, sideSign * (hw + 0.12), zEave - 1.8),
+        ], redDoor);
+      }
+    } else {
+      // SBB Re 460 Locomotive: dark side cab windows + iconic crisp white SBB livery stripe & louvers
+      const cabDir = isLead ? 1 : -1;
+      fillPoly([
+        b.proj(cabDir * (hl - 10.5), sideSign * (hw + 0.08), zSkirt + 3.6),
+        b.proj(cabDir * (hl - 3.6), sideSign * (hw + 0.08), zSkirt + 3.6),
+        b.proj(cabDir * (hl - 4.8), sideSign * (hw + 0.08), zEave - 1.6),
+        b.proj(cabDir * (hl - 10.5), sideSign * (hw + 0.08), zEave - 1.6),
+      ], isNight ? '#58789c' : '#243a52');
+      // Crisp white SBB CFF FFS center livery bar
+      fillPoly([
+        b.proj(-11.0, sideSign * (hw + 0.09), zSkirt + 3.8),
+        b.proj(11.0, sideSign * (hw + 0.09), zSkirt + 3.8),
+        b.proj(11.0, sideSign * (hw + 0.09), zSkirt + 5.4),
+        b.proj(-11.0, sideSign * (hw + 0.09), zSkirt + 5.4),
+      ], shadeHex('#f4f7fa', sideShade * 1.05, mode));
+      // Dark cooling louver band along upper loco body
+      fillPoly([
+        b.proj(-16.0, sideSign * (hw + 0.07), zEave - 2.6),
+        b.proj(16.0, sideSign * (hw + 0.07), zEave - 2.6),
+        b.proj(16.0, sideSign * (hw + 0.07), zEave - 1.0),
+        b.proj(-16.0, sideSign * (hw + 0.07), zEave - 1.0),
+      ], shadeHex('#7d1818', sideShade, mode));
+    }
+
+    // 5. Visible front cab nose or rear end face
+    const endShade = b.dirShade(endSign, 0);
+    const isCabFace = (endSign > 0 && isLead) || (endSign < 0 && isTail);
+    const endTopL = (endSign > 0 ? noseL : tailL);
+    const endHex = isCabFace ? '#d92121' : '#3a424d';
+    fillPoly([
+      b.proj(endSign * hl, -hw, zSkirt),
+      b.proj(endSign * hl, hw, zSkirt),
+      b.proj(endTopL, hw, zEave),
+      b.proj(endTopL, -hw, zEave),
+    ], shadeHex(endHex, endShade, mode), outlineCol, lw);
+
+    if (isCabFace) {
+      // Sloped panoramic dark cab windshield
+      const wL0 = endSign * (hl - 1.4);
+      const wL1 = endSign * (hl - 3.6);
+      fillPoly([
+        b.proj(wL0, -hw * 0.78, zSkirt + 4.4),
+        b.proj(wL0, hw * 0.78, zSkirt + 4.4),
+        b.proj(wL1, hw * 0.72, zEave - 1.2),
+        b.proj(wL1, -hw * 0.72, zEave - 1.2),
+      ], isNight ? '#58789c' : '#1d2d40');
+    }
+
+    // 6. Sculpted 3-Facet Rounded Silver-White Roof (brighter NW bevel, crisp sunlit crown, shaded SE bevel!)
+    const rw = hw * 0.62;
+    const nwBevelShade = b.dirShade(0, -1) * 0.5 + 0.62;
+    const seBevelShade = b.dirShade(0, 1) * 0.5 + 0.54;
+    // Left roof bevel
+    fillPoly([
+      b.proj(tailL, -hw, zEave),
+      b.proj(noseL, -hw, zEave),
+      b.proj(noseL - 0.8, -rw, zCrown),
+      b.proj(tailL + 0.8, -rw, zCrown),
+    ], shadeHex('#d4dce5', nwBevelShade, mode));
+    // Right roof bevel
+    fillPoly([
+      b.proj(tailL, hw, zEave),
+      b.proj(noseL, hw, zEave),
+      b.proj(noseL - 0.8, rw, zCrown),
+      b.proj(tailL + 0.8, rw, zCrown),
+    ], shadeHex('#c4ceda', seBevelShade, mode));
+    // Sunlit top roof crown (always the brightest surface on the train -> true 3D volume!)
+    fillPoly([
+      b.proj(tailL + 0.8, -rw, zCrown),
+      b.proj(noseL - 0.8, -rw, zCrown),
+      b.proj(noseL - 0.8, rw, zCrown),
+      b.proj(tailL + 0.8, rw, zCrown),
+    ], shadeHex('#e8eef5', 1.06, mode), outlineCol, lw * 0.75);
+
+    // Rooftop HVAC pods & pantograph on lead/mid coaches
+    for (const podL of [-14, 10]) {
+      fillPoly([
+        b.proj(podL - 4.5, -rw * 0.72, zCrown + 1.1),
+        b.proj(podL + 4.5, -rw * 0.72, zCrown + 1.1),
+        b.proj(podL + 4.5, rw * 0.72, zCrown + 1.1),
+        b.proj(podL - 4.5, rw * 0.72, zCrown + 1.1),
+      ], shadeHex('#bcc6d2', 0.98, mode), outlineCol, lw * 0.6);
+    }
+    if (isLead) {
+      // Crisp overhead pantograph bar
+      const p0 = b.proj(-22, -rw * 0.9, zCrown + 3.4);
+      const p1 = b.proj(-22, rw * 0.9, zCrown + 3.4);
+      ctx.strokeStyle = isNight ? '#96a8c0' : '#4a5462';
+      ctx.lineWidth = Math.max(1.0, b.s * 0.7);
+      ctx.beginPath();
+      ctx.moveTo(p0[0], p0[1]);
+      ctx.lineTo(p1[0], p1[1]);
+      ctx.stroke();
+
+      // Swiss triple-headlight glow at night
+      if (isNight) {
+        fillPoly([
+          b.proj(hl, -hw * 0.75, zSkirt + 2.0),
+          b.proj(hl, hw * 0.75, zSkirt + 2.0),
+          b.proj(hl + 52, hw * 3.4, 0.2),
+          b.proj(hl + 52, -hw * 3.4, 0.2),
+        ], 'rgba(255,244,186,0.28)');
+      }
+    }
   }
 
   function drawAnimations(worldW, worldH, tSec) {
@@ -1423,7 +1955,7 @@
         frac = evalWithStationStop(tSec, ship.length_m, ship.speed_mps, ship.stop_frac, ship.dwell_sec, ship.phase || 0);
       }
       if (frac < 0 || frac > 1) continue;
-      const pos = samplePathAt(ship.pts, frac, worldW, worldH);
+      const pos = samplePathAt(ship.pts, frac, worldW, worldH, 3);
       if (!pos) continue;
 
       // Pixel water wake ripples behind moving vessels
@@ -1434,7 +1966,7 @@
           ? ((frac - k * 0.012) % 1 + 1) % 1
           : frac - k * 0.008;
         if (fWake <= 0 || fWake >= 1) continue;
-        const pw = samplePathAt(ship.pts, fWake, worldW, worldH);
+        const pw = samplePathAt(ship.pts, fWake, worldW, worldH, 3);
         if (!pw) continue;
         const spread = (ship.kind === 'zsg_steamer' ? 9 : 4) + k * 3.2;
         const nx = -pw.ty * spread * wScale;
@@ -1448,48 +1980,57 @@
       blitWorldSprite(sp, pos.wx, pos.wy, wScale);
     }
 
-    // 3. Road Cars & ZVV Lakefront Buses (respecting exact 3D foreground building/tree occlusion!)
+    // 3. Road Cars & ZVV Lakefront/Viaduct Buses (continuous 3D shaded & sorted back-to-front!)
+    const roadDrawList = [];
     for (let rIdx = 0; rIdx < (animData.roads || []).length; rIdx++) {
       const rd = animData.roads[rIdx];
       const cyc = rd.length_m / Math.max(1.0, rd.speed_mps);
-      const totalVehicles = (rd.car_count || 3) + (rd.has_bus ? 1 : 0);
+      const busCount = rd.bus_count != null ? rd.bus_count : (rd.has_bus ? 1 : 0);
+      const carCount = rd.car_count || 3;
+      const totalVehicles = carCount + busCount;
       for (let vIdx = 0; vIdx < totalVehicles; vIdx++) {
-        const isBus = rd.has_bus && vIdx === 0;
-        const vSpeedMul = isBus ? 0.82 : (0.92 + ((vIdx * 7 + rIdx * 3) % 5) * 0.045);
+        const isBus = vIdx < busCount;
+        const vSpeedMul = isBus ? 0.84 : (0.93 + ((vIdx * 7 + rIdx * 3) % 5) * 0.04);
         const frac = ((((tSec * vSpeedMul) / cyc) + (rd.phase || 0) + vIdx / totalVehicles) % 1 + 1) % 1;
-        if (frac < 0.015 || frac > 0.985) continue;
-        const pos = samplePathAt(rd.pts, frac, worldW, worldH);
+        if (frac < 0.012 || frac > 0.988) continue;
+        const pos = samplePathAt(rd.pts, frac, worldW, worldH, 3);
         if (!pos || pos.occ) continue;
-        const angIdx = ((Math.round((Math.atan2(pos.ty, pos.tx) / (Math.PI * 2)) * 32) % 32) + 32) % 32;
-        const sp = isBus
-          ? getVehicleSprite('bus', 0, angIdx, currentMode)
-          : getVehicleSprite('car', vIdx + rIdx * 3, angIdx, currentMode);
-        blitWorldSprite(sp, pos.wx, pos.wy, wScale);
+        roadDrawList.push({ isBus, pos, colorIdx: vIdx + rIdx * 3 });
+      }
+    }
+    roadDrawList.sort((a, b) => a.pos.wy - b.pos.wy);
+    for (const v of roadDrawList) {
+      if (v.isBus) {
+        draw3DBus(v.pos, wScale, currentMode);
+      } else {
+        draw3DCar(v.pos, v.colorIdx, wScale, currentMode);
       }
     }
 
-    // 4. SBB Seebahn Multi-Carriage Trains (decelerating & dwelling at Bahnhof Kilchberg!)
+    // 4. SBB Seebahn Multi-Carriage Trains (continuous 3D shaded, smoothly curving, articulated!)
     for (const tr of (animData.trains || [])) {
       const headFrac = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
       if (headFrac < 0 || headFrac > 1.08) continue;
-      const coachStepFrac = 19.5 / tr.length_m; // 19.5 m exact SBB coach pitch -> seamless articulated gangways!
+      const coachStepFrac = 19.5 / tr.length_m;
       const nCars = tr.carriages || 4;
-      // Draw from rear coach to lead cab in back-to-front screen Y order
       const units = [];
       for (let cIdx = 0; cIdx < nCars; cIdx++) {
         const cFrac = headFrac - cIdx * coachStepFrac;
         if (cFrac < 0.005 || cFrac > 0.995) continue;
-        const pos = samplePathAt(tr.pts, cFrac, worldW, worldH);
+        // Wide-chord tangent (tanWin=6) guarantees every coach follows the exact same smooth curve!
+        const pos = samplePathAt(tr.pts, cFrac, worldW, worldH, 6);
         if (pos && !pos.occ) {
           const variant = cIdx === 0 ? 0 : (cIdx === nCars - 1 ? 2 : 1);
-          units.push({ cIdx, variant, pos });
+          const nextFrac = headFrac - (cIdx + 1) * coachStepFrac;
+          const nextPos = (cIdx < nCars - 1 && nextFrac > 0.005 && nextFrac < 0.995)
+            ? samplePathAt(tr.pts, nextFrac, worldW, worldH, 6)
+            : null;
+          units.push({ cIdx, variant, pos, nextPos: (nextPos && !nextPos.occ) ? nextPos : null });
         }
       }
       units.sort((a, b) => a.pos.wy - b.pos.wy);
       for (const u of units) {
-        const angIdx = ((Math.round((Math.atan2(u.pos.ty, u.pos.tx) / (Math.PI * 2)) * 64) % 64) + 64) % 64;
-        const sp = getVehicleSprite(tr.kind, u.variant, angIdx, currentMode, 64);
-        blitWorldSprite(sp, u.pos.wx, u.pos.wy, wScale);
+        draw3DTrainUnit(u.pos, tr.kind, u.variant, wScale, currentMode, u.nextPos);
       }
     }
 
@@ -1608,10 +2149,25 @@
 
   window.addEventListener('resize', resizeViewport);
 
+  const urlParams = new URLSearchParams(window.location.search);
+  const fixedAnimTime = urlParams.has('t') && !Number.isNaN(parseFloat(urlParams.get('t')))
+    ? parseFloat(urlParams.get('t'))
+    : null;
+  if (urlParams.get('pins') === '0') {
+    showPins = false;
+    const btnPins = document.getElementById('btn-toggle-pins');
+    if (btnPins) btnPins.classList.remove('active');
+  }
+  const initMode = ['day', 'sunset', 'night'].includes(urlParams.get('mode')) ? urlParams.get('mode') : 'day';
+  if (initMode !== 'day') {
+    currentMode = initMode;
+    document.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === currentMode));
+  }
+
   // Boot
   Promise.all([
-    loadModeOverview('day'),
-    loadTileManifest('day'),
+    loadModeOverview(currentMode),
+    loadTileManifest(currentMode),
     fetch(`data/kilchberg_interactive.json?v=${ASSET_VER}`).then((r) => r.json()).catch(() => null),
     fetch(`data/kilchberg_animations.json?v=${ASSET_VER}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]).then(([_, __, loadedMeta, loadedAnim]) => {
@@ -1619,14 +2175,30 @@
     animData = loadedAnim;
     populateSidebar();
     resizeViewport();
-    fitToScreen();
+    const qZoom = parseFloat(urlParams.get('zoom'));
+    const qU = parseFloat(urlParams.get('u'));
+    const qV = parseFloat(urlParams.get('v'));
+    if (!Number.isNaN(qZoom) && qZoom > 0) {
+      const { width, height } = getWorldSize();
+      const cu = !Number.isNaN(qU) ? qU : 0.5;
+      const cv = !Number.isNaN(qV) ? qV : 0.5;
+      scale = qZoom;
+      offsetX = canvas.width * 0.5 - cu * width * scale;
+      offsetY = canvas.height * 0.5 - cv * height * scale;
+      updateZoomReadout();
+      draw();
+    } else {
+      fitToScreen();
+    }
     if (showAnimations && animData) {
       requestAnimationFrame(animLoop);
     }
-    // Preload sunset & night overviews + manifests
-    loadModeOverview('sunset');
-    loadTileManifest('sunset');
-    loadModeOverview('night');
-    loadTileManifest('night');
+    // Preload remaining lighting modes
+    for (const m of ['day', 'sunset', 'night']) {
+      if (m !== currentMode) {
+        loadModeOverview(m);
+        loadTileManifest(m);
+      }
+    }
   });
 })();

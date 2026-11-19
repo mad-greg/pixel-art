@@ -176,10 +176,12 @@ def _catmull_rom_closed_or_open(ctrl: list[tuple[float, float]], step_m: float =
     return _resample_smooth_line(ls, step_m=step_m, offset_right_m=0.0)
 
 
-def _build_obstacle_surface(scene: SceneData) -> np.ndarray:
-    """Build 0.5 m foreground obstacle elevation grid (trees + 3D LOD2 building roofs + 3D bridges)."""
-    obs_z = (scene.dem + scene.chm).astype(np.float32)
-    if hasattr(scene, "bridge_z") and hasattr(scene, "bridge_class"):
+def _build_obstacle_surface(scene: SceneData, include_bridges: bool = True, include_trees: bool = False) -> np.ndarray:
+    """Build 0.5 m foreground obstacle elevation grid (3D LOD2 building roofs + optional bridges/trees)."""
+    obs_z = scene.dem.astype(np.float32).copy()
+    if include_trees:
+        obs_z = np.maximum(obs_z, (scene.dem + scene.chm).astype(np.float32))
+    if include_bridges and hasattr(scene, "bridge_z") and hasattr(scene, "bridge_class"):
         has_br = scene.bridge_class > 0
         obs_z[has_br] = np.maximum(obs_z[has_br], scene.bridge_z[has_br] + 1.0)
     # Stamp exact 3D building roof elevations onto roof triangles' bounding footprints
@@ -334,7 +336,8 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, e_nb, n_nb, z_nb, vehicle_h=3.8),
         })
 
-    # 2. Road Network: Seestrasse (ZVV Route 161 Bus + Cars), Dorfstrasse Viaduct, A3 Motorway, and Village Streets
+    # 2. Road Network: Seestrasse (ZVV Route 161 Buses + Cars), Dorfstrasse Viaduct, A3 Motorway, and Village Streets
+    obs_z_road = _build_obstacle_surface(scene, include_bridges=False, include_trees=False)
     roads_out = []
     prim_geoms = get_clipped("primary")
     see_spine = _stitch_longest_path(prim_geoms, (2683371.0, 1243254.0), (2684410.0, 1241104.0), snap_tol=6.0)
@@ -351,30 +354,34 @@ def export_animations(mpp_full: float = 0.25) -> Path:
                 "length_m": round(lr, 1),
                 "speed_mps": 11.5,
                 "has_bus": True,
-                "car_count": 5,
+                "bus_count": 2,
+                "car_count": 12,
                 "phase": phase0,
-                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, er, nr, zr, vehicle_h=1.9),
+                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, er, nr, zr, vehicle_h=2.4),
             })
 
     # Dedicated Dorfstrasse Horseshoe Viaduct route (Seestrasse Bendlikon -> up Dorfstrasse viaduct -> Dorf!)
     minor_all = get_clipped("minor")
-    dorf_spine = _stitch_longest_path(minor_all, (2684040.0, 1241872.0), (2683620.0, 1241920.0), snap_tol=6.0)
+    sec_all = get_clipped("secondary") + get_clipped("tertiary")
+    dorf_pool = prim_geoms + sec_all + minor_all
+    dorf_spine = _stitch_longest_path(dorf_pool, (2684040.0, 1241872.0), (2683620.0, 1241920.0), snap_tol=12.0)
     if dorf_spine is not None and dorf_spine.length >= 180.0:
         for dir_id, ls_dir, phase0, has_b in [
             ("dorfstrasse_viaduct_up", dorf_spine, 0.14, True),
-            ("dorfstrasse_viaduct_dn", LineString(list(reversed(list(dorf_spine.coords)))), 0.62, False),
+            ("dorfstrasse_viaduct_dn", LineString(list(reversed(list(dorf_spine.coords)))), 0.62, True),
         ]:
             ed, nd, ld = _resample_smooth_line(ls_dir, step_m=2.6, offset_right_m=1.55)
             zd = _sample_road_z(scene, ed, nd) + 0.35
             roads_out.append({
                 "id": dir_id,
-                "kind": "village",
+                "kind": "viaduct",
                 "length_m": round(ld, 1),
-                "speed_mps": 8.2,
+                "speed_mps": 8.5,
                 "has_bus": has_b,
-                "car_count": 2,
+                "bus_count": 1,
+                "car_count": 5,
                 "phase": phase0,
-                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, ed, nd, zd, vehicle_h=2.0),
+                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, ed, nd, zd, vehicle_h=2.4),
             })
 
     mw_geoms = sorted(get_clipped("motorway"), key=lambda g: -g.length)
@@ -389,9 +396,9 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "length_m": round(lm, 1),
             "speed_mps": 24.0,
             "has_bus": False,
-            "car_count": 5,
+            "car_count": 12,
             "phase": idx_m * 0.41,
-            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, em, nm, zm, vehicle_h=2.0),
+            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, em, nm, zm, vehicle_h=2.4),
         })
 
     minor_geoms = [g for g in sorted(minor_all, key=lambda s: -s.length) if g.length >= 370.0][:5]
@@ -403,10 +410,11 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "kind": "village",
             "length_m": round(lv, 1),
             "speed_mps": 8.5,
-            "has_bus": (idx_v == 0),
-            "car_count": 2,
+            "has_bus": (idx_v in (0, 1)),
+            "bus_count": 1,
+            "car_count": 4,
             "phase": (idx_v * 0.23) % 1.0,
-            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, ev, nv, zv, vehicle_h=1.8),
+            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, ev, nv, zv, vehicle_h=2.2),
         })
 
     # 3. Lake Zurich ZSG Passenger Steamer (docking at Bendlikon Pier!) & Leisure Sailboats

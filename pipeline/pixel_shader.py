@@ -1463,45 +1463,61 @@ def _render_sculpted_pixel_art_trees_and_hedges(
 
         # Deterministic per-tree silhouette & slight hue variation
         s1 = ((tid * 73856093) ^ 0x5A5A) & 0xFF
-        s2 = ((tid * 19349663) ^ 0x3C3C) & 0xFF
         jitter_x = ((s1 / 255.0) - 0.5) * 0.32 * r_px
         ramp = SPECIES_RAMPS[sp_k]
 
+        # True non-periodic 2D spatial hashes (uint32 avalanche mixing — ZERO diagonal stripes!)
+        ix = gx.astype(np.uint32)
+        iy = gy.astype(np.uint32)
+        cx2 = ix >> np.uint32(1)
+        cy2 = iy >> np.uint32(1)
+        h2 = cx2 * np.uint32(374761393) + cy2 * np.uint32(668265263) + np.uint32((tid * 1442695041) & 0xFFFFFFFF)
+        h2 = (h2 ^ (h2 >> np.uint32(13))) * np.uint32(1274126177)
+        h2 = h2 ^ (h2 >> np.uint32(16))
+        clump_2x2 = (h2 & np.uint32(255)).astype(np.float32) * (1.0 / 255.0) - 0.5
+
+        h1 = ix * np.uint32(1597334677) + iy * np.uint32(3812015801) + np.uint32((tid * 2654435761) & 0xFFFFFFFF)
+        h1 = (h1 ^ (h1 >> np.uint32(13))) * np.uint32(1274126177)
+        h1 = h1 ^ (h1 >> np.uint32(16))
+        micro_1x1 = (h1 & np.uint32(255)).astype(np.float32) * (1.0 / 255.0) - 0.5
+
+        bayer_t = BAYER_4X4[iy & np.uint32(3), ix & np.uint32(3)]
+
         if sp_k == 2:
-            # ALPINE SPRUCE / FIR CONIFER: 4 stacked scalloped conical pine tiers!
+            # ALPINE SPRUCE / FIR CONIFER: 4 stacked scalloped conical pine tiers with organic pine needles!
             in_v = (v_h >= -0.04) & (v_h <= 1.04)
             v_c = np.clip(v_h, 0.0, 1.0)
             tier_wave = 0.74 + 0.32 * (1.0 - ((v_c * 4.0) % 1.0))
             half_w_y = np.maximum(0.9, r_px * (1.0 - 0.88 * v_c) * tier_wave)
-            edge_n = ((((gx.astype(np.int32) * 13 + gy.astype(np.int32) * 29 + tid) & 7) - 3.5) * 0.25)
+            edge_n = clump_2x2 * 1.15 + micro_1x1 * 0.65
             nx_n = dx / np.maximum(1.0, half_w_y + edge_n)
             inside = in_v & (np.abs(nx_n) <= 1.0)
             if not inside.any():
                 continue
             nz_n = np.sqrt(np.maximum(0.05, 1.0 - np.minimum(0.98, nx_n * nx_n)))
             ny_n = 0.28 + 0.45 * v_c - 0.28 * (((v_c * 4.0) % 1.0))
-            tier_sh = np.where(((v_c * 4.0) % 1.0) < 0.26, -0.28, 0.0)
-            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s + tier_sh
+            tier_sh = np.where(((v_c * 4.0) % 1.0) < 0.26, -0.26, 0.0)
+            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s + tier_sh + clump_2x2 * 0.34 + micro_1x1 * 0.16 + bayer_t * 0.22
             d_surf = d0 - nz_n * (r_m * 0.78) - v_c * (h_m * 0.45 * sp_c)
 
         elif sp_k == 3:
-            # SLENDER CYPRESS / LOMBARDY POPLAR: Crisp tall flame-shaped spire!
+            # SLENDER CYPRESS / LOMBARDY POPLAR: Crisp tall flame-shaped spire with leafy edge texture!
             in_v = (v_h >= -0.02) & (v_h <= 1.04)
             v_c = np.clip(v_h, 0.0, 1.0)
             flame = np.sin(np.power(v_c, 0.72) * math.pi)
-            half_w_y = np.maximum(0.9, r_px * (0.28 + 0.85 * flame))
+            half_w_y = np.maximum(0.9, r_px * (0.28 + 0.85 * flame) + micro_1x1 * 0.6)
             nx_n = dx / half_w_y
             inside = in_v & (np.abs(nx_n) <= 1.0)
             if not inside.any():
                 continue
             nz_n = np.sqrt(np.maximum(0.05, 1.0 - np.minimum(0.98, nx_n * nx_n)))
             ny_n = (v_c - 0.45) * 0.8
-            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s
+            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s + clump_2x2 * 0.32 + micro_1x1 * 0.14 + bayer_t * 0.20
             d_surf = d0 - nz_n * (r_m * 0.75) - v_c * (h_m * 0.45 * sp_c)
 
         else:
             # BROADLEAF DECIDUOUS (Oak, Beech, Linden, Maple, Copper Beech):
-            # Wide, billowing 6-puff 90s pixel-art leaf canopy with leafy stipple clusters!
+            # Wide, billowing 6-puff 90s pixel-art leaf canopy with organic leaf-cluster stipple & nibbled rim!
             dy_c = gy - crown_cy
             lobes = (
                 (0.0, -0.22 * crown_ry, 0.68 * r_px, 0.66 * crown_ry),
@@ -1527,18 +1543,20 @@ def _render_sculpted_pixel_art_trees_and_hedges(
                 best_nx[better] = ux[better]
                 best_ny[better] = -uy[better]
 
-            inside = best_z > 0.0
+            # Organic nibbled outer foliage rim so silhouettes look leafy instead of smooth ovals
+            rim_thresh = 0.08 + clump_2x2 * 0.16 + micro_1x1 * 0.10
+            inside = best_z > np.maximum(0.0, rim_thresh)
             if not inside.any():
                 continue
             nz_n = best_z
             nd_s = best_nx * lx_s + best_ny * ly_s + nz_n * lz_s
-            # Crisp 2x2 pixel-art leaf-cluster stipple & subtle underside canopy self-shadow!
-            leaf_clump = ((((gx.astype(np.int32) >> 1) * 17 + (gy.astype(np.int32) >> 1) * 31 + s2) & 7) - 3.5) * 0.14
-            nd_s = nd_s + leaf_clump - np.clip(0.32 - v_h, 0.0, 0.35) * 0.55
+            # Organic 2x2 leaf clusters + 1x1 leaf highlights + 4x4 Bayer ordered dither (breaks concentric rings!)
+            leaf_tex = clump_2x2 * 0.44 + micro_1x1 * 0.18 + bayer_t * 0.24
+            nd_s = nd_s + leaf_tex - np.clip(0.32 - v_h, 0.0, 0.35) * 0.52
             d_surf = d0 - nz_n * (r_m * 0.82) - np.clip(v_h, 0.0, 1.0) * (h_m * 0.42 * sp_c)
 
         # Quantize lighting into all 4 crisp hand-drawn 90s pixel-art leaf tones!
-        tone_idx = np.clip(np.floor((nd_s + 0.02) * 2.85).astype(np.int32), 0, 3)
+        tone_idx = np.clip(np.floor((nd_s + 0.04) * 2.85).astype(np.int32), 0, 3)
 
         sub_z = zbuf[y0_b : y1_b + 1, x0_b : x1_b + 1]
         win = inside & (d_surf < sub_z)
@@ -2984,18 +3002,17 @@ def render_diorama_tiled_hires(
     }
     (tiles_dir / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":")))
 
-    ov_w = min(W_full, 4160)
-    ov_h = int(round(H_full * (ov_w / W_full)))
-    ov_img = master_img.resize((ov_w, ov_h), resample=Image.Resampling.BOX)
-    ov_img.save(overview_webp_path, format="WEBP", lossless=True, method=4)
+    ov_w = W_full // 2
+    ov_h = H_full // 2
+    ov_img = master_img.resize((ov_w, ov_h), resample=Image.Resampling.LANCZOS)
+    ov_img.save(overview_webp_path, format="WEBP", quality=94, method=4)
 
-    png_img = master_img.resize((W_full // 2, H_full // 2), resample=Image.Resampling.NEAREST)
-    png_img.save(full_png_path, optimize=True)
+    ov_img.save(full_png_path, optimize=True)
 
     hit_data = {}
     if collect_hit_boxes:
         hit_data = _extract_interactive_metadata(scene, cam, shift_x_full, shift_y_full, W_full, H_full)
 
-    del master_img, ov_img, png_img
+    del master_img, ov_img
     gc.collect()
     return hit_data
