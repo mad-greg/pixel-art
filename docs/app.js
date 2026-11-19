@@ -1530,6 +1530,46 @@
     return { cx, cy, s, tx, ty, rx, ry, proj, dirShade };
   }
 
+  function makeTwoPointIsoBasis(pRear, pFront, hl, wScale) {
+    // True articulated rail-car kinematics: front coupler sits on pFront and rear coupler sits on pRear!
+    // Automatically preserves exact isometric foreshortening along any curve so adjacent wagons stay
+    // locked end-to-end with zero center-pivot swing, zero lateral offset, and zero gap/overlap!
+    const s = scale * wScale;
+    const fx = offsetX + pFront.wx * scale;
+    const fy = offsetY + pFront.wy * scale;
+    const rx0 = offsetX + pRear.wx * scale;
+    const ry0 = offsetY + pRear.wy * scale;
+    const cx = (fx + rx0) * 0.5;
+    const cy = (fy + ry0) * 0.5;
+    const dx = fx - rx0;
+    const dy = fy - ry0;
+    const mag = Math.hypot(dx, dy) || 1;
+    const tx = dx / mag;
+    const ty = dy / mag;
+    const isoScaleY = 0.55;
+    const gx = tx;
+    const gy = ty / isoScaleY;
+    const gMag = Math.hypot(gx, gy) || 1;
+    const rx = -gy / gMag;
+    const ry = (gx / gMag) * isoScaleY;
+    const inv2hl = 1 / (2 * hl);
+    const proj = (l, w, z) => {
+      const u = (l + hl) * inv2hl; // -hl -> 0 (pRear), +hl -> 1 (pFront)
+      return [
+        rx0 + u * dx + w * rx * s,
+        ry0 + u * dy + (w * ry - z * 0.84) * s,
+      ];
+    };
+    const dirShade = (nl, nw) => {
+      const nx = nl * tx + nw * rx;
+      const ny = nl * ty + nw * ry;
+      const nm = Math.hypot(nx, ny) || 1;
+      const dot = (nx / nm) * (-0.72) + (ny / nm) * (-0.69);
+      return 0.78 + Math.max(-1, Math.min(1, dot)) * 0.26;
+    };
+    return { cx, cy, s, tx, ty, rx, ry, proj, dirShade };
+  }
+
   function fillPoly(pts, fill, stroke = null, lw = 1) {
     vCtx.beginPath();
     vCtx.moveTo(pts[0][0], pts[0][1]);
@@ -1753,19 +1793,19 @@
     }
   }
 
-  function draw3DTrainUnit(pos, kind, variant, wScale, mode, nextPos) {
+  function draw3DTrainUnit(pRear, pFront, kind, variant, wScale, mode, nextRear, nextFront) {
     // Museum-grade continuous 3D SBB RABe 511 KISS Double-Decker & SBB Re 460 IC
-    // Rounded 3-facet sunlit roof, directional NW-sun walls, double-deck tinted windows,
-    // red SBB doors, overhead pantograph, and articulated dark rubber gangway bellows!
-    const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
-    if (b.cx < -120 || b.cx > canvas.width + 120 || b.cy < -120 || b.cy > canvas.height + 120) return;
+    // True two-point rail-pinned kinematics (pFront & pRear on the track) so every wagon
+    // tracks the rail like a real articulated train with locked dark rubber gangway bellows!
+    const hl = 34.5; // local coordinate range [-hl, +hl] mapped directly to [pRear, pFront]
+    const b = makeTwoPointIsoBasis(pRear, pFront, hl, wScale);
+    if (b.cx < -140 || b.cx > canvas.width + 140 || b.cy < -140 || b.cy > canvas.height + 140) return;
 
     const isNight = mode === 'night';
     const isKISS = kind === 'sbb_kiss';
     const isLead = variant === 0;
     const isTail = variant === 2;
 
-    const hl = 34.5; // ~17.5 m coach body (pairs with 19.5 m pitch for 2 m articulated gangway!)
     const hw = 6.8;  // ~3.0 m wide SBB carbody
     const zBot = 1.6;
     const zSkirt = 3.8;
@@ -1781,27 +1821,27 @@
     // 1. Grounded cast SE shadow along the gravel ballast bed
     const shOff = [5.4 * b.s, 4.0 * b.s];
     fillPoly([
-      b.proj(hl + 2.0, -hw - 1.2, 0),
-      b.proj(hl + 2.0, hw + 1.2, 0),
-      b.proj(-hl - 2.0, hw + 1.2, 0),
-      b.proj(-hl - 2.0, -hw - 1.2, 0),
+      b.proj(hl + 1.5, -hw - 1.2, 0),
+      b.proj(hl + 1.5, hw + 1.2, 0),
+      b.proj(-hl - 1.5, hw + 1.2, 0),
+      b.proj(-hl - 1.5, -hw - 1.2, 0),
     ].map(([x, y]) => [x + shOff[0], y + shOff[1]]), isNight ? 'rgba(6,10,20,0.68)' : 'rgba(20,24,32,0.48)');
 
-    // 2. Articulated dark rubber gangway bellows connecting directly to next coach!
-    if (nextPos) {
-      const bNext = makeScreenIsoBasis(nextPos.wx, nextPos.wy, nextPos.tx, nextPos.ty, wScale);
-      const gw = hw * 0.72;
+    // 2. Articulated dark rubber gangway bellows locked directly from this wagon's rear to next wagon's front!
+    if (nextRear && nextFront) {
+      const bNext = makeTwoPointIsoBasis(nextRear, nextFront, hl, wScale);
+      const gw = hw * 0.78;
       fillPoly([
-        b.proj(-hl + 1.0, sideSign * gw, zSkirt),
-        bNext.proj(hl - 1.0, sideSign * gw, zSkirt),
-        bNext.proj(hl - 1.0, sideSign * gw, zEave - 0.6),
-        b.proj(-hl + 1.0, sideSign * gw, zEave - 0.6),
+        b.proj(-hl, sideSign * gw, zSkirt),
+        bNext.proj(hl, sideSign * gw, zSkirt),
+        bNext.proj(hl, sideSign * gw, zEave - 0.4),
+        b.proj(-hl, sideSign * gw, zEave - 0.4),
       ], shadeHex('#2c323b', 0.85, mode), outlineCol, lw * 0.8);
       fillPoly([
-        b.proj(-hl + 1.0, -gw, zEave - 0.6),
-        bNext.proj(hl - 1.0, -gw, zEave - 0.6),
-        bNext.proj(hl - 1.0, gw, zEave - 0.6),
-        b.proj(-hl + 1.0, gw, zEave - 0.6),
+        b.proj(-hl, -gw, zEave - 0.4),
+        bNext.proj(hl, -gw, zEave - 0.4),
+        bNext.proj(hl, gw, zEave - 0.4),
+        b.proj(-hl, gw, zEave - 0.4),
       ], shadeHex('#3e4652', 0.95, mode), outlineCol, lw * 0.8);
     }
 
@@ -2094,32 +2134,53 @@
       });
     }
 
-    // 4. SBB Seebahn Multi-Carriage Trains (continuous 3D shaded, smoothly curving, articulated!)
+    // 4. SBB Seebahn Multi-Carriage Trains (true two-point rail-pinned articulated wagons!)
     for (const tr of (animData.trains || [])) {
       const headFrac = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
-      if (headFrac < 0 || headFrac > 1.08) continue;
-      const coachStepFrac = 19.5 / tr.length_m;
+      if (headFrac < 0 || headFrac > 1.12) continue;
+      const coachPitchFrac = 19.5 / tr.length_m;
+      const bodyLenFrac = 18.1 / tr.length_m; // 18.1 m carbody + 1.4 m articulated rubber gangway = 19.5 m pitch
       const nCars = tr.carriages || 4;
-      const units = [];
+      const carSamples = [];
       for (let cIdx = 0; cIdx < nCars; cIdx++) {
-        const cFrac = headFrac - cIdx * coachStepFrac;
-        if (cFrac < 0.005 || cFrac > 0.995) continue;
-        // Wide-chord tangent (tanWin=6) guarantees every coach follows the exact same smooth curve!
-        const pos = samplePathAt(tr.pts, cFrac, worldW, worldH, 6);
-        if (pos && (depthPixels || !pos.occ)) {
-          const variant = cIdx === 0 ? 0 : (cIdx === nCars - 1 ? 2 : 1);
-          const nextFrac = headFrac - (cIdx + 1) * coachStepFrac;
-          const nextPos = (cIdx < nCars - 1 && nextFrac > 0.005 && nextFrac < 0.995)
-            ? samplePathAt(tr.pts, nextFrac, worldW, worldH, 6)
-            : null;
-          units.push({ cIdx, variant, pos, nextPos: (nextPos && (depthPixels || !nextPos.occ)) ? nextPos : null });
+        const fFront = headFrac - cIdx * coachPitchFrac;
+        const fRear = fFront - bodyLenFrac;
+        if (fRear < 0.004 || fFront > 0.996) {
+          carSamples.push(null);
+          continue;
+        }
+        const pFront = samplePathAt(tr.pts, fFront, worldW, worldH, 2);
+        const pRear = samplePathAt(tr.pts, fRear, worldW, worldH, 2);
+        if (pFront && pRear && (depthPixels || (!pFront.occ && !pRear.occ))) {
+          carSamples.push({
+            cIdx,
+            variant: cIdx === 0 ? 0 : (cIdx === nCars - 1 ? 2 : 1),
+            pFront,
+            pRear,
+            midWx: (pFront.wx + pRear.wx) * 0.5,
+            midWy: (pFront.wy + pRear.wy) * 0.5,
+            midD16: Math.round((pFront.d16 + pRear.d16) * 0.5),
+          });
+        } else {
+          carSamples.push(null);
         }
       }
-      units.sort((a, b) => a.pos.wy - b.pos.wy);
-      const trainPadW = (isNight ? 92 : 68) * wScale;
+      const units = [];
+      for (let cIdx = 0; cIdx < nCars; cIdx++) {
+        const u = carSamples[cIdx];
+        if (!u) continue;
+        const nxt = (cIdx < nCars - 1) ? carSamples[cIdx + 1] : null;
+        units.push({
+          ...u,
+          nextRear: nxt ? nxt.pRear : null,
+          nextFront: nxt ? nxt.pFront : null,
+        });
+      }
+      units.sort((a, b) => a.midWy - b.midWy);
+      const trainPadW = (isNight ? 98 : 76) * wScale;
       for (const u of units) {
-        drawDepthMasked(u.pos.wx, u.pos.wy, trainPadW, u.pos.d16, worldW, worldH, () => {
-          draw3DTrainUnit(u.pos, tr.kind, u.variant, wScale, currentMode, u.nextPos);
+        drawDepthMasked(u.midWx, u.midWy, trainPadW, u.midD16, worldW, worldH, () => {
+          draw3DTrainUnit(u.pRear, u.pFront, tr.kind, u.variant, wScale, currentMode, u.nextRear, u.nextFront);
         });
       }
     }
