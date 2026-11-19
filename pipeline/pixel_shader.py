@@ -892,8 +892,6 @@ def _shade_drawn_ground_90s(
             ortho_w = np.clip(raw_ortho[wi].astype(np.float32) * 1.15, 22.0, 165.0)
             w_col = (1.0 - shallow_tint) * w_col + shallow_tint * ortho_w
 
-            ripple = np.sin(we_w * 0.42 + wn_w * 0.31) * np.cos(we_w * 0.19 - wn_w * 0.47)
-            w_col += ripple[:, None] * np.array([3.5, 5.5, 5.5])
             shore_f = depth_m < 0.48
             w_col[shore_f] = 0.65 * w_col[shore_f] + 0.35 * np.array([176.0, 212.0, 204.0])
             gcol[wi] = w_col

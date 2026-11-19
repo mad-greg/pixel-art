@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '4.5';
+  const ASSET_VER = '4.6';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -28,6 +28,9 @@
   let depthPixels = null;     // Uint8ClampedArray (R/G = 16-bit scene depth, B = 255 if 3D occluder)
   let depthW = 0;
   let depthH = 0;
+  let waterMask = null;       // Uint8Array (1 = eroded pure open water, 0 = shore/rock/boat/pier/land)
+  let waterW = 0;
+  let waterH = 0;
 
   let currentMode = 'day';
   let meta = null;
@@ -2163,54 +2166,80 @@
         const wx = st.u * worldW + st.nx * dist;
         const wy = st.v * worldH + st.ny * dist;
 
-        // Clip cleanly behind harbor piers, boathouses & shoreline trees using our 16-bit depth occluder map!
-        if (depthPixels) {
-          const dx = Math.floor((wx / worldW) * depthW);
-          const dy = Math.floor((wy / worldH) * depthH);
-          if (dx >= 0 && dx < depthW && dy >= 0 && dy < depthH) {
-            if (depthPixels[(dy * depthW + dx) * 4 + 2] > 128) continue;
+        const isBreaking = p > 0.66;
+        const halfLenW = (15.0 + st.seed * 12.0) * (0.65 + 0.35 * Math.sin(p * Math.PI)) * wScale;
+        // Subtle inward bow in world coords (center of wavelet curves slightly toward the shore!)
+        const bowW = -2.2 * wScale;
+        const wx0 = wx - ux * halfLenW;
+        const wy0 = wy - uy * halfLenW;
+        const wx1 = wx + ux * halfLenW;
+        const wy1 = wy + uy * halfLenW;
+        const wcx = wx + st.nx * bowW;
+        const wcy = wy + st.ny * bowW;
+
+        // Sample 9 points along the quadratic arc and break cleanly whenever any point hits
+        // a shore element, seawall, dark rock, moored boat, or wooden pier!
+        const subRuns = [];
+        let curRun = [];
+        const N_SUB = 8;
+        for (let k = 0; k <= N_SUB; k++) {
+          const t = k / N_SUB;
+          const omt = 1 - t;
+          const pwx = omt * omt * wx0 + 2 * omt * t * wcx + t * t * wx1;
+          const pwy = omt * omt * wy0 + 2 * omt * t * wcy + t * t * wy1;
+          let ok = true;
+          if (waterMask) {
+            const mx = Math.floor((pwx / worldW) * waterW);
+            const my = Math.floor((pwy / worldH) * waterH);
+            ok = (mx >= 0 && mx < waterW && my >= 0 && my < waterH && waterMask[my * waterW + mx] === 1);
+          } else if (depthPixels) {
+            const dx = Math.floor((pwx / worldW) * depthW);
+            const dy = Math.floor((pwy / worldH) * depthH);
+            ok = !(dx >= 0 && dx < depthW && dy >= 0 && dy < depthH && depthPixels[(dy * depthW + dx) * 4 + 2] > 128);
+          }
+          if (ok) {
+            curRun.push([offsetX + pwx * scale, offsetY + pwy * scale]);
+          } else {
+            if (curRun.length >= 2) subRuns.push(curRun);
+            curRun = [];
           }
         }
+        if (curRun.length >= 2) subRuns.push(curRun);
+        if (subRuns.length === 0) continue;
 
-        const sx = offsetX + wx * scale;
-        const sy = offsetY + wy * scale;
-        const isBreaking = p > 0.66;
-        const halfLen = (15.0 + st.seed * 12.0) * (0.65 + 0.35 * Math.sin(p * Math.PI)) * s;
-        // Subtle inward bow (center of wavelet curves slightly toward the shore!)
-        const bow = -2.2 * s;
-        const x0 = sx - ux * halfLen;
-        const y0 = sy - uy * halfLen;
-        const x1 = sx + ux * halfLen;
-        const y1 = sy + uy * halfLen;
-        const cx = sx + st.nx * bow;
-        const cy = sy + st.ny * bow;
-
-        // 1. Subtle darker-teal shadow trough just offshore behind the crest
         const shX = st.nx * 2.1 * s;
         const shY = st.ny * 2.1 * s;
-        ctx.globalAlpha = alpha * 0.65;
-        ctx.strokeStyle = troughCol;
-        ctx.lineWidth = Math.max(1.1, 1.8 * s);
-        ctx.beginPath();
-        ctx.moveTo(x0 + shX, y0 + shY);
-        ctx.quadraticCurveTo(cx + shX, cy + shY, x1 + shX, y1 + shY);
-        ctx.stroke();
+        for (const run of subRuns) {
+          // 1. Subtle darker-teal shadow trough just offshore behind the crest
+          ctx.globalAlpha = alpha * 0.65;
+          ctx.strokeStyle = troughCol;
+          ctx.lineWidth = Math.max(1.1, 1.8 * s);
+          ctx.beginPath();
+          for (let k = 0; k < run.length; k++) {
+            if (k === 0) ctx.moveTo(run[k][0] + shX, run[k][1] + shY);
+            else ctx.lineTo(run[k][0] + shX, run[k][1] + shY);
+          }
+          ctx.stroke();
 
-        // 2. Soft curved aqua/foam wave crest gliding smoothly toward shore
-        ctx.globalAlpha = alpha * (isBreaking ? 0.88 : 0.68);
-        ctx.strokeStyle = isBreaking ? foamCol : swellCol;
-        ctx.lineWidth = Math.max(1.0, (isBreaking ? 1.9 : 1.35) * s);
-        ctx.beginPath();
-        ctx.moveTo(x0, y0);
-        ctx.quadraticCurveTo(cx, cy, x1, y1);
-        ctx.stroke();
+          // 2. Soft curved aqua/foam wave crest gliding smoothly toward shore
+          ctx.globalAlpha = alpha * (isBreaking ? 0.88 : 0.68);
+          ctx.strokeStyle = isBreaking ? foamCol : swellCol;
+          ctx.lineWidth = Math.max(1.0, (isBreaking ? 1.9 : 1.35) * s);
+          ctx.beginPath();
+          for (let k = 0; k < run.length; k++) {
+            if (k === 0) ctx.moveTo(run[k][0], run[k][1]);
+            else ctx.lineTo(run[k][0], run[k][1]);
+          }
+          ctx.stroke();
 
-        // 3. Delicate pixel-art foam sparkle at peak shoreline lap
-        if (isBreaking && alpha > 0.35) {
-          const pxSz = Math.max(1.2, 1.5 * s);
-          ctx.globalAlpha = alpha * 0.9;
-          ctx.fillStyle = foamCol;
-          ctx.fillRect(Math.round(cx - pxSz * 1.4), Math.round(cy - pxSz * 0.5), Math.round(pxSz * 2.8), Math.max(1, Math.round(pxSz)));
+          // 3. Delicate pixel-art foam sparkle at peak shoreline lap
+          if (isBreaking && alpha > 0.35 && run.length >= 3) {
+            const mid = run[Math.floor(run.length / 2)];
+            const pxSz = Math.max(1.2, 1.5 * s);
+            ctx.globalAlpha = alpha * 0.9;
+            ctx.fillStyle = foamCol;
+            ctx.fillRect(Math.round(mid[0] - pxSz * 1.4), Math.round(mid[1] - pxSz * 0.5), Math.round(pxSz * 2.8), Math.max(1, Math.round(pxSz)));
+          }
         }
       }
     }
@@ -2683,16 +2712,75 @@
     });
   }
 
+  function buildWaterMask() {
+    const dayImg = overviewImages.day;
+    if (!dayImg || !dayImg.naturalWidth) return;
+    try {
+      // 1/4 master resolution (~3082x1361 -> 0.5 m/px water mask) with 1px erosion
+      // so shoreline waves stop cleanly before touching any seawall, rock, boat, or pier!
+      const mw = Math.floor(dayImg.naturalWidth / 2);
+      const mh = Math.floor(dayImg.naturalHeight / 2);
+      const wc = document.createElement('canvas');
+      wc.width = mw;
+      wc.height = mh;
+      const wctx = wc.getContext('2d', { willReadFrequently: true });
+      wctx.drawImage(dayImg, 0, 0, mw, mh);
+      const px = wctx.getImageData(0, 0, mw, mh).data;
+      const raw = new Uint8Array(mw * mh);
+      for (let y = 0; y < mh; y++) {
+        const dy = depthPixels ? Math.min(depthH - 1, Math.floor((y / mh) * depthH)) : 0;
+        const dRow = dy * depthW;
+        for (let x = 0; x < mw; x++) {
+          const i = (y * mw + x) * 4;
+          const r = px[i];
+          const g = px[i + 1];
+          const b = px[i + 2];
+          // True Lake Zurich water hue (teal/aqua/deep blue — excludes grey seawalls, dark rocks/boats, green grass!)
+          if (b > r + 10 && g > r + 6 && b > 66 && r < 126) {
+            if (depthPixels) {
+              const dx = Math.min(depthW - 1, Math.floor((x / mw) * depthW));
+              if (depthPixels[(dRow + dx) * 4 + 2] > 128) continue;
+            }
+            raw[y * mw + x] = 1;
+          }
+        }
+      }
+      // 3x3 erosion (1px margin) so wave stroke width never spills onto adjacent rocks, boats, or seawalls
+      const eroded = new Uint8Array(mw * mh);
+      for (let y = 1; y < mh - 1; y++) {
+        const row = y * mw;
+        for (let x = 1; x < mw - 1; x++) {
+          const idx = row + x;
+          if (
+            raw[idx] && raw[idx - 1] && raw[idx + 1]
+            && raw[idx - mw] && raw[idx + mw]
+            && raw[idx - mw - 1] && raw[idx - mw + 1]
+            && raw[idx + mw - 1] && raw[idx + mw + 1]
+          ) {
+            eroded[idx] = 1;
+          }
+        }
+      }
+      waterMask = eroded;
+      waterW = mw;
+      waterH = mh;
+    } catch (err) {
+      waterMask = null;
+    }
+  }
+
   // Boot
   Promise.all([
     loadModeOverview(currentMode),
+    currentMode === 'day' ? Promise.resolve() : loadModeOverview('day'),
     loadTileManifest(currentMode),
     loadDepthMap(),
     fetch(`data/kilchberg_interactive.json?v=${ASSET_VER}`).then((r) => r.json()).catch(() => null),
     fetch(`data/kilchberg_animations.json?v=${ASSET_VER}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-  ]).then(([_, __, ___, loadedMeta, loadedAnim]) => {
+  ]).then(([_, __, ___, ____, loadedMeta, loadedAnim]) => {
     meta = loadedMeta;
     animData = loadedAnim;
+    buildWaterMask();
     populateSidebar();
     resizeViewport();
     const qZoom = parseFloat(urlParams.get('zoom'));
