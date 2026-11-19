@@ -81,6 +81,7 @@ M_WINDOW_DAY = 10
 M_TREE = 11
 M_TRUNK = 12
 M_BRIDGE = 13
+M_RAIL = 14
 
 # Classic 4x4 Bayer ordered dither matrix normalized to [-0.5, +0.5]
 BAYER_4X4 = (
@@ -848,6 +849,7 @@ def _shade_drawn_ground_90s(
         rcol[rail_steel] = [196.0, 202.0, 210.0]
         gz[ri[rail_steel]] += 0.14
         gcol[ri] = rcol
+        gmat[ri] = M_RAIL
 
     # 11. SBB Station Platforms & Lakeside Stone Piers (G_PLATFORM_PIER): raised concrete + tactile safety edge!
     is_pl = (gsem == G_PLATFORM_PIER) & (~glake)
@@ -2949,9 +2951,9 @@ def render_diorama_tiled_hires(
     sun_sh = compute_shadow_grid(scene, preset.sun_az_deg, preset.sun_alt_deg)
     full_rgb = np.empty((H_full, W_full, 3), dtype=np.uint8)
 
-    # Export 1/4-res (~1.0 m/px) 16-bit 3D Depth & Occluder Map during 'day' pass
+    # Export 1/2-res (0.5 m/px -> 6165x2722!) 16-bit 3D Depth & Occluder Map during 'day' pass
     # (geometry is identical across day/sunset/night!) for pixel-exact partial vehicle occlusion!
-    DEPTH_DS = 4
+    DEPTH_DS = 2
     DEPTH_MIN = -2400.0
     DEPTH_MAX = 2400.0
     save_depth = preset_key == "day"
@@ -3012,11 +3014,13 @@ def render_diorama_tiled_hires(
                         | (m_blk == M_WINDOW_DAY)
                         | (m_blk == M_WINDOW_LIT)
                         | (m_blk == M_TREE)
+                        | (m_blk == M_TRUNK)
                         | (m_blk == M_BRIDGE)
+                        | (m_blk == M_RAIL)
                         | (m_blk == M_HARBOR_OBJ)
                     )
                     occ_cnt = occ_m.sum(axis=(1, 3))
-                    has_occ = occ_cnt >= 4
+                    has_occ = occ_cnt >= 1
                     if has_occ.any():
                         z_masked = np.where(occ_m, z_blk, 1e9)
                         d_min_blk = z_masked.min(axis=(1, 3))

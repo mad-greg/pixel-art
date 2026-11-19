@@ -204,16 +204,31 @@ def _sample_ground_z(dem: np.ndarray, e: np.ndarray, n: np.ndarray) -> np.ndarra
     return ndimage.gaussian_filter1d(z, sigma=2.0, mode="nearest") if len(z) >= 5 else z
 
 
-def _sample_road_z(scene: SceneData, e: np.ndarray, n: np.ndarray) -> np.ndarray:
-    """Sample road elevation taking the higher of bare-earth DEM and 3D elevated bridge/viaduct deck."""
+def _sample_road_z(
+    scene: SceneData,
+    e: np.ndarray,
+    n: np.ndarray,
+    underpass_poly=None,
+) -> np.ndarray:
+    """Sample road elevation taking the higher of bare-earth DEM and 3D elevated bridge/viaduct deck,
+    and sinking elevation beneath railway embankments/tunnels where roads pass underneath."""
     cols = np.clip(((e - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
     rows = np.clip(((N_MAX - n) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
     z = scene.dem[rows, cols].astype(np.float64)
+    on_bridge = np.zeros(len(e), dtype=bool)
     if hasattr(scene, "bridge_z") and hasattr(scene, "bridge_cls"):
         br_z = scene.bridge_z[rows, cols].astype(np.float64)
-        br_m = scene.bridge_cls[rows, cols] > 0
-        z = np.where(br_m, np.maximum(z, br_z), z)
-    return ndimage.gaussian_filter1d(z, sigma=1.6, mode="nearest") if len(z) >= 5 else z
+        on_bridge = scene.bridge_cls[rows, cols] > 0
+        z = np.where(on_bridge, np.maximum(z, br_z), z)
+    if len(z) >= 5:
+        z = ndimage.gaussian_filter1d(z, sigma=1.6, mode="nearest")
+    if underpass_poly is not None:
+        from shapely.prepared import prep
+        p_under = prep(underpass_poly)
+        for i in range(len(e)):
+            if not on_bridge[i] and p_under.contains(Point(float(e[i]), float(n[i]))):
+                z[i] -= 5.0
+    return z
 
 
 def _compute_occlusion(
@@ -343,6 +358,18 @@ def export_animations(mpp_full: float = 0.25) -> Path:
 
     # 2. Road Network: Seestrasse (ZVV Route 161 Buses + Cars), Dorfstrasse Viaduct, A3 Motorway, and Village Streets
     obs_z_road = _build_obstacle_surface(scene, include_bridges=False, include_trees=False)
+    road_tunnel_geoms = [
+        g.buffer(5.5)
+        for g, p in mvt.get("transportation", [])
+        if p.get("class") != "rail" and (p.get("brunnel") == "tunnel" or (p.get("layer") is not None and p.get("layer") < 0))
+    ]
+    rail_occ_geoms = [
+        g.buffer(6.5)
+        for g, p in mvt.get("transportation", [])
+        if p.get("class") == "rail" and p.get("brunnel") != "tunnel"
+    ]
+    underpass_poly = unary_union(road_tunnel_geoms + rail_occ_geoms) if (road_tunnel_geoms or rail_occ_geoms) else None
+
     roads_out = []
     prim_geoms = get_clipped("primary")
     see_spine = _stitch_longest_path(prim_geoms, (2683371.0, 1243254.0), (2684410.0, 1241104.0), snap_tol=6.0)
@@ -352,7 +379,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             ("seestrasse_nb", LineString(list(reversed(list(see_spine.coords)))), 0.37),
         ]:
             er, nr, lr = _resample_smooth_line(ls_dir, step_m=3.2, offset_right_m=1.9)
-            zr = _sample_road_z(scene, er, nr) + 0.35
+            zr = _sample_road_z(scene, er, nr, underpass_poly) + 0.35
             roads_out.append({
                 "id": dir_id,
                 "kind": "seestrasse",
@@ -376,7 +403,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             ("dorfstrasse_viaduct_dn", LineString(list(reversed(list(dorf_spine.coords)))), 0.62, True),
         ]:
             ed, nd, ld = _resample_smooth_line(ls_dir, step_m=2.6, offset_right_m=1.55)
-            zd = _sample_road_z(scene, ed, nd) + 0.35
+            zd = _sample_road_z(scene, ed, nd, underpass_poly) + 0.35
             roads_out.append({
                 "id": dir_id,
                 "kind": "viaduct",
@@ -394,7 +421,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         if mg.length < 300.0:
             continue
         em, nm, lm = _resample_smooth_line(mg, step_m=3.5, offset_right_m=0.0)
-        zm = _sample_road_z(scene, em, nm) + 0.35
+        zm = _sample_road_z(scene, em, nm, underpass_poly) + 0.35
         roads_out.append({
             "id": f"a3_motorway_{idx_m}",
             "kind": "motorway",
@@ -415,7 +442,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         is_collector = idx_v < min(3, len(collector_geoms))
         lane_off = 1.35 if is_collector else 0.75
         ev, nv, lv = _resample_smooth_line(vg, step_m=3.2, offset_right_m=lane_off)
-        zv = _sample_road_z(scene, ev, nv) + 0.35
+        zv = _sample_road_z(scene, ev, nv, underpass_poly) + 0.35
         has_b = is_collector and idx_v in (0, 1)
         roads_out.append({
             "id": f"village_st_{idx_v}",
