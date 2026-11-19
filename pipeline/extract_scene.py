@@ -458,21 +458,34 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     bathy_depth[~lake_mask] = 0.0
     bathy_z = LAKE_SURFACE_Z - bathy_depth
 
-    # Identify all named main Kilchberg streets (Dorfstrasse, Bahnhofstrasse, Alte Landstrasse,
-    # Weinbergstrasse, Böndlerstrasse, Stockenstrasse, Pilgerweg, Seestrasse) from transportation_name!
-    named_main_lines = [
-        g for g, p in mvt.get("transportation_name", [])
-        if p.get("class") in ("primary", "secondary") and g is not None and not g.is_empty
-    ]
-    named_main_buf = unary_union([g.buffer(3.2) for g in named_main_lines]) if named_main_lines else Polygon()
-
+    # True Swiss road hierarchy directly from swisstopo MVT transportation classes:
+    # - ONLY primary, secondary, tertiary (and Dorfstrasse Viaduct) are 2-lane main roads (G_STREET_MAIN)
+    # - minor (route=11) -> medium residential Quartierstrasse (G_STREET_MINOR, NO dashed centerline)
+    # - minor (route=None) / service -> narrow 1-lane residential lane / driveway (hw=1.85m, NO dashed centerline)
+    # - footway / path / track / pedestrian / cycleway -> narrow warm gravel walking path (G_FOOTPATH, hw=1.05m)
     def _is_main_road(ls: LineString, props: dict) -> bool:
-        if props.get("class") in ("primary", "secondary"):
+        cls = props.get("class")
+        if cls in ("primary", "secondary", "tertiary"):
             return True
-        if props.get("is_route") is not None:
+        # Dorfstrasse horseshoe viaduct (tagged minor + route=11 in MVT) is a real 2-lane collector viaduct
+        if cls == "minor" and props.get("is_route") == 11 and props.get("brunnel") == "bridge":
+            cx, cy = ls.centroid.x, ls.centroid.y
+            if 2683890.0 <= cx <= 2684020.0 and 1241695.0 <= cy <= 1241820.0:
+                return True
+        return False
+
+    def _is_pedestrian_overpass(ls: LineString, props: dict) -> bool:
+        """Detect pedestrian/bicycle overpasses tagged as minor bridges (e.g. Bahnhof Kilchberg station overpass)."""
+        cls = props.get("class")
+        if cls in ("footway", "path", "track", "pedestrian", "cycleway"):
             return True
-        if not named_main_buf.is_empty and ls.intersects(named_main_buf):
-            if ls.intersection(named_main_buf).length >= 0.48 * ls.length:
+        if cls == "minor" and props.get("is_route") is None:
+            cx, cy = ls.centroid.x, ls.centroid.y
+            # Bahnhof Kilchberg station overpass (connects directly to station stairs!)
+            if 2683800.0 <= cx <= 2683920.0 and 1242000.0 <= cy <= 1242140.0:
+                return True
+            # Narrow lakeside pedestrian bridge near Bendlikon
+            if ls.length <= 15.0:
                 return True
         return False
 
@@ -540,7 +553,7 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
             if is_elev:
                 if cls == "motorway":
                     raw_bridges_mw.append(ls)
-                elif cls in ("footway", "path", "track"):
+                elif _is_pedestrian_overpass(ls, p):
                     if subcls == "steps":
                         raw_bridges_steps.append(ls)
                     else:
@@ -553,28 +566,30 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                 continue
 
             # Surface ground transportation
-            if cls in ("footway", "path", "track"):
-                foot_geoms.append(ls.buffer(1.15))
+            if cls in ("footway", "path", "track", "pedestrian", "cycleway"):
+                foot_geoms.append(ls.buffer(1.05))
             elif cls == "motorway":
                 hw = 5.4 if not p.get("ramp") else 3.4
                 mw_geoms.append(ls.buffer(hw))
                 road_centerlines_hw.append((ls, hw))
                 surf_road_lines.append(ls)
             elif cls in ("primary", "secondary", "tertiary", "minor", "service"):
-                if cls == "service":
-                    hw = 2.0
-                    minor_geoms.append(ls.buffer(hw))
-                    road_centerlines_hw.append((ls, hw))
-                elif _is_main_road(ls, p):
-                    hw = 4.65  # 3.35m carriageway half-width + 1.30m raised stone sidewalk!
+                if _is_main_road(ls, p):
+                    hw = 4.35  # 3.15m 2-lane carriageway half-width + 1.20m raised stone sidewalk
                     main_geoms.append(ls.buffer(hw))
                     road_centerlines_hw.append((ls, hw))
                     surf_road_lines.append(ls)
-                else:
-                    hw = 2.85
+                elif cls == "minor" and p.get("is_route") == 11:
+                    hw = 2.55  # Medium residential Quartierstrasse (NO dashed centerline!)
                     minor_geoms.append(ls.buffer(hw))
                     road_centerlines_hw.append((ls, hw))
                     surf_road_lines.append(ls)
+                else:
+                    hw = 1.85  # Narrow 1-lane residential lane / driveway (e.g. Pilgerweg!)
+                    minor_geoms.append(ls.buffer(hw))
+                    road_centerlines_hw.append((ls, hw))
+                    if cls == "minor":
+                        surf_road_lines.append(ls)
 
     _burn(foot_geoms, G_FOOTPATH)
     _burn(minor_geoms, G_STREET_MINOR)
@@ -663,10 +678,10 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     bridge_groups = [
         (BR_RAIL_BRIDGE, 3.05, False, _merge_group(raw_bridges_rail)),
         (BR_FOOTBRIDGE, 1.65, False, _merge_group(raw_bridges_foot)),
-        (BR_ROAD_VIADUCT, 4.35, True, _merge_group(raw_bridges_local_road)),
-        (BR_ROAD_VIADUCT, 5.55, True, _merge_group(raw_bridges_main_road)),  # 11.1m-wide Dorfstrasse Viaduct & main A3 bridges!
+        (BR_ROAD_VIADUCT, 3.25, True, _merge_group(raw_bridges_local_road)),
+        (BR_ROAD_VIADUCT, 4.95, True, _merge_group(raw_bridges_main_road)),  # Dorfstrasse Viaduct & main A3 bridges
         (BR_MOTORWAY, 5.80, True, _merge_group(raw_bridges_mw)),
-        (BR_STEPS, 1.65, False, _merge_group(raw_bridges_steps)),
+        (BR_STEPS, 1.55, False, _merge_group(raw_bridges_steps)),
     ]
 
     cur_bid = 0

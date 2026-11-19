@@ -1067,9 +1067,9 @@ def _render_elevated_bridges_and_rail_portals(
             rail_in = hw_r - 0.52
 
             col_r = np.where((ph[ri] < 64)[:, None], [92.0, 96.0, 104.0], [84.0, 88.0, 96.0]).astype(np.float32)
-            # Crisp white dashed centerline & solid white edge lines!
-            dash = (sd_r < 0.25) & ((al_r % 5.6) < 2.6)
-            edge_l = np.abs(sd_r - (sw_in - 0.35)) < 0.22
+            # Crisp white dashed centerline (only on 2-lane main viaducts/motorways!) & solid white edge lines
+            dash = (hw_r >= 4.4) & (sd_r < 0.25) & ((al_r % 5.6) < 2.6)
+            edge_l = (hw_r >= 4.4) & (np.abs(sd_r - (sw_in - 0.35)) < 0.22)
             col_r[dash | edge_l] = [230.0, 232.0, 236.0]
 
             # Raised concrete sidewalks with expansion joints every 2.0m
@@ -1585,6 +1585,7 @@ def render_diorama(
     collect_hit_boxes: bool = False,
     viewport_win: tuple[int, int, int, int] | None = None,
     sun_shadow_override: np.ndarray | None = None,
+    out_depth_buf: dict | None = None,
 ) -> tuple[Image.Image, dict]:
     """Render 100% data-accurate, distinctly drawn 3D isometric 90s pixel-art diorama."""
     preset = PRESETS[preset_key]
@@ -2724,6 +2725,10 @@ def render_diorama(
     if add_frame and viewport_win is None:
         img = _draw_museum_cartouche(img, preset, camera, len(scene.buildings), len(scene.tree_e), crop_box_lv95)
 
+    if out_depth_buf is not None:
+        out_depth_buf["zbuf"] = zbuf
+        out_depth_buf["mat_buf"] = mat_buf
+
     return img, hit_data
 
 
@@ -2944,6 +2949,19 @@ def render_diorama_tiled_hires(
     sun_sh = compute_shadow_grid(scene, preset.sun_az_deg, preset.sun_alt_deg)
     full_rgb = np.empty((H_full, W_full, 3), dtype=np.uint8)
 
+    # Export 1/4-res (~1.0 m/px) 16-bit 3D Depth & Occluder Map during 'day' pass
+    # (geometry is identical across day/sunset/night!) for pixel-exact partial vehicle occlusion!
+    DEPTH_DS = 4
+    DEPTH_MIN = -2400.0
+    DEPTH_MAX = 2400.0
+    save_depth = preset_key == "day"
+    if save_depth:
+        dw_f = W_full // DEPTH_DS
+        dh_f = H_full // DEPTH_DS
+        depth_rgb = np.zeros((dh_f, dw_f, 3), dtype=np.uint8)
+        depth_rgb[:, :, 0] = 255
+        depth_rgb[:, :, 1] = 255
+
     nx_macro, ny_macro = 6, 3
     guard = 6
     for my in range(ny_macro):
@@ -2958,6 +2976,7 @@ def render_diorama_tiled_hires(
             wx1 = min(W_full, x1 + guard)
             wy1 = min(H_full, y1 + guard)
 
+            dbuf = {} if save_depth else None
             sub_img, _ = render_diorama(
                 scene,
                 cam,
@@ -2967,11 +2986,59 @@ def render_diorama_tiled_hires(
                 collect_hit_boxes=False,
                 viewport_win=(wx0, wy0, wx1, wy1),
                 sun_shadow_override=sun_sh,
+                out_depth_buf=dbuf,
             )
             sub_arr = np.asarray(sub_img)
             full_rgb[y0:y1, x0:x1] = sub_arr[(y0 - wy0) : (y1 - wy0), (x0 - wx0) : (x1 - wx0)]
+
+            if save_depth and dbuf:
+                # Sample exact 3D occluder depth at 1/4 resolution for this macro window
+                sz = dbuf["zbuf"]
+                sm = dbuf["mat_buf"]
+                dy0 = (y0 + DEPTH_DS - 1) // DEPTH_DS
+                dy1 = min(dh_f, y1 // DEPTH_DS)
+                dx0 = (x0 + DEPTH_DS - 1) // DEPTH_DS
+                dx1 = min(dw_f, x1 // DEPTH_DS)
+                if dy1 > dy0 and dx1 > dx0:
+                    ly0 = dy0 * DEPTH_DS - wy0
+                    ly1 = dy1 * DEPTH_DS - wy0
+                    lx0 = dx0 * DEPTH_DS - wx0
+                    lx1 = dx1 * DEPTH_DS - wx0
+                    z_blk = sz[ly0:ly1, lx0:lx1].reshape(dy1 - dy0, DEPTH_DS, dx1 - dx0, DEPTH_DS)
+                    m_blk = sm[ly0:ly1, lx0:lx1].reshape(dy1 - dy0, DEPTH_DS, dx1 - dx0, DEPTH_DS)
+                    occ_m = (
+                        (m_blk == M_WALL)
+                        | (m_blk == M_ROOF)
+                        | (m_blk == M_WINDOW_DAY)
+                        | (m_blk == M_WINDOW_LIT)
+                        | (m_blk == M_TREE)
+                        | (m_blk == M_BRIDGE)
+                        | (m_blk == M_HARBOR_OBJ)
+                    )
+                    occ_cnt = occ_m.sum(axis=(1, 3))
+                    has_occ = occ_cnt >= 4
+                    if has_occ.any():
+                        z_masked = np.where(occ_m, z_blk, 1e9)
+                        d_min_blk = z_masked.min(axis=(1, 3))
+                        v16 = np.clip(
+                            np.round((d_min_blk - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 65535.0),
+                            0,
+                            65535,
+                        ).astype(np.uint16)
+                        sub_dr = depth_rgb[dy0:dy1, dx0:dx1]
+                        sub_dr[has_occ, 0] = (v16[has_occ] >> 8).astype(np.uint8)
+                        sub_dr[has_occ, 1] = (v16[has_occ] & 0xFF).astype(np.uint8)
+                        sub_dr[has_occ, 2] = 255
+                del dbuf
+
             del sub_img, sub_arr
             gc.collect()
+
+    if save_depth:
+        depth_path = overview_webp_path.parent / "kilchberg_depth.png"
+        Image.fromarray(depth_rgb, mode="RGB").save(depth_path, optimize=True)
+        print(f"[render] Saved 16-bit 3D Depth & Occluder Map -> {depth_path} ({dw_f}x{dh_f})")
+        del depth_rgb
 
     master_img = Image.fromarray(full_rgb, mode="RGB")
     del full_rgb
@@ -2999,6 +3066,8 @@ def render_diorama_tiled_hires(
         "rows": rows,
         "mpp": mpp,
         "preset": preset_key,
+        "depthMin": DEPTH_MIN,
+        "depthMax": DEPTH_MAX,
     }
     (tiles_dir / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":")))
 

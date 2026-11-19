@@ -181,8 +181,8 @@ def _build_obstacle_surface(scene: SceneData, include_bridges: bool = True, incl
     obs_z = scene.dem.astype(np.float32).copy()
     if include_trees:
         obs_z = np.maximum(obs_z, (scene.dem + scene.chm).astype(np.float32))
-    if include_bridges and hasattr(scene, "bridge_z") and hasattr(scene, "bridge_class"):
-        has_br = scene.bridge_class > 0
+    if include_bridges and hasattr(scene, "bridge_z") and hasattr(scene, "bridge_cls"):
+        has_br = scene.bridge_cls > 0
         obs_z[has_br] = np.maximum(obs_z[has_br], scene.bridge_z[has_br] + 1.0)
     # Stamp exact 3D building roof elevations onto roof triangles' bounding footprints
     roof_tris = scene.verts[scene.surf_type == 1]
@@ -209,9 +209,9 @@ def _sample_road_z(scene: SceneData, e: np.ndarray, n: np.ndarray) -> np.ndarray
     cols = np.clip(((e - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
     rows = np.clip(((N_MAX - n) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
     z = scene.dem[rows, cols].astype(np.float64)
-    if hasattr(scene, "bridge_z") and hasattr(scene, "bridge_class"):
+    if hasattr(scene, "bridge_z") and hasattr(scene, "bridge_cls"):
         br_z = scene.bridge_z[rows, cols].astype(np.float64)
-        br_m = scene.bridge_class[rows, cols] > 0
+        br_m = scene.bridge_cls[rows, cols] > 0
         z = np.where(br_m, np.maximum(z, br_z), z)
     return ndimage.gaussian_filter1d(z, sigma=1.6, mode="nearest") if len(z) >= 5 else z
 
@@ -260,13 +260,18 @@ def _pack_path(
     vehicle_h: float = 2.2,
 ) -> list[list[float | int]]:
     px, py, _ = cam.project(e, n, z)
+    # Compute exact 16-bit camera depth at mid-vehicle elevation (cleanly clears road/bridge deck under tires,
+    # while properly testing behind foreground trees, buildings, and overhead bridges!)
+    _, _, pd_veh = cam.project(e, n, z + vehicle_h * 0.72)
+    DEPTH_MIN, DEPTH_MAX = -2400.0, 2400.0
+    d_u16 = np.clip(np.round((pd_veh - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 65535.0), 0, 65535).astype(np.int32)
     u = (px + shift_x) / W_full
     v = (py + shift_y) / H_full
     if obs_z is not None:
         occ = _compute_occlusion(obs_z, cam, e, n, z, vehicle_h=vehicle_h)
     else:
         occ = np.zeros(len(e), dtype=np.uint8)
-    return [[round(float(u[i]), 5), round(float(v[i]), 5), int(occ[i])] for i in range(len(e))]
+    return [[round(float(u[i]), 5), round(float(v[i]), 5), int(occ[i]), int(d_u16[i])] for i in range(len(e))]
 
 
 def export_animations(mpp_full: float = 0.25) -> Path:
@@ -401,18 +406,25 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, em, nm, zm, vehicle_h=2.4),
         })
 
-    minor_geoms = [g for g in sorted(minor_all, key=lambda s: -s.length) if g.length >= 370.0][:5]
-    for idx_v, vg in enumerate(minor_geoms):
-        ev, nv, lv = _resample_smooth_line(vg, step_m=3.2, offset_right_m=1.4)
+    # Prefer wider secondary/tertiary collector streets (Alte Landstrasse, Schorenstrasse, Dorfstrasse)
+    # before falling back to longer residential streets; never put buses on narrow residential lanes!
+    collector_geoms = [g for g in sorted(sec_all, key=lambda s: -s.length) if g.length >= 260.0]
+    minor_geoms = [g for g in sorted(minor_all, key=lambda s: -s.length) if g.length >= 370.0]
+    village_pool = (collector_geoms[:3] + minor_geoms)[:5]
+    for idx_v, vg in enumerate(village_pool):
+        is_collector = idx_v < min(3, len(collector_geoms))
+        lane_off = 1.35 if is_collector else 0.75
+        ev, nv, lv = _resample_smooth_line(vg, step_m=3.2, offset_right_m=lane_off)
         zv = _sample_road_z(scene, ev, nv) + 0.35
+        has_b = is_collector and idx_v in (0, 1)
         roads_out.append({
             "id": f"village_st_{idx_v}",
             "kind": "village",
             "length_m": round(lv, 1),
-            "speed_mps": 8.5,
-            "has_bus": (idx_v in (0, 1)),
-            "bus_count": 1,
-            "car_count": 4,
+            "speed_mps": 9.5 if is_collector else 7.5,
+            "has_bus": has_b,
+            "bus_count": 1 if has_b else 0,
+            "car_count": 4 if is_collector else 2,
             "phase": (idx_v * 0.23) % 1.0,
             "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, ev, nv, zv, vehicle_h=2.2),
         })

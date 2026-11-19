@@ -19,12 +19,15 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '3.1';
+  const ASSET_VER = '4.0';
 
-  // Overview images & optional ultra-high-res 0.25 m/px tile pyramids per lighting mode
+  // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
   const tileManifests = {};   // mode -> { width, height, tileSize, cols, rows, mpp } | null
   const tileCache = {};       // "mode:c:r" -> HTMLImageElement | 'loading' | 'error'
+  let depthPixels = null;     // Uint8ClampedArray (R/G = 16-bit scene depth, B = 255 if 3D occluder)
+  let depthW = 0;
+  let depthH = 0;
 
   let currentMode = 'day';
   let meta = null;
@@ -1371,7 +1374,10 @@
     dx /= mag;
     dy /= mag;
     const occ = (t < 0.5 ? p0[2] : p1[2]) === 1;
-    return { wx, wy, tx: dx, ty: dy, occ };
+    const d16 = p0.length > 3 && p1.length > 3
+      ? Math.round(p0[3] + (p1[3] - p0[3]) * t)
+      : 0;
+    return { wx, wy, tx: dx, ty: dy, occ, d16 };
   }
 
   function blitWorldSprite(sp, wx, wy, wScale) {
@@ -1395,9 +1401,87 @@
     ctx.fillRect(sx, sy, sw, sh);
   }
 
-  // ---- CONTINUOUS 3D NW-SUN SHADED VEHICLE RENDERER (Trains, ZVV Buses, Cars) ----
-  // Renders crisp, grounded, smoothly curving 3D isometric vehicles directly in screen space
-  // with NW directional sun shading (matching diorama lighting) & ZERO discrete angle snapping!
+  // ---- CONTINUOUS 3D NW-SUN SHADED VEHICLE RENDERER + PER-PIXEL 3D Z-BUFFER OCCLUSION ----
+  // Renders crisp, grounded, smoothly curving 3D isometric vehicles and masks EVERY pixel
+  // against the exact 16-bit 3D depth map (kilchberg_depth.png) so vehicles smoothly slide
+  // behind tree canopies, buildings, and bridges instead of floating on top or popping out!
+  let vCtx = ctx;
+  const vehScratch = document.createElement('canvas');
+  vehScratch.width = 320;
+  vehScratch.height = 240;
+  const vehScratchCtx = vehScratch.getContext('2d', { willReadFrequently: true });
+
+  function drawDepthMasked(wx, wy, padWorld, vehD16, worldW, worldH, drawFn) {
+    const cx = offsetX + wx * scale;
+    const cy = offsetY + wy * scale;
+    const padPx = Math.ceil(padWorld * scale) + 6;
+    if (cx + padPx < 0 || cx - padPx > canvas.width || cy + padPx < 0 || cy - padPx > canvas.height) return;
+
+    if (!depthPixels || !vehD16) {
+      vCtx = ctx;
+      drawFn();
+      return;
+    }
+
+    const x0 = Math.max(0, Math.floor(cx - padPx));
+    const y0 = Math.max(0, Math.floor(cy - padPx));
+    const x1 = Math.min(canvas.width, Math.ceil(cx + padPx));
+    const y1 = Math.min(canvas.height, Math.ceil(cy + padPx));
+    const bw = x1 - x0;
+    const bh = y1 - y0;
+    if (bw <= 0 || bh <= 0) return;
+    if (bw > vehScratch.width) vehScratch.width = Math.min(1024, bw + 32);
+    if (bh > vehScratch.height) vehScratch.height = Math.min(1024, bh + 32);
+    if (bw > vehScratch.width || bh > vehScratch.height) {
+      vCtx = ctx;
+      drawFn();
+      return;
+    }
+
+    vehScratchCtx.clearRect(0, 0, bw, bh);
+    vehScratchCtx.save();
+    vehScratchCtx.translate(-x0, -y0);
+    vCtx = vehScratchCtx;
+    drawFn();
+    vehScratchCtx.restore();
+    vCtx = ctx;
+
+    const imgData = vehScratchCtx.getImageData(0, 0, bw, bh);
+    const d = imgData.data;
+    const invWorldScaleX = depthW / (worldW * scale);
+    const invWorldScaleY = depthH / (worldH * scale);
+    const baseDx = (x0 - offsetX) * invWorldScaleX;
+    const baseDy = (y0 - offsetY) * invWorldScaleY;
+
+    let anyVisible = false;
+    for (let ly = 0; ly < bh; ly++) {
+      const dy = Math.floor(baseDy + ly * invWorldScaleY);
+      if (dy < 0 || dy >= depthH) continue;
+      const rowOff = dy * depthW;
+      const pRow = ly * bw * 4;
+      for (let lx = 0; lx < bw; lx++) {
+        const p = pRow + lx * 4;
+        if (d[p + 3] === 0) continue;
+        const dx = Math.floor(baseDx + lx * invWorldScaleX);
+        if (dx >= 0 && dx < depthW) {
+          const di = (rowOff + dx) * 4;
+          if (depthPixels[di + 2] > 128) {
+            const sceneD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
+            if (vehD16 > sceneD16) {
+              d[p + 3] = 0;
+              continue;
+            }
+          }
+        }
+        anyVisible = true;
+      }
+    }
+    if (anyVisible) {
+      vehScratchCtx.putImageData(imgData, 0, 0);
+      ctx.drawImage(vehScratch, 0, 0, bw, bh, x0, y0, bw, bh);
+    }
+  }
+
   function shadeHex(hex, factor, mode) {
     let r = parseInt(hex.slice(1, 3), 16);
     let g = parseInt(hex.slice(3, 5), 16);
@@ -1447,16 +1531,16 @@
   }
 
   function fillPoly(pts, fill, stroke = null, lw = 1) {
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    ctx.closePath();
-    ctx.fillStyle = fill;
-    ctx.fill();
+    vCtx.beginPath();
+    vCtx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) vCtx.lineTo(pts[i][0], pts[i][1]);
+    vCtx.closePath();
+    vCtx.fillStyle = fill;
+    vCtx.fill();
     if (stroke) {
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = lw;
-      ctx.stroke();
+      vCtx.strokeStyle = stroke;
+      vCtx.lineWidth = lw;
+      vCtx.stroke();
     }
   }
 
@@ -1557,12 +1641,12 @@
         b.proj(hl + 22, -hw * 2.2, 0.2),
       ], 'rgba(255,244,186,0.22)');
     }
-    ctx.fillStyle = isNight ? '#fff8c8' : '#fffbe0';
-    ctx.fillRect(hl1[0] - rDot * 0.5, hl1[1] - rDot * 0.5, rDot, rDot);
-    ctx.fillRect(hl2[0] - rDot * 0.5, hl2[1] - rDot * 0.5, rDot, rDot);
-    ctx.fillStyle = isNight ? '#ff3b30' : '#d62828';
-    ctx.fillRect(tl1[0] - rDot * 0.5, tl1[1] - rDot * 0.5, rDot, rDot);
-    ctx.fillRect(tl2[0] - rDot * 0.5, tl2[1] - rDot * 0.5, rDot, rDot);
+    vCtx.fillStyle = isNight ? '#fff8c8' : '#fffbe0';
+    vCtx.fillRect(hl1[0] - rDot * 0.5, hl1[1] - rDot * 0.5, rDot, rDot);
+    vCtx.fillRect(hl2[0] - rDot * 0.5, hl2[1] - rDot * 0.5, rDot, rDot);
+    vCtx.fillStyle = isNight ? '#ff3b30' : '#d62828';
+    vCtx.fillRect(tl1[0] - rDot * 0.5, tl1[1] - rDot * 0.5, rDot, rDot);
+    vCtx.fillRect(tl2[0] - rDot * 0.5, tl2[1] - rDot * 0.5, rDot, rDot);
   }
 
   function draw3DBus(pos, wScale, mode) {
@@ -1906,12 +1990,12 @@
       // Crisp overhead pantograph bar
       const p0 = b.proj(-22, -rw * 0.9, zCrown + 3.4);
       const p1 = b.proj(-22, rw * 0.9, zCrown + 3.4);
-      ctx.strokeStyle = isNight ? '#96a8c0' : '#4a5462';
-      ctx.lineWidth = Math.max(1.0, b.s * 0.7);
-      ctx.beginPath();
-      ctx.moveTo(p0[0], p0[1]);
-      ctx.lineTo(p1[0], p1[1]);
-      ctx.stroke();
+      vCtx.strokeStyle = isNight ? '#96a8c0' : '#4a5462';
+      vCtx.lineWidth = Math.max(1.0, b.s * 0.7);
+      vCtx.beginPath();
+      vCtx.moveTo(p0[0], p0[1]);
+      vCtx.lineTo(p1[0], p1[1]);
+      vCtx.stroke();
 
       // Swiss triple-headlight glow at night
       if (isNight) {
@@ -1994,17 +2078,20 @@
         const frac = ((((tSec * vSpeedMul) / cyc) + (rd.phase || 0) + vIdx / totalVehicles) % 1 + 1) % 1;
         if (frac < 0.012 || frac > 0.988) continue;
         const pos = samplePathAt(rd.pts, frac, worldW, worldH, 3);
-        if (!pos || pos.occ) continue;
+        if (!pos || (!depthPixels && pos.occ)) continue;
         roadDrawList.push({ isBus, pos, colorIdx: vIdx + rIdx * 3 });
       }
     }
     roadDrawList.sort((a, b) => a.pos.wy - b.pos.wy);
     for (const v of roadDrawList) {
-      if (v.isBus) {
-        draw3DBus(v.pos, wScale, currentMode);
-      } else {
-        draw3DCar(v.pos, v.colorIdx, wScale, currentMode);
-      }
+      const padW = (v.isBus ? (isNight ? 58 : 38) : (isNight ? 40 : 26)) * wScale;
+      drawDepthMasked(v.pos.wx, v.pos.wy, padW, v.pos.d16, worldW, worldH, () => {
+        if (v.isBus) {
+          draw3DBus(v.pos, wScale, currentMode);
+        } else {
+          draw3DCar(v.pos, v.colorIdx, wScale, currentMode);
+        }
+      });
     }
 
     // 4. SBB Seebahn Multi-Carriage Trains (continuous 3D shaded, smoothly curving, articulated!)
@@ -2019,18 +2106,21 @@
         if (cFrac < 0.005 || cFrac > 0.995) continue;
         // Wide-chord tangent (tanWin=6) guarantees every coach follows the exact same smooth curve!
         const pos = samplePathAt(tr.pts, cFrac, worldW, worldH, 6);
-        if (pos && !pos.occ) {
+        if (pos && (depthPixels || !pos.occ)) {
           const variant = cIdx === 0 ? 0 : (cIdx === nCars - 1 ? 2 : 1);
           const nextFrac = headFrac - (cIdx + 1) * coachStepFrac;
           const nextPos = (cIdx < nCars - 1 && nextFrac > 0.005 && nextFrac < 0.995)
             ? samplePathAt(tr.pts, nextFrac, worldW, worldH, 6)
             : null;
-          units.push({ cIdx, variant, pos, nextPos: (nextPos && !nextPos.occ) ? nextPos : null });
+          units.push({ cIdx, variant, pos, nextPos: (nextPos && (depthPixels || !nextPos.occ)) ? nextPos : null });
         }
       }
       units.sort((a, b) => a.pos.wy - b.pos.wy);
+      const trainPadW = (isNight ? 92 : 68) * wScale;
       for (const u of units) {
-        draw3DTrainUnit(u.pos, tr.kind, u.variant, wScale, currentMode, u.nextPos);
+        drawDepthMasked(u.pos.wx, u.pos.wy, trainPadW, u.pos.d16, worldW, worldH, () => {
+          draw3DTrainUnit(u.pos, tr.kind, u.variant, wScale, currentMode, u.nextPos);
+        });
       }
     }
 
@@ -2164,13 +2254,37 @@
     document.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === currentMode));
   }
 
+  function loadDepthMap() {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const dc = document.createElement('canvas');
+          dc.width = img.naturalWidth;
+          dc.height = img.naturalHeight;
+          const dctx = dc.getContext('2d', { willReadFrequently: true });
+          dctx.drawImage(img, 0, 0);
+          depthPixels = dctx.getImageData(0, 0, dc.width, dc.height).data;
+          depthW = dc.width;
+          depthH = dc.height;
+        } catch (err) {
+          depthPixels = null;
+        }
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = `assets/kilchberg_depth.png?v=${ASSET_VER}`;
+    });
+  }
+
   // Boot
   Promise.all([
     loadModeOverview(currentMode),
     loadTileManifest(currentMode),
+    loadDepthMap(),
     fetch(`data/kilchberg_interactive.json?v=${ASSET_VER}`).then((r) => r.json()).catch(() => null),
     fetch(`data/kilchberg_animations.json?v=${ASSET_VER}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-  ]).then(([_, __, loadedMeta, loadedAnim]) => {
+  ]).then(([_, __, ___, loadedMeta, loadedAnim]) => {
     meta = loadedMeta;
     animData = loadedAnim;
     populateSidebar();
