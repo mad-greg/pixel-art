@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '4.6';
+  const ASSET_VER = '4.7';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -2619,6 +2619,263 @@
         }
       }
     }
+
+    // 6. Update Spatial Distance-Attenuated Kilchberg Soundscape
+    if (soundEnabled) {
+      updateSoundscape(worldW, worldH, tSec);
+    }
+  }
+
+  // ---- SPATIAL KILCHBERG SOUNDSCAPE ENGINE (Real Field Recordings + Web Audio Spatial Mixer) ----
+  // Mixes authentic Swiss/European field recordings (SBB train, ZVV bus, road cars, songbirds,
+  // night crickets, Lake Zurich boat & shoreline waves) with real-time viewport visibility,
+  // zoom-sensitive inverse-square distance falloff, air-absorption lowpass & stereo panning!
+  let soundEnabled = false;
+  let audioCtx = null;
+  let audioMasterGain = null;
+  let soundLoading = false;
+  let soundReady = false;
+  let lastAudioUpdateMs = 0;
+  const soundChannels = {};
+
+  const SOUND_TRACKS = {
+    lake_waves: { file: 'lake_waves.mp3', baseGain: 0.46, maxHz: 6200 },
+    birds:      { file: 'birds.mp3',      baseGain: 0.34, maxHz: 11000 },
+    crickets:   { file: 'crickets.mp3',   baseGain: 0.30, maxHz: 10500 },
+    train:      { file: 'train.mp3',      baseGain: 0.52, maxHz: 8500 },
+    traffic:    { file: 'traffic.mp3',    baseGain: 0.32, maxHz: 5800 },
+    bus:        { file: 'bus.mp3',        baseGain: 0.36, maxHz: 3600 },
+    boat:       { file: 'boat.mp3',       baseGain: 0.40, maxHz: 4800 },
+  };
+
+  async function initSoundscape() {
+    if (soundReady || soundLoading) return;
+    soundLoading = true;
+    const btn = document.getElementById('btn-toggle-sound');
+    if (btn) btn.textContent = 'Sound: Loading…';
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      const comp = audioCtx.createDynamicsCompressor();
+      comp.threshold.value = -16;
+      comp.knee.value = 18;
+      comp.ratio.value = 3.5;
+      comp.attack.value = 0.015;
+      comp.release.value = 0.25;
+
+      audioMasterGain = audioCtx.createGain();
+      audioMasterGain.gain.value = 0.0001;
+      comp.connect(audioMasterGain);
+      audioMasterGain.connect(audioCtx.destination);
+
+      const entries = Object.entries(SOUND_TRACKS);
+      await Promise.all(entries.map(async ([key, cfg]) => {
+        try {
+          const resp = await fetch(`assets/audio/${cfg.file}?v=${ASSET_VER}`);
+          if (!resp.ok) return;
+          const arrBuf = await resp.arrayBuffer();
+          const audioBuf = await audioCtx.decodeAudioData(arrBuf);
+          const src = audioCtx.createBufferSource();
+          src.buffer = audioBuf;
+          src.loop = true;
+
+          const lpf = audioCtx.createBiquadFilter();
+          lpf.type = 'lowpass';
+          lpf.frequency.value = 1800;
+          lpf.Q.value = 0.55;
+
+          const panner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
+          const gain = audioCtx.createGain();
+          gain.gain.value = 0.0001;
+
+          src.connect(lpf);
+          if (panner) {
+            lpf.connect(panner);
+            panner.connect(gain);
+          } else {
+            lpf.connect(gain);
+          }
+          gain.connect(comp);
+          // Start at staggered random offset so loops never align mechanically
+          src.start(0, Math.random() * Math.max(0.5, audioBuf.duration * 0.7));
+          soundChannels[key] = { src, lpf, panner, gain, cfg };
+        } catch (err) {
+          // Gracefully skip any track that fails to decode
+        }
+      }));
+      soundReady = true;
+    } catch (err) {
+      soundEnabled = false;
+    } finally {
+      soundLoading = false;
+      if (btn) {
+        btn.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
+        btn.classList.toggle('active', soundEnabled);
+      }
+      if (soundReady && audioMasterGain) {
+        const now = audioCtx.currentTime;
+        audioMasterGain.gain.setTargetAtTime(soundEnabled ? 0.85 : 0.0001, now, 0.22);
+      }
+    }
+  }
+
+  function computeSpatialFactor(u, v, u0, u1, v0, v1, uC, halfVisU, zoomNorm) {
+    // Distance outside visible viewport (isotropic ground-plane aspect 0.44)
+    const dxOut = u < u0 ? (u0 - u) : (u > u1 ? (u - u1) : 0);
+    const dyOut = v < v0 ? (v0 - v) : (v > v1 ? (v - v1) : 0);
+    const dOut = Math.hypot(dxOut, dyOut * 0.44);
+    const inView = dOut === 0;
+
+    // Stereo pan relative to viewport horizontal center
+    const pan = Math.max(-0.85, Math.min(0.85, (u - uC) / Math.max(0.04, halfVisU * 1.15)));
+
+    // Zoom-sensitive distance attenuation:
+    // - When zoomed out (zoomNorm ~ 0.18): gentle wide panorama where all of Kilchberg blends softly
+    // - When zoomed in (zoomNorm ~ 1.5..4.0): sounds inside screen are vivid & bright, while sounds
+    //   beyond the screen drop off rapidly with distance and become low-pass muffled!
+    const distScale = 2.4 + zoomNorm * 8.0;
+    const falloff = inView ? 1.0 : (1.0 / (1.0 + Math.pow(dOut * distScale, 2.0)));
+    const closeBoost = inView ? (0.48 + 0.52 * Math.min(1.0, zoomNorm / 1.35)) : (0.48 * falloff);
+    const brightness = inView
+      ? (0.30 + 0.70 * Math.min(1.0, zoomNorm / 1.4))
+      : Math.max(0.07, 0.36 * Math.sqrt(falloff));
+
+    return { level: Math.max(0, Math.min(1, closeBoost)), brightness, pan, inView, dOut };
+  }
+
+  function applyChannelSpatial(key, level, brightness, pan) {
+    const ch = soundChannels[key];
+    if (!ch || !audioCtx) return;
+    const now = audioCtx.currentTime;
+    const targetGain = Math.max(0.0001, level * ch.cfg.baseGain);
+    const targetHz = 520 + brightness * (ch.cfg.maxHz - 520);
+    ch.gain.gain.setTargetAtTime(targetGain, now, 0.14);
+    ch.lpf.frequency.setTargetAtTime(targetHz, now, 0.16);
+    if (ch.panner) {
+      ch.panner.pan.setTargetAtTime(Math.max(-0.85, Math.min(0.85, pan)), now, 0.14);
+    }
+  }
+
+  function updateSoundscape(worldW, worldH, tSec) {
+    if (!soundReady || !audioCtx || !animData) return;
+    const nowMs = performance.now();
+    if (nowMs - lastAudioUpdateMs < 85) return;
+    lastAudioUpdateMs = nowMs;
+
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+
+    // Current visible viewport in normalized [0..1] world coordinates
+    const u0 = (-offsetX) / (worldW * scale);
+    const u1 = (canvas.width - offsetX) / (worldW * scale);
+    const v0 = (-offsetY) / (worldH * scale);
+    const v1 = (canvas.height - offsetY) / (worldH * scale);
+    const uC = (u0 + u1) * 0.5;
+    const vC = (v0 + v1) * 0.5;
+    const halfVisU = Math.max(0.02, (u1 - u0) * 0.5);
+    const zoomNorm = Math.max(0.15, Math.min(4.0, scale));
+    const isNight = currentMode === 'night';
+    const isSunset = currentMode === 'sunset';
+
+    // 1. Swiss SBB Trains (strongest of the 2 live trains, quiet when dwelling at Bahnhof Kilchberg!)
+    let bestTrain = { level: 0, brightness: 0.1, pan: 0 };
+    for (const tr of (animData.trains || [])) {
+      const f0 = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
+      const f1 = evalWithStationStop(tSec + 0.15, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
+      if (f0 < 0.01 || f0 > 1.05) continue;
+      const isMoving = Math.abs(f1 - f0) > 1e-5;
+      const midF = Math.max(0.01, Math.min(0.99, f0 - (30.0 / tr.length_m)));
+      const pos = samplePathAt(tr.pts, midF, worldW, worldH, 2);
+      if (!pos) continue;
+      const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm);
+      const speedMul = isMoving ? 1.0 : 0.16; // soft idle hum when stopped at Bahnhof Kilchberg
+      const lvl = sp.level * speedMul;
+      if (lvl > bestTrain.level) {
+        bestTrain = { level: lvl, brightness: sp.brightness * (isMoving ? 1.0 : 0.45), pan: sp.pan };
+      }
+    }
+    applyChannelSpatial('train', bestTrain.level, bestTrain.brightness, bestTrain.pan);
+
+    // 2. ZVV Buses & 3. Road Cars Traffic
+    let bestBus = { level: 0, brightness: 0.1, pan: 0 };
+    let carEnergy = 0;
+    let carPanSum = 0;
+    let carBrightMax = 0.12;
+    for (let rIdx = 0; rIdx < (animData.roads || []).length; rIdx++) {
+      const rd = animData.roads[rIdx];
+      const busCount = rd.bus_count != null ? rd.bus_count : (rd.has_bus ? 1 : 0);
+      const carCount = rd.car_count || 3;
+      const totalV = carCount + busCount;
+      const laneSpeed = Math.max(1.0, rd.speed_mps * (busCount > 0 ? 0.88 : 0.96));
+      const cyc = rd.length_m / laneSpeed;
+      const maxJitter = Math.min(0.011, 0.24 / Math.max(1, totalV));
+      for (let vIdx = 0; vIdx < totalV; vIdx++) {
+        const isBus = vIdx < busCount;
+        const jitter = Math.sin(tSec * 0.28 + vIdx * 2.17 + rIdx * 1.3) * maxJitter;
+        const frac = ((((tSec / cyc) + (rd.phase || 0) + vIdx / totalV + jitter) % 1) + 1) % 1;
+        if (frac < 0.015 || frac > 0.985) continue;
+        const pos = samplePathAt(rd.pts, frac, worldW, worldH, 2);
+        if (!pos) continue;
+        const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm);
+        if (isBus) {
+          if (sp.level > bestBus.level) bestBus = sp;
+        } else {
+          const wMul = rd.kind === 'motorway' ? 0.52 : 0.34;
+          const e = sp.level * wMul;
+          carEnergy += e;
+          carPanSum += sp.pan * e;
+          if (sp.brightness > carBrightMax) carBrightMax = sp.brightness;
+        }
+      }
+    }
+    const nightTrafficMul = isNight ? 0.65 : 1.0;
+    applyChannelSpatial('bus', bestBus.level * nightTrafficMul, bestBus.brightness, bestBus.pan);
+    const carLevel = Math.min(1.0, Math.sqrt(carEnergy * 0.55)) * nightTrafficMul;
+    const carPan = carEnergy > 0.001 ? (carPanSum / carEnergy) : 0;
+    applyChannelSpatial('traffic', carLevel, carBrightMax, carPan);
+
+    // 4. Lake Zurich ZSG Steamer Boat (plus soft sailboats)
+    let bestBoat = { level: 0, brightness: 0.1, pan: 0 };
+    for (const ship of (animData.ships || [])) {
+      const frac = ship.closed
+        ? (((tSec / (ship.length_m / Math.max(0.5, ship.speed_mps))) + (ship.phase || 0)) % 1 + 1) % 1
+        : evalWithStationStop(tSec, ship.length_m, ship.speed_mps, ship.stop_frac, ship.dwell_sec, ship.phase || 0);
+      if (frac < 0 || frac > 1) continue;
+      const pos = samplePathAt(ship.pts, frac, worldW, worldH, 2);
+      if (!pos) continue;
+      const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm);
+      const mul = ship.kind === 'zsg_steamer' ? 1.0 : 0.35;
+      if (sp.level * mul > bestBoat.level) {
+        bestBoat = { level: sp.level * mul, brightness: sp.brightness, pan: sp.pan };
+      }
+    }
+    applyChannelSpatial('boat', bestBoat.level, bestBoat.brightness, bestBoat.pan);
+
+    // 5. Lake Zurich Shoreline Waves (tracks closest shoreline point to viewport!)
+    let bestWave = { level: 0, brightness: 0.1, pan: 0 };
+    const shore = (animData.ambient && animData.ambient.shoreline) || [];
+    for (let i = 0; i < shore.length; i += 3) {
+      const sp = computeSpatialFactor(shore[i][0], shore[i][1], u0, u1, v0, v1, uC, halfVisU, zoomNorm);
+      if (sp.level > bestWave.level) bestWave = sp;
+    }
+    // Gentle organic swell synced subtly to our 5.6s shoreline wave cycle
+    const wavePulse = 0.84 + 0.16 * Math.sin(tSec * (Math.PI * 2 / 5.6));
+    applyChannelSpatial('lake_waves', bestWave.level * wavePulse, bestWave.brightness, bestWave.pan);
+
+    // 6. European Songbirds (Day/Alpenglow) & Evening Crickets (Night) in wooded hillside & village gardens
+    const gardenZones = [
+      [0.34, 0.42], [0.46, 0.36], [0.58, 0.34], [0.68, 0.30], [0.42, 0.48], [0.54, 0.44],
+    ];
+    let bestNature = { level: 0, brightness: 0.1, pan: 0 };
+    for (const [gu, gv] of gardenZones) {
+      const sp = computeSpatialFactor(gu, gv, u0, u1, v0, v1, uC, halfVisU, zoomNorm);
+      if (sp.level > bestNature.level) bestNature = sp;
+    }
+    const birdMul = isNight ? 0.0 : (isSunset ? 0.65 : 1.0);
+    const cricketMul = isNight ? 1.0 : (isSunset ? 0.35 : 0.0);
+    applyChannelSpatial('birds', bestNature.level * birdMul, bestNature.brightness, bestNature.pan);
+    applyChannelSpatial('crickets', bestNature.level * cricketMul, bestNature.brightness, bestNature.pan);
   }
 
   let lastAnimPaint = 0;
@@ -2646,7 +2903,33 @@
     });
   }
 
+  const btnToggleSound = document.getElementById('btn-toggle-sound');
+  if (btnToggleSound) {
+    btnToggleSound.addEventListener('click', () => {
+      soundEnabled = !soundEnabled;
+      btnToggleSound.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
+      btnToggleSound.classList.toggle('active', soundEnabled);
+      if (soundEnabled) {
+        if (!soundReady) {
+          initSoundscape();
+        } else if (audioCtx && audioMasterGain) {
+          audioCtx.resume().catch(() => {});
+          audioMasterGain.gain.setTargetAtTime(0.85, audioCtx.currentTime, 0.22);
+          lastAudioUpdateMs = 0;
+          const { width, height } = getWorldSize();
+          updateSoundscape(width, height, getAnimTimeSec());
+        }
+      } else if (audioCtx && audioMasterGain) {
+        audioMasterGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.18);
+      }
+    });
+  }
+
   document.addEventListener('visibilitychange', () => {
+    if (audioCtx && audioMasterGain && soundEnabled) {
+      const target = document.hidden ? 0.0001 : 0.85;
+      audioMasterGain.gain.setTargetAtTime(target, audioCtx.currentTime, 0.15);
+    }
     if (!document.hidden && showAnimations && animData) {
       requestAnimationFrame(animLoop);
     }

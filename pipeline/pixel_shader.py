@@ -874,10 +874,10 @@ def _shade_drawn_ground_90s(
         gcol[p_i] = pcol
         gnx[p_i], gny[p_i], gnz[p_i] = 0.0, 0.0, 1.0
 
-    # 13. Lake Zurich (Zürichsee): authentic alpine jade-emerald shallows -> deep glacial teal-blue + real boats/piers!
+    # 13. Lake Zurich (Zürichsee): authentic alpine jade-emerald shallows -> deep glacial teal-blue + real piers!
     if glake.any():
         li = np.nonzero(glake)[0]
-        is_real_harbor_obj = gharbor[li]
+        is_real_harbor_obj = gharbor[li] & (gsem[li] == G_PLATFORM_PIER)
 
         wi = li[~is_real_harbor_obj]
         if len(wi) > 0:
