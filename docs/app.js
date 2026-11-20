@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '5.0';
+  const ASSET_VER = '5.1';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -1610,19 +1610,23 @@
 
   function draw3DCar(pos, colorIdx, wScale, mode) {
     const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
-    if (b.cx < -40 || b.cx > canvas.width + 40 || b.cy < -40 || b.cy > canvas.height + 40) return;
+    if (b.cx < -44 || b.cx > canvas.width + 44 || b.cy < -44 || b.cy > canvas.height + 44) return;
 
-    // Distinct, readable Swiss car palette (clearly pops against cool grey asphalt!)
+    // Authentic Kilchberg & Swiss vehicle mix: Swiss Yellow Die Post vans + Lindt Gold Chocolate trucks + European cars!
+    const isPostVan = (colorIdx % 11 === 4);
+    const isLindtVan = !isPostVan && (colorIdx % 13 === 7);
+    const isVan = isPostVan || isLindtVan;
+
     const palette = ['#d63830', '#f4f6f9', '#2b6cb0', '#e6a825', '#2f855a', '#c9d2dc', '#805ad5', '#dd6b20'];
-    const baseHex = palette[colorIdx % palette.length];
+    const baseHex = isPostVan ? '#f6c216' : (isLindtVan ? '#f7f3e6' : palette[colorIdx % palette.length]);
     const isNight = mode === 'night';
 
-    // Crisp 1:1 miniature scale — unmistakably readable while staying cleanly inside village lanes
-    const hl = 9.2;  // half-length
-    const hw = 4.2;  // half-width
+    // Crisp 1:1 miniature scale — vans are slightly taller & boxier than sedans
+    const hl = isVan ? 10.6 : 9.2;  // half-length
+    const hw = isVan ? 4.5 : 4.2;   // half-width
     const zBot = 1.2;
-    const zBelt = 4.4;
-    const zRoof = 7.2;
+    const zBelt = isVan ? 5.0 : 4.4;
+    const zRoof = isVan ? 9.2 : 7.2;
 
     // Grounded soft SE drop shadow
     const shOff = [2.6 * b.s, 2.0 * b.s];
@@ -1641,55 +1645,125 @@
     const outlineCol = isNight ? 'rgba(10,16,28,0.85)' : 'rgba(26,30,38,0.72)';
     const lw = Math.max(0.7, Math.min(1.4, b.s * 0.45));
 
-    // Side body wall + cabin greenhouse side
     const sideShade = b.dirShade(0, sideSign);
-    fillPoly([
-      b.proj(-hl, sideSign * hw, zBot),
-      b.proj(hl, sideSign * hw, zBot),
-      b.proj(hl, sideSign * hw, zBelt),
-      b.proj(-hl, sideSign * hw, zBelt),
-    ], shadeHex(baseHex, sideShade * 0.92, mode), outlineCol, lw);
-
-    // Side dark tinted windows
-    fillPoly([
-      b.proj(-hl * 0.56, sideSign * hw * 0.92, zBelt),
-      b.proj(hl * 0.46, sideSign * hw * 0.92, zBelt),
-      b.proj(hl * 0.26, sideSign * hw * 0.82, zRoof),
-      b.proj(-hl * 0.42, sideSign * hw * 0.82, zRoof),
-    ], isNight ? '#334d6e' : '#26384c', outlineCol, lw * 0.8);
-
-    // Visible front or rear bumper face
     const endShade = b.dirShade(endSign, 0);
-    fillPoly([
-      b.proj(endSign * hl, -hw, zBot),
-      b.proj(endSign * hl, hw, zBot),
-      b.proj(endSign * hl, hw, zBelt),
-      b.proj(endSign * hl, -hw, zBelt),
-    ], shadeHex(baseHex, endShade * 0.90, mode), outlineCol, lw);
 
-    // Hood & trunk deck
-    fillPoly([
-      b.proj(-hl, -hw, zBelt),
-      b.proj(hl, -hw, zBelt),
-      b.proj(hl, hw, zBelt),
-      b.proj(-hl, hw, zBelt),
-    ], shadeHex(baseHex, 1.04, mode));
+    if (isVan) {
+      // Full-height cargo box van (Swiss Die Post or Lindt Chocolate Truck)
+      fillPoly([
+        b.proj(-hl, sideSign * hw, zBot),
+        b.proj(hl, sideSign * hw, zBot),
+        b.proj(hl, sideSign * hw, zBelt),
+        b.proj(-hl, sideSign * hw, zBelt),
+      ], shadeHex(baseHex, sideShade * 0.92, mode), outlineCol, lw);
+      fillPoly([
+        b.proj(-hl, sideSign * hw, zBelt),
+        b.proj(hl * 0.56, sideSign * hw, zBelt),
+        b.proj(hl * 0.50, sideSign * hw, zRoof),
+        b.proj(-hl, sideSign * hw, zRoof),
+      ], shadeHex(baseHex, sideShade * 0.98, mode), outlineCol, lw * 0.9);
+      // Signature side livery stripe (Swiss red/white Post badge or Lindt metallic gold ribbon!)
+      const stripeHex = isPostVan ? '#d62828' : '#d4a02c';
+      fillPoly([
+        b.proj(-hl * 0.88, sideSign * (hw + 0.08), zBelt + 0.6),
+        b.proj(hl * 0.36, sideSign * (hw + 0.08), zBelt + 0.6),
+        b.proj(hl * 0.36, sideSign * (hw + 0.08), zBelt + 2.0),
+        b.proj(-hl * 0.88, sideSign * (hw + 0.08), zBelt + 2.0),
+      ], shadeHex(stripeHex, sideShade * 1.05, mode));
+      // Cab side window
+      fillPoly([
+        b.proj(hl * 0.48, sideSign * (hw + 0.05), zBelt),
+        b.proj(hl * 0.86, sideSign * (hw + 0.05), zBelt),
+        b.proj(hl * 0.64, sideSign * (hw + 0.02), zRoof - 0.5),
+        b.proj(hl * 0.46, sideSign * (hw + 0.02), zRoof - 0.5),
+      ], isNight ? '#334d6e' : '#26384c', outlineCol, lw * 0.7);
+      // Visible front/rear face
+      const endTopZ = (endSign > 0) ? zBelt : zRoof;
+      fillPoly([
+        b.proj(endSign * hl, -hw, zBot),
+        b.proj(endSign * hl, hw, zBot),
+        b.proj(endSign * hl, hw, endTopZ),
+        b.proj(endSign * hl, -hw, endTopZ),
+      ], shadeHex(baseHex, endShade * 0.90, mode), outlineCol, lw);
+      // Sloped cab windshield
+      fillPoly([
+        b.proj(hl * 0.92, -hw * 0.88, zBelt + 0.1),
+        b.proj(hl * 0.92, hw * 0.88, zBelt + 0.1),
+        b.proj(hl * 0.56, hw * 0.84, zRoof),
+        b.proj(hl * 0.56, -hw * 0.84, zRoof),
+      ], isNight ? '#48688c' : '#35506b', outlineCol, lw * 0.7);
+      // Flat sunlit cargo roof + subtle Lindt gold crest / Post white band
+      fillPoly([
+        b.proj(-hl, -hw, zRoof),
+        b.proj(hl * 0.56, -hw, zRoof),
+        b.proj(hl * 0.56, hw, zRoof),
+        b.proj(-hl, hw, zRoof),
+      ], shadeHex(isPostVan ? '#f8d238' : '#fcf9f0', 1.08, mode), outlineCol, lw * 0.8);
+      if (isLindtVan) {
+        fillPoly([
+          b.proj(-hl * 0.55, -hw * 0.42, zRoof + 0.1),
+          b.proj(hl * 0.15, -hw * 0.42, zRoof + 0.1),
+          b.proj(hl * 0.15, hw * 0.42, zRoof + 0.1),
+          b.proj(-hl * 0.55, hw * 0.42, zRoof + 0.1),
+        ], shadeHex('#d4a02c', 1.1, mode));
+      }
+    } else {
+      // Side body wall + cabin greenhouse side
+      fillPoly([
+        b.proj(-hl, sideSign * hw, zBot),
+        b.proj(hl, sideSign * hw, zBot),
+        b.proj(hl, sideSign * hw, zBelt),
+        b.proj(-hl, sideSign * hw, zBelt),
+      ], shadeHex(baseHex, sideShade * 0.92, mode), outlineCol, lw);
 
-    // Windshield & rear glass
-    fillPoly([
-      b.proj(hl * 0.54, -hw * 0.84, zBelt + 0.1),
-      b.proj(hl * 0.54, hw * 0.84, zBelt + 0.1),
-      b.proj(hl * 0.28, hw * 0.78, zRoof),
-      b.proj(hl * 0.28, -hw * 0.78, zRoof),
-    ], isNight ? '#446387' : '#354f68');
+      // Side dark tinted windows
+      fillPoly([
+        b.proj(-hl * 0.56, sideSign * hw * 0.92, zBelt),
+        b.proj(hl * 0.46, sideSign * hw * 0.92, zBelt),
+        b.proj(hl * 0.26, sideSign * hw * 0.82, zRoof),
+        b.proj(-hl * 0.42, sideSign * hw * 0.82, zRoof),
+      ], isNight ? '#334d6e' : '#26384c', outlineCol, lw * 0.8);
 
-    // Sunlit top roof panel
-    fillPoly([
-      b.proj(-hl * 0.44, -hw * 0.78, zRoof),
-      b.proj(hl * 0.28, -hw * 0.78, zRoof),
-      b.proj(hl * 0.28, hw * 0.78, zRoof),
-      b.proj(-hl * 0.44, hw * 0.78, zRoof),
-    ], shadeHex(baseHex, 1.15, mode), outlineCol, lw * 0.8);
+      // Visible front or rear bumper face
+      fillPoly([
+        b.proj(endSign * hl, -hw, zBot),
+        b.proj(endSign * hl, hw, zBot),
+        b.proj(endSign * hl, hw, zBelt),
+        b.proj(endSign * hl, -hw, zBelt),
+      ], shadeHex(baseHex, endShade * 0.90, mode), outlineCol, lw);
+
+      // Hood & trunk deck
+      fillPoly([
+        b.proj(-hl, -hw, zBelt),
+        b.proj(hl, -hw, zBelt),
+        b.proj(hl, hw, zBelt),
+        b.proj(-hl, hw, zBelt),
+      ], shadeHex(baseHex, 1.04, mode));
+
+      // Windshield & rear glass with subtle sky-reflection highlight
+      fillPoly([
+        b.proj(hl * 0.54, -hw * 0.84, zBelt + 0.1),
+        b.proj(hl * 0.54, hw * 0.84, zBelt + 0.1),
+        b.proj(hl * 0.28, hw * 0.78, zRoof),
+        b.proj(hl * 0.28, -hw * 0.78, zRoof),
+      ], isNight ? '#446387' : '#354f68');
+      if (!isNight) {
+        fillPoly([
+          b.proj(hl * 0.46, -hw * 0.64, zBelt + 0.7),
+          b.proj(hl * 0.46, -hw * 0.12, zBelt + 0.7),
+          b.proj(hl * 0.34, -hw * 0.12, zRoof - 0.5),
+          b.proj(hl * 0.34, -hw * 0.60, zRoof - 0.5),
+        ], 'rgba(216,238,255,0.34)');
+      }
+
+      // Sunlit top roof panel
+      fillPoly([
+        b.proj(-hl * 0.44, -hw * 0.78, zRoof),
+        b.proj(hl * 0.28, -hw * 0.78, zRoof),
+        b.proj(hl * 0.28, hw * 0.78, zRoof),
+        b.proj(-hl * 0.44, hw * 0.78, zRoof),
+      ], shadeHex(baseHex, 1.15, mode), outlineCol, lw * 0.8);
+    }
 
     // Headlights (warm beams at night!) & red taillights
     const hl1 = b.proj(hl + 0.3, -hw * 0.62, zBot + 1.6);
@@ -1817,7 +1891,7 @@
     }
   }
 
-  function draw3DTrainUnit(pRear, pFront, kind, variant, wScale, mode, nextRear, nextFront) {
+  function draw3DTrainUnit(pRear, pFront, kind, variant, wScale, mode, nextRear, nextFront, tSec = 0) {
     // Museum-grade continuous 3D SBB RABe 511 KISS Double-Decker & SBB Re 460 IC
     // True two-point rail-pinned kinematics (pFront & pRear on the track) so every wagon
     // tracks the rail like a real articulated train with locked dark rubber gangway bellows!
@@ -2060,6 +2134,22 @@
       vCtx.moveTo(p0[0], p0[1]);
       vCtx.lineTo(p1[0], p1[1]);
       vCtx.stroke();
+
+      // Authentic rare SBB pantograph-to-catenary electric arc flash (especially atmospheric at Alpenglow & Night!)
+      const sparkSlot = Math.floor(tSec * 14.0);
+      const sparkHash = Math.sin(sparkSlot * 127.1 + Math.round(b.cx * 0.05) * 31.7) * 43758.5453;
+      if ((sparkHash - Math.floor(sparkHash)) > (isNight ? 0.945 : 0.975)) {
+        const pm = b.proj(-22, 0, zCrown + 3.6);
+        const spR = Math.max(2.0, 3.2 * b.s);
+        vCtx.save();
+        vCtx.fillStyle = isNight ? 'rgba(110, 230, 255, 0.55)' : 'rgba(140, 235, 255, 0.35)';
+        vCtx.beginPath();
+        vCtx.arc(pm[0], pm[1], spR * 1.9, 0, Math.PI * 2);
+        vCtx.fill();
+        vCtx.fillStyle = '#f2feff';
+        vCtx.fillRect(Math.round(pm[0] - spR * 0.5), Math.round(pm[1] - spR * 0.5), Math.max(2, Math.round(spR)), Math.max(2, Math.round(spR)));
+        vCtx.restore();
+      }
 
       // Swiss triple-headlight glow at night
       if (isNight) {
@@ -2389,8 +2479,9 @@
       drawShorelineWaves(animData.ambient.shoreline, worldW, worldH, wScale, tSec, currentMode);
     }
 
-    // 2. Lake Zurich ZSG Steamer & Sailboats (with crisp pixel V-wakes!)
-    for (const ship of (animData.ships || [])) {
+    // 2. Lake Zurich ZSG Steamer, Sailboats & Boesch Runabout (layered pixel V-wakes, bow spray & night reflections!)
+    for (let sIdx = 0; sIdx < (animData.ships || []).length; sIdx++) {
+      const ship = animData.ships[sIdx];
       let frac;
       if (ship.closed) {
         const cyc = ship.length_m / Math.max(0.5, ship.speed_mps);
@@ -2402,26 +2493,97 @@
       const pos = samplePathAt(ship.pts, frac, worldW, worldH, 3);
       if (!pos) continue;
 
-      // Pixel water wake ripples behind moving vessels
-      const wakeCount = ship.kind === 'zsg_steamer' ? 6 : 3;
-      const wakeColor = isNight ? 'rgba(130,168,210,0.38)' : 'rgba(224,242,246,0.52)';
-      for (let k = 1; k <= wakeCount; k++) {
-        const fWake = ship.closed
-          ? ((frac - k * 0.012) % 1 + 1) % 1
-          : frac - k * 0.008;
-        if (fWake <= 0 || fWake >= 1) continue;
-        const pw = samplePathAt(ship.pts, fWake, worldW, worldH, 3);
-        if (!pw) continue;
-        const spread = (ship.kind === 'zsg_steamer' ? 9 : 4) + k * 3.2;
-        const nx = -pw.ty * spread * wScale;
-        const ny = pw.tx * spread * 0.55 * wScale;
-        drawPixelRectWorld(pw.wx + nx, pw.wy + ny, 3, 2, wakeColor, wScale);
-        drawPixelRectWorld(pw.wx - nx, pw.wy - ny, 3, 2, wakeColor, wScale);
+      const isSteamer = ship.kind === 'zsg_steamer';
+      const isMotor = ship.kind === 'motorboat';
+      const isDocked = !ship.closed && ship.stop_frac != null && Math.abs(frac - ship.stop_frac) < 0.002;
+      const wakeCount = isSteamer ? 14 : (isMotor ? 10 : 6);
+      const wakeStep = ship.closed ? 0.0045 : 0.0026;
+
+      if (!isDocked) {
+        const sPx = scale * wScale;
+        const leftPts = [];
+        const rightPts = [];
+        const centerPts = [];
+        // Start right at the stern/waterline of the vessel
+        const sternBack = (isSteamer ? 32 : (isMotor ? 10 : 7)) * wScale;
+        const initSpread = (isSteamer ? 7.5 : (isMotor ? 3.2 : 2.6)) * wScale;
+        const wx0 = pos.wx - pos.tx * sternBack;
+        const wy0 = pos.wy - pos.ty * sternBack;
+        leftPts.push([wx0 * scale + offsetX - pos.ty * initSpread * scale, wy0 * scale + offsetY + pos.tx * initSpread * 0.55 * scale]);
+        rightPts.push([wx0 * scale + offsetX + pos.ty * initSpread * scale, wy0 * scale + offsetY - pos.tx * initSpread * 0.55 * scale]);
+        centerPts.push([wx0 * scale + offsetX, wy0 * scale + offsetY]);
+
+        for (let k = 1; k <= wakeCount; k++) {
+          const fWake = ship.closed
+            ? ((frac - k * wakeStep) % 1 + 1) % 1
+            : frac - k * wakeStep;
+          if (fWake <= 0 || fWake >= 1) break;
+          const pw = samplePathAt(ship.pts, fWake, worldW, worldH, 3);
+          if (!pw) break;
+          const spread = (isSteamer ? 8.5 : (isMotor ? 3.8 : 3.0)) + k * (isSteamer ? 2.4 : 1.55);
+          const nx = -pw.ty * spread * wScale;
+          const ny = pw.tx * spread * 0.55 * wScale;
+          leftPts.push([(pw.wx + nx) * scale + offsetX, (pw.wy + ny) * scale + offsetY]);
+          rightPts.push([(pw.wx - nx) * scale + offsetX, (pw.wy - ny) * scale + offsetY]);
+          centerPts.push([pw.wx * scale + offsetX, pw.wy * scale + offsetY]);
+        }
+
+        ctx.save();
+        ctx.lineCap = 'round';
+        for (let k = 1; k < leftPts.length; k++) {
+          const fade = Math.pow(1 - (k - 1) / Math.max(1, leftPts.length - 1), 1.35);
+          const a = (isNight ? 0.34 : (isSunset ? 0.52 : 0.62)) * fade;
+          const wCol = isNight
+            ? `rgba(148,188,232,${a.toFixed(2)})`
+            : (isSunset ? `rgba(255,228,200,${a.toFixed(2)})` : `rgba(232,248,255,${a.toFixed(2)})`);
+          ctx.strokeStyle = wCol;
+          ctx.lineWidth = Math.max(1.1, (isSteamer ? 2.6 : 1.6) * sPx * (0.55 + 0.55 * fade));
+          ctx.beginPath();
+          ctx.moveTo(leftPts[k - 1][0], leftPts[k - 1][1]);
+          ctx.lineTo(leftPts[k][0], leftPts[k][1]);
+          ctx.moveTo(rightPts[k - 1][0], rightPts[k - 1][1]);
+          ctx.lineTo(rightPts[k][0], rightPts[k][1]);
+          ctx.stroke();
+
+          // Soft frothy central prop-wash stream behind steamer & Boesch runabout
+          if ((isSteamer || isMotor) && k <= 7) {
+            const pa = a * 0.58;
+            ctx.strokeStyle = isNight
+              ? `rgba(164,202,240,${pa.toFixed(2)})`
+              : (isSunset ? `rgba(255,236,216,${pa.toFixed(2)})` : `rgba(244,253,255,${pa.toFixed(2)})`);
+            ctx.lineWidth = Math.max(1.2, (isSteamer ? 4.4 : 2.0) * sPx * fade);
+            ctx.beginPath();
+            ctx.moveTo(centerPts[k - 1][0], centerPts[k - 1][1]);
+            ctx.lineTo(centerPts[k][0], centerPts[k][1]);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+
+        // Crisp bow foam flecks right at the waterline
+        const bowOff = (isSteamer ? 30 : (isMotor ? 10 : 7)) * wScale;
+        const foamCol = isNight ? 'rgba(176,208,242,0.55)' : 'rgba(248,254,255,0.78)';
+        drawPixelRectWorld(pos.wx + pos.tx * bowOff, pos.wy + pos.ty * bowOff, 3.6, 1.8, foamCol, wScale);
       }
 
+      // Shimmering warm golden cabin light reflection dancing on dark Lake Zurich water beneath ZSG Steamer at Night!
+      if (isNight && isSteamer) {
+        for (let r = 0; r < 5; r++) {
+          const along = (-16 + r * 8) * wScale;
+          for (let d = 1; d <= 3; d++) {
+            const rx = pos.wx + pos.tx * along + Math.sin(tSec * 3.8 + r * 1.9 + d * 1.3) * 2.4 * wScale;
+            const ry = pos.wy + pos.ty * along + (5 + d * 3.4) * wScale;
+            const ra = (0.42 - d * 0.10).toFixed(2);
+            drawPixelRectWorld(rx, ry, 4.2, 1.6, `rgba(255,214,112,${ra})`, wScale);
+          }
+        }
+      }
+
+      // Subtle buoyant water bobbing
+      const bobY = Math.sin(tSec * (isSteamer ? 1.8 : 2.6) + sIdx * 1.9) * (isSteamer ? 0.55 : 0.85) * wScale;
       const angIdx = ((Math.round((Math.atan2(pos.ty, pos.tx) / (Math.PI * 2)) * 32) % 32) + 32) % 32;
       const sp = getVehicleSprite(ship.kind, 0, angIdx, currentMode);
-      blitWorldSprite(sp, pos.wx, pos.wy, wScale);
+      blitWorldSprite(sp, pos.wx, pos.wy + bobY, wScale);
     }
 
     // 3. Road Cars, ZVV Buses, Cyclists & Sidewalk Pedestrians (zero-overlap lane flow & back-to-front sorted!)
@@ -2567,12 +2729,12 @@
       const trainPadW = (isNight ? 98 : 76) * wScale;
       for (const u of units) {
         drawDepthMasked(u.midWx, u.midWy, trainPadW, u.midD16, worldW, worldH, () => {
-          draw3DTrainUnit(u.pRear, u.pFront, tr.kind, u.variant, wScale, currentMode, u.nextRear, u.nextFront);
+          draw3DTrainUnit(u.pRear, u.pFront, tr.kind, u.variant, wScale, currentMode, u.nextRear, u.nextFront, tSec);
         });
       }
     }
 
-    // 5. Waving Swiss Flags, Lindt 43.6 m Hochkamin Rising Pixel Steam & Gliding Lake Zurich Gulls
+    // 5. Waving Swiss & Kilchberg Flags, Lindt 43.6 m Hochkamin Multi-Layered Pixel Steam & Lake Zurich Gulls
     if (animData.ambient) {
       const waveStep = Math.floor(tSec * 5.0) % 4;
       for (let fIdx = 0; fIdx < (animData.ambient.swiss_flags || []).length; fIdx++) {
@@ -2580,10 +2742,10 @@
         const fx = fl.uv[0] * worldW;
         const fy = fl.uv[1] * worldH;
         const fPhase = (waveStep + fIdx) % 4;
-        // Thin silver flagpole
-        drawPixelRectWorld(fx, fy - 14 * wScale, 1.5, 15, isNight ? '#8a99b2' : '#d8dce2', wScale);
-        // 3 waving segments of red Swiss flag + white cross
-        const segY0 = fy - 14 * wScale;
+        // Thin silver flagpole with golden finial ball
+        drawPixelRectWorld(fx, fy - 15 * wScale, 1.5, 16, isNight ? '#8a99b2' : '#d8dce2', wScale);
+        drawPixelRectWorld(fx - 0.3 * wScale, fy - 16 * wScale, 2.1, 1.6, isNight ? '#c8a852' : '#f2ca52', wScale);
+        const segY0 = fy - 14.5 * wScale;
         const dy1 = (fPhase === 1 ? -1 : (fPhase === 3 ? 1 : 0)) * wScale;
         const dy2 = (fPhase === 2 ? -1 : (fPhase === 0 ? 1 : 0)) * wScale;
         const redFlag = isNight ? '#9e2828' : '#d62c28';
@@ -2593,22 +2755,50 @@
         drawPixelRectWorld(fx + 7.2 * wScale, segY0 + dy2, 2.8, 6, redFlag, wScale);
         drawPixelRectWorld(fx + 4.6 * wScale, segY0 + dy1 + 1.2 * wScale, 1.4, 3.6, whiteCross, wScale);
         drawPixelRectWorld(fx + 3.4 * wScale, segY0 + dy1 + 2.3 * wScale, 3.8, 1.4, whiteCross, wScale);
+
+        // At Bahnhof / Gemeindehaus (fIdx === 3), fly the authentic Kilchberg ZH Municipal Crest Flag beside the Swiss flag!
+        if (fIdx === 3) {
+          const kx = fx + 13 * wScale;
+          const ky = fy + 2 * wScale;
+          const kPhase = (waveStep + 2) % 4;
+          const kdy1 = (kPhase === 1 ? -1 : (kPhase === 3 ? 1 : 0)) * wScale;
+          const kdy2 = (kPhase === 2 ? -1 : (kPhase === 0 ? 1 : 0)) * wScale;
+          drawPixelRectWorld(kx, ky - 14 * wScale, 1.5, 15, isNight ? '#8a99b2' : '#d8dce2', wScale);
+          // Kilchberg ZH Coat of Arms (red upper/church spire field + golden lower band + crisp white spire silhouette)
+          const kTop = isNight ? '#9c2c2c' : '#cc2e2a';
+          const kGold = isNight ? '#b59238' : '#e8be42';
+          drawPixelRectWorld(kx + 1.5 * wScale, ky - 14 * wScale, 3, 3.4, kTop, wScale);
+          drawPixelRectWorld(kx + 4.2 * wScale, ky - 14 * wScale + kdy1, 3.2, 3.4, kTop, wScale);
+          drawPixelRectWorld(kx + 7.2 * wScale, ky - 14 * wScale + kdy2, 2.8, 3.4, kTop, wScale);
+          drawPixelRectWorld(kx + 1.5 * wScale, ky - 10.6 * wScale, 3, 2.6, kGold, wScale);
+          drawPixelRectWorld(kx + 4.2 * wScale, ky - 10.6 * wScale + kdy1, 3.2, 2.6, kGold, wScale);
+          drawPixelRectWorld(kx + 7.2 * wScale, ky - 10.6 * wScale + kdy2, 2.8, 2.6, kGold, wScale);
+          drawPixelRectWorld(kx + 4.8 * wScale, ky - 13.4 * wScale + kdy1, 1.6, 3.8, whiteCross, wScale);
+        }
       }
 
       if (animData.ambient.chimney_steam) {
+        // Multi-layered sunlit + shaded 90s pixel steam clouds rising from the 43.6 m Lindt brick Hochkamin!
         const stUv = animData.ambient.chimney_steam.uv;
         const cxWorld = stUv[0] * worldW;
         const cyWorld = stUv[1] * worldH;
-        for (let p = 0; p < 7; p++) {
-          const age = ((tSec * 0.34 + p / 7) % 1);
-          const pxWorld = Math.round(cxWorld - age * 26 * wScale + Math.sin(age * 7.0 + p) * 2.5 * wScale);
-          const pyWorld = Math.round(cyWorld - (3 + age * 38) * wScale);
-          const alpha = (1 - age) * (age < 0.15 ? age / 0.15 : 0.62);
-          const sz = 2.5 + age * 6.5;
-          const puffCol = isNight
-            ? `rgba(148,164,196,${(alpha * 0.55).toFixed(2)})`
-            : (isSunset ? `rgba(248,214,196,${(alpha * 0.72).toFixed(2)})` : `rgba(242,240,236,${(alpha * 0.72).toFixed(2)})`);
-          drawPixelRectWorld(pxWorld - sz * 0.5 * wScale, pyWorld - sz * 0.4 * wScale, sz, sz * 0.75, puffCol, wScale);
+        for (let p = 0; p < 10; p++) {
+          const age = ((tSec * 0.28 + p / 10) % 1);
+          const driftX = -age * 34 * wScale + Math.sin(age * 6.5 + p * 1.4) * 3.0 * wScale;
+          const riseY = -(3 + age * 46) * wScale;
+          const pxWorld = Math.round(cxWorld + driftX);
+          const pyWorld = Math.round(cyWorld + riseY);
+          const alpha = (1 - age) * (age < 0.12 ? age / 0.12 : 0.72);
+          const sz = 2.6 + age * 7.8;
+          // Soft cool underside puff + bright NW-sunlit upper puff
+          const shadeCol = isNight
+            ? `rgba(110,126,158,${(alpha * 0.48).toFixed(2)})`
+            : (isSunset ? `rgba(218,174,162,${(alpha * 0.62).toFixed(2)})` : `rgba(204,210,220,${(alpha * 0.60).toFixed(2)})`);
+          const litCol = isNight
+            ? `rgba(154,170,204,${(alpha * 0.56).toFixed(2)})`
+            : (isSunset ? `rgba(255,226,200,${(alpha * 0.78).toFixed(2)})` : `rgba(248,248,244,${(alpha * 0.78).toFixed(2)})`);
+          drawPixelRectWorld(pxWorld - sz * 0.48 * wScale, pyWorld - sz * 0.25 * wScale, sz, sz * 0.68, shadeCol, wScale);
+          drawPixelRectWorld(pxWorld - sz * 0.56 * wScale, pyWorld - sz * 0.50 * wScale, sz * 0.82, sz * 0.52, litCol, wScale);
         }
       }
 
@@ -2633,7 +2823,8 @@
       }
     }
 
-    // 5b. v5.0 Masterpiece Living Atmosphere (Lake Glints, Harbor Beacons, SBB Signal, Cloud Shadows, Fireflies & Bell Ripples)
+    // 5b. v5.1 Kilchberg Living Details & Dynamic Swiss Atmosphere
+    drawKilchbergDetails(worldW, worldH, wScale, tSec, isNight, isSunset);
     drawAtmosphereAndLife(worldW, worldH, wScale, tSec, isNight, isSunset);
 
     // 6. Update Spatial Distance-Attenuated Kilchberg Soundscape
@@ -2655,6 +2846,544 @@
     [0.71, 0.43], [0.77, 0.37], [0.47, 0.41], [0.35, 0.32],
   ];
 
+  // Crisp 90s pixel-grid miniature villager/visitor/commuter sprite (used at Lindt Plaza, Bahnhof, Bendlikon Pier & Seebad)
+  function drawMiniPerson(sx, sy, s, coatCol, pantsCol, hairCol, isNight, stridePhase, bagCol = null) {
+    const p = Math.max(1.0, s);
+    const rx = Math.round(sx);
+    const ry = Math.round(sy);
+    const step = Math.round(Math.sin(stridePhase) * 0.85 * p);
+    // Grounded shadow
+    ctx.fillStyle = isNight ? 'rgba(6,10,20,0.48)' : 'rgba(18,24,32,0.30)';
+    ctx.fillRect(rx - Math.round(1.4 * p), ry, Math.max(2, Math.round(3.0 * p)), Math.max(1, Math.round(1.1 * p)));
+    // Striding legs
+    ctx.fillStyle = pantsCol;
+    ctx.fillRect(rx - Math.round(0.8 * p) + step, ry - Math.round(2.2 * p), Math.max(1, Math.round(0.95 * p)), Math.max(1, Math.round(2.2 * p)));
+    ctx.fillRect(rx + Math.round(0.1 * p) - step, ry - Math.round(2.2 * p), Math.max(1, Math.round(0.95 * p)), Math.max(1, Math.round(2.2 * p)));
+    // Jacket torso
+    ctx.fillStyle = coatCol;
+    ctx.fillRect(rx - Math.round(1.0 * p), ry - Math.round(4.6 * p), Math.max(2, Math.round(2.1 * p)), Math.max(2, Math.round(2.5 * p)));
+    // Optional Lindt golden-red shopping bag or commuter briefcase!
+    if (bagCol) {
+      ctx.fillStyle = bagCol;
+      ctx.fillRect(rx + Math.round(1.0 * p), ry - Math.round(3.2 * p), Math.max(1, Math.round(1.1 * p)), Math.max(1, Math.round(1.5 * p)));
+    }
+    // Face + hair crown
+    ctx.fillStyle = isNight ? '#a88c72' : '#ecc29c';
+    ctx.fillRect(rx - Math.round(0.7 * p), ry - Math.round(5.9 * p), Math.max(1, Math.round(1.4 * p)), Math.max(1, Math.round(1.3 * p)));
+    ctx.fillStyle = hairCol;
+    ctx.fillRect(rx - Math.round(0.75 * p), ry - Math.round(6.4 * p), Math.max(1, Math.round(1.5 * p)), Math.max(1, Math.round(0.75 * p)));
+  }
+
+  function drawKilchbergDetails(worldW, worldH, wScale, tSec, isNight, isSunset) {
+    const s = scale * wScale;
+    const toX = (u) => u * worldW * scale + offsetX;
+    const toY = (v) => v * worldH * scale + offsetY;
+    const inView = (x, y, pad = 90) => x >= -pad && x <= canvas.width + pad && y >= -pad && y <= canvas.height + pad;
+    const coats = ['#d9382e', '#2563eb', '#0d9488', '#d97706', '#7c3aed', '#e11d48', '#334155', '#16a34a'];
+    const hairs = ['#2d241c', '#5c4028', '#8a6842', '#3a3430', '#b89458'];
+
+    ctx.save();
+
+    // =========================================================================
+    // 1. REFORMIERTE KIRCHE KILCHBERG — Live Real-Time Swiss Tower Clock + Circling Swifts!
+    // =========================================================================
+    {
+      const cx = toX(0.29035);
+      const cy = toY(0.31775);
+      if (inView(cx, cy, 80)) {
+        // Real Zurich local time (falls back smoothly when ?t= fixed time is used for deterministic captures)
+        let hr, min, sec;
+        if (fixedAnimTime !== null) {
+          hr = 14; min = 20 + Math.floor(fixedAnimTime / 60); sec = fixedAnimTime % 60;
+        } else {
+          const now = new Date();
+          const zh = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Zurich' }));
+          hr = zh.getHours(); min = zh.getMinutes(); sec = zh.getSeconds();
+        }
+        const rDial = 6.2 * s;
+        if (rDial >= 2.2) {
+          // Dark navy dial inside the real gold bezel (subtle warm lantern glow at night!)
+          ctx.fillStyle = isNight ? '#1c2a42' : '#162030';
+          ctx.beginPath();
+          ctx.arc(cx, cy, rDial, 0, Math.PI * 2);
+          ctx.fill();
+          if (isNight) {
+            ctx.strokeStyle = 'rgba(255,220,120,0.45)';
+            ctx.lineWidth = Math.max(1.0, 1.1 * s);
+            ctx.stroke();
+          }
+          // Golden hour & minute hands
+          const minAng = ((min + sec / 60) / 60) * Math.PI * 2 - Math.PI * 0.5;
+          const hrAng = (((hr % 12) + min / 60) / 12) * Math.PI * 2 - Math.PI * 0.5;
+          ctx.strokeStyle = isNight ? '#ffe38a' : '#f4cf58';
+          ctx.lineCap = 'round';
+          // Hour hand
+          ctx.lineWidth = Math.max(1.2, 1.5 * s);
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + Math.cos(hrAng) * rDial * 0.56, cy + Math.sin(hrAng) * rDial * 0.56);
+          ctx.stroke();
+          // Minute hand
+          ctx.lineWidth = Math.max(1.0, 1.15 * s);
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + Math.cos(minAng) * rDial * 0.84, cy + Math.sin(minAng) * rDial * 0.84);
+          ctx.stroke();
+          // Brass center pin
+          ctx.fillStyle = '#fff5cc';
+          ctx.fillRect(Math.round(cx - 0.7 * s), Math.round(cy - 0.7 * s), Math.max(1.5, Math.round(1.4 * s)), Math.max(1.5, Math.round(1.4 * s)));
+        }
+
+        // 4 graceful dark swifts orbiting the Reformierte Kirche steeple (Midday & Alpenglow!)
+        if (!isNight) {
+          const spX = toX(0.2904);
+          const spY = toY(0.3055);
+          ctx.fillStyle = isSunset ? '#2e2230' : '#26303d';
+          for (let b = 0; b < 4; b++) {
+            const ang = tSec * (0.95 + b * 0.13) + b * 1.62;
+            const bx = spX + Math.cos(ang) * (16 + b * 5) * s;
+            const by = spY + Math.sin(ang) * (7 + b * 2.2) * s;
+            const fl = Math.sin(tSec * 12.0 + b * 2.3) > 0 ? -1 : 1;
+            const px = Math.max(1, Math.round(1.1 * s));
+            ctx.fillRect(Math.round(bx - px * 2), Math.round(by + fl * px * 0.6), px * 2, px);
+            ctx.fillRect(Math.round(bx), Math.round(by), px, px);
+            ctx.fillRect(Math.round(bx + px), Math.round(by + fl * px * 0.6), px * 2, px);
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // 2. LINDT HOME OF CHOCOLATE — Shimmering Golden Fountain Atrium + Visitors on Schokoladenplatz!
+    // =========================================================================
+    {
+      const lx = toX(0.3775);
+      const ly = toY(0.6485);
+      if (inView(lx, ly, 160)) {
+        // Warm shimmering Golden Chocolate Fountain light strictly inside the dark curved glass entrance doors!
+        const shimmer = 0.76 + 0.24 * Math.sin(tSec * 3.4);
+        const arcPts = [
+          [0.3764, 0.6468], [0.3775, 0.6463], [0.3786, 0.6462], [0.3798, 0.6464],
+        ];
+        for (let i = 0; i < arcPts.length; i++) {
+          const ax = toX(arcPts[i][0]);
+          const ay = toY(arcPts[i][1]);
+          const pGlow = 0.75 + 0.25 * Math.sin(tSec * 4.2 + i * 1.3);
+          const rw = Math.max(3, 5.2 * s);
+          const rh = Math.max(2, 3.6 * s);
+          ctx.fillStyle = isNight
+            ? `rgba(255, 206, 94, ${(0.76 * pGlow).toFixed(2)})`
+            : (isSunset ? `rgba(255, 204, 102, ${(0.54 * pGlow).toFixed(2)})` : `rgba(255, 214, 118, ${(0.38 * pGlow).toFixed(2)})`);
+          ctx.fillRect(Math.round(ax - rw * 0.5), Math.round(ay - rh * 0.5), Math.round(rw), Math.round(rh));
+        }
+        // Soft warm plaza glow spilling onto Schokoladenplatz at Alpenglow & Night
+        if (isNight || isSunset) {
+          const gRad = 26 * s;
+          const grad = ctx.createRadialGradient(toX(0.3782), toY(0.6472), 2 * s, toX(0.3782), toY(0.6498), gRad);
+          grad.addColorStop(0, isNight ? `rgba(255, 202, 92, ${(0.34 * shimmer).toFixed(2)})` : `rgba(255, 198, 104, ${(0.20 * shimmer).toFixed(2)})`);
+          grad.addColorStop(1, 'rgba(255, 198, 104, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.ellipse(toX(0.3782), toY(0.6498), gRad * 1.25, gRad * 0.72, -0.15, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // 7 strolling visitors & families cleanly centered on Schokoladenplatz cobblestones (with Lindt bags!)
+        const plazaWalkers = [
+          { u0: 0.3758, v0: 0.6510, u1: 0.3800, v1: 0.6496, spd: 0.08, ph: 0.1, bag: '#e5b93c' },
+          { u0: 0.3802, v0: 0.6524, u1: 0.3764, v1: 0.6504, spd: 0.07, ph: 0.45, bag: '#d62c28' },
+          { u0: 0.3770, v0: 0.6534, u1: 0.3794, v1: 0.6486, spd: 0.06, ph: 0.72, bag: '#e5b93c' },
+          { u0: 0.3762, v0: 0.6494, u1: 0.3790, v1: 0.6528, spd: 0.055, ph: 0.25, bag: null },
+          { u0: 0.3792, v0: 0.6488, u1: 0.3772, v1: 0.6520, spd: 0.065, ph: 0.88, bag: '#e5b93c' },
+          { u0: 0.3776, v0: 0.6495, u1: 0.3780, v1: 0.6500, spd: 0.03, ph: 0.3, bag: '#d62c28' },
+          { u0: 0.3783, v0: 0.6498, u1: 0.3787, v1: 0.6503, spd: 0.03, ph: 0.6, bag: null },
+        ];
+        const nVis = isNight ? 3 : plazaWalkers.length;
+        for (let i = 0; i < nVis; i++) {
+          const w = plazaWalkers[i];
+          const p = 0.5 + 0.5 * Math.sin(tSec * w.spd * Math.PI * 2 + w.ph * Math.PI * 2);
+          const vx = toX(w.u0 + (w.u1 - w.u0) * p);
+          const vy = toY(w.v0 + (w.v1 - w.v0) * p);
+          const coat = shadeHex(coats[i % coats.length], 1.0, currentMode);
+          const pants = shadeHex('#263040', 1.0, currentMode);
+          drawMiniPerson(vx, vy, s, coat, pants, hairs[i % hairs.length], isNight, tSec * 7.5 + i * 1.9, w.bag);
+        }
+      }
+    }
+
+    // =========================================================================
+    // 3. TC KILCHBERG CLAY TENNIS COURTS — 2 Live Animated Pixel-Art Tennis Matches!
+    // =========================================================================
+    if (!isNight) {
+      const courts = [
+        // Upper-right clay court (TC Kilchberg Court 1)
+        { swU: 0.1736, swV: 0.3484, neU: 0.1794, neV: 0.3418, latU: 0.0012, latV: 0.0020, ph: 0.0, freq: 1.55 },
+        // Center-left clay court behind clubhouse (TC Kilchberg Court 3)
+        { swU: 0.1616, swV: 0.3544, neU: 0.1670, neV: 0.3484, latU: 0.0011, latV: 0.0019, ph: 2.1, freq: 1.38 },
+      ];
+      for (let ci = 0; ci < courts.length; ci++) {
+        const c = courts[ci];
+        const midX = toX((c.swU + c.neU) * 0.5);
+        const midY = toY((c.swV + c.neV) * 0.5);
+        if (!inView(midX, midY, 120)) continue;
+
+        // Crisp white tennis net + dark net posts fitted strictly inside the clay court!
+        const netU0 = (c.swU + c.neU) * 0.5 - c.latU * 0.92;
+        const netV0 = (c.swV + c.neV) * 0.5 - c.latV * 0.92;
+        const netU1 = (c.swU + c.neU) * 0.5 + c.latU * 0.92;
+        const netV1 = (c.swV + c.neV) * 0.5 + c.latV * 0.92;
+        const nx0 = toX(netU0); const ny0 = toY(netV0);
+        const nx1 = toX(netU1); const ny1 = toY(netV1);
+        ctx.strokeStyle = isSunset ? 'rgba(255,235,215,0.78)' : 'rgba(248,250,252,0.84)';
+        ctx.lineWidth = Math.max(1.0, 1.1 * s);
+        ctx.beginPath();
+        ctx.moveTo(nx0, ny0);
+        ctx.lineTo(nx1, ny1);
+        ctx.stroke();
+        // Tiny dark green net posts
+        const postSz = Math.max(1.5, Math.round(1.4 * s));
+        ctx.fillStyle = '#1f2937';
+        ctx.fillRect(Math.round(nx0 - postSz * 0.5), Math.round(ny0 - postSz * 0.5), postSz, postSz);
+        ctx.fillRect(Math.round(nx1 - postSz * 0.5), Math.round(ny1 - postSz * 0.5), postSz, postSz);
+
+        // Volley cycle: 0..1 goes SW -> NE, 1..2 goes NE -> SW!
+        const cyc = (tSec * c.freq + c.ph) % 2.0;
+        const ballF = cyc < 1.0 ? cyc : (2.0 - cyc);
+        const latA = Math.sin(tSec * 0.78 + ci * 2.4) * 0.62;
+        const latB = Math.cos(tSec * 0.85 + ci * 1.7) * 0.62;
+        const ballLat = latA * (1 - ballF) + latB * ballF;
+
+        const pAx = toX(c.swU + c.latU * latA);
+        const pAy = toY(c.swV + c.latV * latA);
+        const pBx = toX(c.neU + c.latU * latB);
+        const pBy = toY(c.neV + c.latV * latB);
+        const whiteKit = isSunset ? '#ffe8d4' : '#f4f7fa';
+        const shortCol = ci === 0 ? '#1e3a5f' : '#991b1b';
+        drawMiniPerson(pBx, pBy, s * 0.92, whiteKit, shortCol, hairs[ci], false, tSec * 10.0 + 1.0);
+        drawMiniPerson(pAx, pAy, s * 0.92, whiteKit, '#1e3a5f', hairs[ci + 2], false, tSec * 10.0);
+
+        // 3D parabolic neon-yellow tennis ball + grounded court shadow!
+        const bu = c.swU + (c.neU - c.swU) * ballF + c.latU * ballLat;
+        const bv = c.swV + (c.neV - c.swV) * ballF + c.latV * ballLat;
+        const arcH = Math.sin(ballF * Math.PI) * 9.0 * s;
+        const bx = toX(bu);
+        const by = toY(bv);
+        const bSz = Math.max(1.6, 1.8 * s);
+        ctx.fillStyle = 'rgba(28, 18, 12, 0.35)';
+        ctx.fillRect(Math.round(bx - bSz * 0.4), Math.round(by), Math.max(1.5, Math.round(bSz * 0.8)), Math.max(1, Math.round(bSz * 0.6)));
+        ctx.fillStyle = '#d9ff3b';
+        ctx.fillRect(Math.round(bx - bSz * 0.5), Math.round(by - arcH - bSz * 0.5), Math.max(2, Math.round(bSz)), Math.max(2, Math.round(bSz)));
+      }
+    }
+
+    // =========================================================================
+    // 4. SEEBAD KILCHBERG — Pool Swimmers, Pixel-Art Beach Umbrellas, Jetty Bathers & Lake Swimmers!
+    // =========================================================================
+    {
+      const poolX = toX(0.4090);
+      const poolY = toY(0.7092);
+      if (inView(poolX, poolY, 180)) {
+        if (isNight) {
+          const grad = ctx.createRadialGradient(poolX, poolY, 2 * s, poolX, poolY, 22 * s);
+          grad.addColorStop(0, 'rgba(64, 228, 240, 0.34)');
+          grad.addColorStop(1, 'rgba(32, 160, 200, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.ellipse(poolX, poolY, 22 * s, 14 * s, -0.35, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // 3 animated swimmers gliding back & forth inside Seebad Kilchberg's turquoise pool!
+          const swimCaps = ['#f43f5e', '#facc15', '#ffffff'];
+          for (let sw = 0; sw < 3; sw++) {
+            const prog = 0.5 + 0.5 * Math.sin(tSec * (0.28 + sw * 0.05) + sw * 2.1);
+            const su = 0.4071 + prog * 0.0028 + sw * 0.0005;
+            const sv = 0.7069 + (1 - prog) * 0.0018 + sw * 0.0013;
+            const sx = toX(su);
+            const sy = toY(sv);
+            const px = Math.max(1.2, 1.3 * s);
+            ctx.fillStyle = 'rgba(240, 252, 255, 0.78)';
+            ctx.fillRect(Math.round(sx - px * 1.6), Math.round(sy), Math.max(2, Math.round(px * 3.2)), Math.max(1, Math.round(px * 0.85)));
+            ctx.fillStyle = swimCaps[sw];
+            ctx.fillRect(Math.round(sx - px * 0.5), Math.round(sy - px * 0.7), Math.max(2, Math.round(px * 1.2)), Math.max(2, Math.round(px * 1.1)));
+          }
+
+          // 3 crisp pixel-grid-snapped 90s pixel-art beach umbrellas on the Seebad sunlit lawn!
+          const umbrellas = [
+            { u: 0.4036, v: 0.7018, c1: '#d9382e', c2: '#f4f6f8', dk: '#8f1d18' },
+            { u: 0.4052, v: 0.7010, c1: '#2563eb', c2: '#f4f6f8', dk: '#1a3f94' },
+            { u: 0.4063, v: 0.7024, c1: '#eab308', c2: '#fef3c7', dk: '#a16207' },
+          ];
+          for (const um of umbrellas) {
+            const ux = Math.round(toX(um.u));
+            const uy = Math.round(toY(um.v));
+            const p = Math.max(1.0, s);
+            const w = (n) => Math.max(1, Math.round(n * p));
+            // Grounded pixel shadow + wooden pole
+            ctx.fillStyle = 'rgba(16, 28, 22, 0.34)';
+            ctx.fillRect(ux - w(2), uy + w(1), w(7), w(2));
+            ctx.fillStyle = '#5c4028';
+            ctx.fillRect(ux, uy - w(2), w(1), w(3));
+            // Dark pixel outline silhouette
+            ctx.fillStyle = 'rgba(22, 26, 32, 0.82)';
+            ctx.fillRect(ux - w(4), uy - w(4), w(9), w(3));
+            ctx.fillRect(ux - w(3), uy - w(5), w(7), w(5));
+            // Striped canopy body (shaded lower rim + vibrant upper panels + white center stripe)
+            ctx.fillStyle = shadeHex(um.dk, 1.0, currentMode);
+            ctx.fillRect(ux - w(3), uy - w(2), w(7), w(1.2));
+            ctx.fillStyle = shadeHex(um.c1, 1.04, currentMode);
+            ctx.fillRect(ux - w(3), uy - w(4), w(7), w(2.2));
+            ctx.fillStyle = shadeHex(um.c2, 1.04, currentMode);
+            ctx.fillRect(ux - w(1), uy - w(4.5), w(3), w(3.2));
+            // Bright crown peak pixel
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(ux, uy - w(4.5), w(1), w(1));
+          }
+
+          // 4 bathers strolling along the long wooden Seebad Kilchberg jetty + 2 open-lake swimmers off the tip!
+          for (let jb = 0; jb < 4; jb++) {
+            const f = 0.14 + 0.76 * (0.5 + 0.5 * Math.sin(tSec * (0.11 + jb * 0.03) + jb * 1.7));
+            const ju = 0.4126 + (0.4216 - 0.4126) * f;
+            const jv = 0.7136 + (0.7232 - 0.7136) * f;
+            drawMiniPerson(toX(ju), toY(jv), s * 0.92, shadeHex(coats[(jb + 2) % coats.length], 1.0, currentMode), '#2b4c7e', hairs[jb], false, tSec * 6.5 + jb);
+          }
+          for (let ls = 0; ls < 2; ls++) {
+            const ang = tSec * (0.32 + ls * 0.08) + ls * 3.1;
+            const lsu = 0.4235 + Math.cos(ang) * 0.0022;
+            const lsv = 0.7252 + Math.sin(ang) * 0.0024;
+            const lx = toX(lsu);
+            const ly = toY(lsv);
+            const px = Math.max(1.2, 1.3 * s);
+            ctx.fillStyle = 'rgba(232, 248, 255, 0.68)';
+            ctx.fillRect(Math.round(lx - px * 1.8), Math.round(ly), Math.max(2, Math.round(px * 3.6)), Math.max(1, Math.round(px * 0.85)));
+            ctx.fillStyle = ls === 0 ? '#fb7185' : '#38bdf8';
+            ctx.fillRect(Math.round(lx - px * 0.5), Math.round(ly - px * 0.6), Math.max(2, Math.round(px * 1.2)), Math.max(2, Math.round(px * 1.1)));
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // 5. BENDLIKON ZSG STEAMER PIER — Waiting Passengers, Lake Zurich Swans & SUP Paddlers!
+    // =========================================================================
+    {
+      const pierX = toX(0.5835);
+      const pierY = toY(0.5782);
+      if (inView(pierX, pierY, 200)) {
+        let shipNear = false;
+        for (const sh of (animData.ships || [])) {
+          if (sh.kind === 'zsg_steamer') {
+            const f = evalWithStationStop(tSec, sh.length_m, sh.speed_mps, sh.stop_frac, sh.dwell_sec, sh.phase || 0);
+            if (Math.abs(f - sh.stop_frac) < 0.04) shipNear = true;
+          }
+        }
+        const pCount = isNight ? 2 : 5;
+        for (let i = 0; i < pCount; i++) {
+          const shift = shipNear ? 0.0005 : 0;
+          const pu = 0.5812 + i * 0.00095 + Math.sin(tSec * 0.4 + i * 1.7) * 0.00025 + shift;
+          const pv = 0.5786 - i * 0.00035 + Math.cos(tSec * 0.35 + i * 2.1) * 0.00018 + shift;
+          drawMiniPerson(
+            toX(pu), toY(pv), s * 0.96,
+            shadeHex(coats[(i + 1) % coats.length], 1.0, currentMode),
+            shadeHex('#243040', 1.0, currentMode),
+            hairs[i % hairs.length],
+            isNight,
+            shipNear ? tSec * 7.5 + i : tSec * 1.2 + i,
+            i === 1 ? '#b45309' : null,
+          );
+        }
+      }
+
+      // Graceful White Lake Zurich Mute Swans (Zürichsee Höckerschwäne) gliding in Bendlikon & Schooren Bays!
+      const swanLoops = [
+        { cu: 0.5880, cv: 0.5845, ru: 0.0045, rv: 0.0038, spd: 0.14, ph: 0.0 },
+        { cu: 0.5865, cv: 0.5860, ru: 0.0040, rv: 0.0035, spd: 0.14, ph: 0.35 },
+        { cu: 0.4270, cv: 0.7145, ru: 0.0038, rv: 0.0035, spd: 0.16, ph: 1.4 },
+        { cu: 0.4255, cv: 0.7160, ru: 0.0035, rv: 0.0032, spd: 0.16, ph: 1.85 },
+        { cu: 0.6780, cv: 0.5200, ru: 0.0042, rv: 0.0036, spd: 0.13, ph: 3.1 },
+      ];
+      for (const sw of swanLoops) {
+        const ang = tSec * sw.spd + sw.ph;
+        const su = sw.cu + Math.cos(ang) * sw.ru;
+        const sv = sw.cv + Math.sin(ang) * sw.rv;
+        const sx = toX(su);
+        const sy = toY(sv);
+        if (!inView(sx, sy, 24)) continue;
+        const dir = -Math.sin(ang) >= 0 ? 1 : -1;
+        const px = Math.max(1.0, 1.15 * s);
+        ctx.fillStyle = isNight ? 'rgba(130,170,210,0.28)' : 'rgba(234,248,255,0.48)';
+        ctx.fillRect(Math.round(sx - dir * 3.0 * px), Math.round(sy + 0.4 * px), Math.max(2, Math.round(2.6 * px)), Math.max(1, Math.round(0.9 * px)));
+        ctx.fillStyle = isNight ? '#b8c8dc' : (isSunset ? '#fff0de' : '#ffffff');
+        ctx.fillRect(Math.round(sx - 1.6 * px), Math.round(sy - 0.6 * px), Math.max(2, Math.round(3.2 * px)), Math.max(1.5, Math.round(1.6 * px)));
+        ctx.fillRect(Math.round(sx + dir * 1.1 * px), Math.round(sy - 2.2 * px), Math.max(1, Math.round(1.1 * px)), Math.max(2, Math.round(2.0 * px)));
+        ctx.fillStyle = '#f97316';
+        ctx.fillRect(Math.round(sx + dir * 2.0 * px), Math.round(sy - 1.9 * px), Math.max(1, Math.round(0.9 * px)), Math.max(1, Math.round(0.7 * px)));
+      }
+
+      // 2 Stand-Up Paddleboarders (SUPs) gliding peacefully parallel to Kilchberg's shore (Day & Alpenglow!)
+      if (!isNight) {
+        const sups = [
+          { u0: 0.562, v0: 0.606, u1: 0.625, v1: 0.562, spd: 0.022, ph: 0.15, board: '#38bdf8', shirt: '#f43f5e' },
+          { u0: 0.435, v0: 0.720, u1: 0.495, v1: 0.665, spd: 0.019, ph: 0.62, board: '#fbbf24', shirt: '#0d9488' },
+        ];
+        for (let i = 0; i < sups.length; i++) {
+          const sp = sups[i];
+          const p = 0.5 + 0.5 * Math.sin(tSec * sp.spd * Math.PI * 2 + sp.ph * Math.PI * 2);
+          const su = sp.u0 + (sp.u1 - sp.u0) * p;
+          const sv = sp.v0 + (sp.v1 - sp.v0) * p;
+          const sx = toX(su);
+          const sy = toY(sv);
+          if (!inView(sx, sy, 30)) continue;
+          const px = Math.max(1.0, 1.15 * s);
+          ctx.fillStyle = 'rgba(232,248,255,0.44)';
+          ctx.fillRect(Math.round(sx - 5.5 * px), Math.round(sy + 1.5 * px), Math.max(2, Math.round(4.0 * px)), Math.max(1, Math.round(1.0 * px)));
+          ctx.fillStyle = shadeHex(sp.board, 1.0, currentMode);
+          ctx.fillRect(Math.round(sx - 3.6 * px), Math.round(sy - 0.6 * px), Math.max(4, Math.round(7.2 * px)), Math.max(1.5, Math.round(1.8 * px)));
+          drawMiniPerson(sx, sy - 0.4 * px, s * 0.88, shadeHex(sp.shirt, 1.0, currentMode), '#1e293b', hairs[i], false, 0);
+          const stroke = Math.sin(tSec * 2.8 + i * 2.1);
+          ctx.strokeStyle = '#334155';
+          ctx.lineWidth = Math.max(1.0, 0.9 * s);
+          ctx.beginPath();
+          ctx.moveTo(sx + 0.8 * px, sy - 4.0 * px);
+          ctx.lineTo(sx + (1.6 + stroke * 1.4) * px, sy + 1.0 * px);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // =========================================================================
+    // 6. BAHNHOF KILCHBERG — Platform Commuters, Footbridge Walkers & Warm Platform Lamps!
+    // =========================================================================
+    {
+      const bhfX = toX(0.558);
+      const bhfY = toY(0.498);
+      if (inView(bhfX, bhfY, 220)) {
+        if (isNight || isSunset) {
+          for (let l = 0; l < 5; l++) {
+            const f = l / 4;
+            const lu = 0.5505 + f * (0.5645 - 0.5505);
+            const lv = 0.5030 + f * (0.4956 - 0.5030);
+            const lx = toX(lu);
+            const ly = toY(lv);
+            const gr = 14 * s;
+            const grad = ctx.createRadialGradient(lx, ly, 1 * s, lx, ly, gr);
+            grad.addColorStop(0, isNight ? 'rgba(255, 224, 146, 0.36)' : 'rgba(255, 214, 140, 0.18)');
+            grad.addColorStop(1, 'rgba(255, 214, 140, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(lx, ly, gr, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // 8 commuters standing cleanly on the concrete NW & SE Bahnhof Kilchberg platforms
+        const nComm = isNight ? 4 : 8;
+        for (let c = 0; c < nComm; c++) {
+          const isSE = c % 2 === 1;
+          const baseF = 0.12 + (c / nComm) * 0.78 + Math.sin(tSec * 0.25 + c * 1.9) * 0.04;
+          const cu = (isSE ? 0.5518 : 0.5502) + baseF * 0.0145;
+          const cv = (isSE ? 0.5050 : 0.5032) - baseF * 0.0074;
+          drawMiniPerson(
+            toX(cu), toY(cv), s * 0.92,
+            shadeHex(coats[(c + 3) % coats.length], 1.0, currentMode),
+            shadeHex('#1e293b', 1.0, currentMode),
+            hairs[c % hairs.length],
+            isNight,
+            tSec * 3.0 + c * 1.5,
+            c % 3 === 0 ? '#334155' : null,
+          );
+        }
+        // 2 pedestrians crossing the Bahnhof Kilchberg pedestrian footbridge!
+        for (let fb = 0; fb < 2; fb++) {
+          const pf = 0.5 + 0.5 * Math.sin(tSec * (0.14 + fb * 0.04) + fb * 2.5);
+          const fu = 0.5628 + (0.5668 - 0.5628) * pf;
+          const fv = 0.4912 + (0.4972 - 0.4912) * pf;
+          drawMiniPerson(toX(fu), toY(fv), s * 0.9, shadeHex(coats[fb + 4], 1.0, currentMode), '#27303f', hairs[fb + 1], isNight, tSec * 7.5 + fb);
+        }
+      }
+    }
+
+    // =========================================================================
+    // 7. SERENE SWISS HOT-AIR BALLOON OVER LAKE ZURICH & KILCHBERG RIDGE (Day & Alpenglow!)
+    // =========================================================================
+    if (!isNight) {
+      const bProg = ((tSec * 0.0055 + 0.28) % 1.24) - 0.12;
+      const bu = bProg;
+      const bv = 0.27 + Math.sin(tSec * 0.11) * 0.025 + bProg * 0.14;
+      const bx = toX(bu);
+      const by = toY(bv);
+      if (inView(bx, by, 120)) {
+        const r = Math.max(4.5, 11.5 * s);
+        // Soft ground shadow far below
+        ctx.fillStyle = 'rgba(18, 28, 44, 0.14)';
+        ctx.beginPath();
+        ctx.ellipse(bx + r * 1.8, by + r * 3.8, r * 0.9, r * 0.48, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Woven wicker basket + rigging cables
+        const basketY = by + r * 1.45;
+        ctx.strokeStyle = 'rgba(60, 48, 38, 0.65)';
+        ctx.lineWidth = Math.max(0.8, 0.8 * s);
+        ctx.beginPath();
+        ctx.moveTo(bx - r * 0.35, by + r * 0.72);
+        ctx.lineTo(bx - r * 0.22, basketY);
+        ctx.moveTo(bx + r * 0.35, by + r * 0.72);
+        ctx.lineTo(bx + r * 0.22, basketY);
+        ctx.stroke();
+        ctx.fillStyle = shadeHex('#8c5a32', 1.0, currentMode);
+        ctx.fillRect(Math.round(bx - r * 0.28), Math.round(basketY), Math.max(2, Math.round(r * 0.56)), Math.max(2, Math.round(r * 0.42)));
+        // Occasional warm propane burner glow just above basket!
+        if (Math.sin(tSec * 0.9) > 0.72) {
+          ctx.fillStyle = '#ffcf48';
+          ctx.fillRect(Math.round(bx - r * 0.12), Math.round(by + r * 0.95), Math.max(2, Math.round(r * 0.24)), Math.max(2, Math.round(r * 0.28)));
+        }
+        // Iconic Swiss red, gold & white vertical-striped pixel envelope
+        ctx.fillStyle = shadeHex('#d62828', 1.02, currentMode);
+        ctx.beginPath();
+        ctx.ellipse(bx, by, r, r * 1.12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = shadeHex('#f4c430', 1.05, currentMode);
+        ctx.beginPath();
+        ctx.ellipse(bx - r * 0.22, by, r * 0.42, r * 1.06, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = shadeHex('#f8fafc', 1.06, currentMode);
+        ctx.beginPath();
+        ctx.ellipse(bx + r * 0.28, by, r * 0.26, r * 1.0, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Crisp 90s dark outline & NW sunlit highlight crescent
+        ctx.strokeStyle = 'rgba(30, 22, 26, 0.72)';
+        ctx.lineWidth = Math.max(0.9, 1.0 * s);
+        ctx.beginPath();
+        ctx.ellipse(bx, by, r, r * 1.12, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // =========================================================================
+    // 8. COZY NIGHTTIME STREETLAMP GLOWS ALONG SEESTRASSE & DORFSTRASSE VIADUCT
+    // =========================================================================
+    if (isNight && animData && animData.roads) {
+      const lampRoads = animData.roads.filter((r) => r.id === 'seestrasse_sb' || r.id === 'dorfstrasse_viaduct_up');
+      for (const rd of lampRoads) {
+        const pts = rd.pts || [];
+        const step = rd.id === 'seestrasse_sb' ? 28 : 26;
+        for (let i = 10; i < pts.length - 10; i += step) {
+          const sx = toX(pts[i][0]);
+          const sy = toY(pts[i][1]);
+          if (!inView(sx, sy, 32)) continue;
+          const lr = Math.max(6, 12.5 * s);
+          const grad = ctx.createRadialGradient(sx, sy, 0.5, sx, sy, lr);
+          grad.addColorStop(0, 'rgba(255, 214, 128, 0.30)');
+          grad.addColorStop(0.55, 'rgba(255, 190, 96, 0.11)');
+          grad.addColorStop(1, 'rgba(255, 180, 80, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, lr * 1.15, lr * 0.72, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    ctx.restore();
+  }
+
   function drawAtmosphereAndLife(worldW, worldH, wScale, tSec, isNight, isSunset) {
     const s = scale * wScale;
     ctx.save();
@@ -2663,8 +3392,7 @@
     if (waterMask && waterW > 0 && waterH > 0) {
       const glintCol = isNight ? '#cddcf4' : (isSunset ? '#ffe2a8' : '#f4fbff');
       const px = Math.max(1.2, 1.5 * s);
-      for (let i = 0; i < 84; i++) {
-        // Concentrate across the Lake Zurich open water wedge (u: 0.42..0.98, v: 0.34..0.96)
+      for (let i = 0; i < 96; i++) {
         const gu = 0.42 + hash01(i * 3.1 + 1) * 0.56;
         const gv = 0.34 + hash01(i * 5.7 + 2) * 0.62;
         const mx = Math.floor(gu * waterW);
@@ -2675,12 +3403,11 @@
         if (sx < -8 || sx > canvas.width + 8 || sy < -8 || sy > canvas.height + 8) continue;
         const pulse = Math.sin(tSec * (1.8 + hash01(i * 9.3) * 2.2) + i * 2.41);
         if (pulse < 0.52) continue;
-        const a = ((pulse - 0.52) / 0.48) * (isNight ? 0.42 : (isSunset ? 0.72 : 0.62));
+        const a = ((pulse - 0.52) / 0.48) * (isNight ? 0.44 : (isSunset ? 0.74 : 0.64));
         ctx.globalAlpha = a;
         ctx.fillStyle = glintCol;
         const rx = Math.round(sx);
         const ry = Math.round(sy);
-        // Crisp 1-pixel diamond sparkle (horizontal 3px + vertical 1px)
         ctx.fillRect(rx - Math.round(px), ry, Math.max(2, Math.round(px * 2.4)), Math.max(1, Math.round(px * 0.75)));
         if (pulse > 0.82) {
           ctx.fillRect(rx, ry - Math.round(px * 0.6), Math.max(1, Math.round(px * 0.8)), Math.max(2, Math.round(px * 2.0)));
@@ -2688,11 +3415,11 @@
       }
     }
 
-    // B. Harbor Navigation Beacons at Bendlikon ZSG Steamer Pier & Schooren Seebad Pier (Alpenglow & Night)
+    // B. Sub-Pixel-Exact Harbor Navigation Beacons at Bendlikon ZSG Steamer Pier & Schooren Seebad Pier (Alpenglow & Night)
     if (isNight || isSunset) {
       const piers = [
-        { u: 0.5855, v: 0.5815, col: '#ffb84d', glow: 'rgba(255,184,77,0.28)', freq: 1.4 }, // Bendlikon ZSG Pier
-        { u: 0.4205, v: 0.7195, col: '#6ee7b7', glow: 'rgba(110,231,183,0.26)', freq: 1.9 }, // Schooren Seebad Pier
+        { u: 0.5870, v: 0.5784, col: '#ffb84d', glow: 'rgba(255,184,77,0.32)', freq: 1.4 }, // Bendlikon ZSG Pier outer bollard
+        { u: 0.4222, v: 0.7236, col: '#6ee7b7', glow: 'rgba(110,231,183,0.30)', freq: 1.9 }, // Schooren Seebad Pier outer tip
       ];
       for (const p of piers) {
         const sx = p.u * worldW * scale + offsetX;
@@ -2700,30 +3427,29 @@
         if (sx < -32 || sx > canvas.width + 32 || sy < -32 || sy > canvas.height + 32) continue;
         const blink = 0.45 + 0.55 * Math.pow(0.5 + 0.5 * Math.sin(tSec * p.freq), 2.5);
         const r = Math.max(3.5, 5.5 * s);
-        ctx.globalAlpha = (isNight ? 0.85 : 0.45) * blink;
+        ctx.globalAlpha = (isNight ? 0.85 : 0.48) * blink;
         ctx.fillStyle = p.glow;
         ctx.beginPath();
         ctx.arc(sx, sy, r * 1.9, 0, Math.PI * 2);
         ctx.fill();
-        ctx.globalAlpha = (isNight ? 0.98 : 0.65) * blink;
+        ctx.globalAlpha = (isNight ? 0.98 : 0.68) * blink;
         ctx.fillStyle = p.col;
         const dot = Math.max(2, Math.round(2.2 * s));
         ctx.fillRect(Math.round(sx - dot * 0.5), Math.round(sy - dot * 0.5), dot, dot);
-        // Subtle vertical pixel reflection on the water below the pier beacon!
         if (isNight) {
           for (let k = 1; k <= 4; k++) {
             const waveX = Math.sin(tSec * 3.1 + k * 1.7) * 1.4 * s;
-            ctx.globalAlpha = (0.36 - k * 0.07) * blink;
+            ctx.globalAlpha = (0.38 - k * 0.07) * blink;
             ctx.fillRect(Math.round(sx + waveX - dot * 0.5), Math.round(sy + k * 2.8 * s), dot, Math.max(1, Math.round(1.2 * s)));
           }
         }
       }
     }
 
-    // C. Bahnhof Kilchberg SBB Railway Signal Light (emerald green -> Swiss red when train is near station!)
+    // C. Bahnhof Kilchberg SBB Railway Signal Light (exact track exit: green -> Swiss red when train is at station!)
     {
-      const sigU = 0.5978;
-      const sigV = 0.4755;
+      const sigU = 0.5685;
+      const sigV = 0.4922;
       const sx = sigU * worldW * scale + offsetX;
       const sy = sigV * worldH * scale + offsetY;
       if (sx > -20 && sx < canvas.width + 20 && sy > -20 && sy < canvas.height + 20) {
@@ -2733,37 +3459,41 @@
           if (Math.abs(hf - tr.stop_frac) < 0.065) { trainNear = true; break; }
         }
         const sigCol = trainNear ? '#ff3b3b' : '#22e584';
-        const sigGlow = trainNear ? 'rgba(255,59,59,0.28)' : 'rgba(34,229,132,0.26)';
-        const dot = Math.max(1.8, 1.8 * s);
+        const sigGlow = trainNear ? 'rgba(255,59,59,0.32)' : 'rgba(34,229,132,0.30)';
+        const dot = Math.max(1.8, 1.9 * s);
+        // Tiny dark SBB signal mast
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = isNight ? '#475569' : '#1e293b';
+        ctx.fillRect(Math.round(sx - 0.5 * s), Math.round(sy), Math.max(1, Math.round(1.0 * s)), Math.max(3, Math.round(5.5 * s)));
         if (isNight || isSunset) {
           ctx.globalAlpha = isNight ? 0.85 : 0.45;
           ctx.fillStyle = sigGlow;
           ctx.beginPath();
-          ctx.arc(sx, sy, dot * 2.6, 0, Math.PI * 2);
+          ctx.arc(sx, sy, dot * 2.8, 0, Math.PI * 2);
           ctx.fill();
         }
-        ctx.globalAlpha = isNight ? 0.98 : 0.82;
+        ctx.globalAlpha = isNight ? 0.98 : 0.88;
         ctx.fillStyle = sigCol;
         ctx.fillRect(Math.round(sx - dot * 0.5), Math.round(sy - dot * 0.5), Math.max(2, Math.round(dot)), Math.max(2, Math.round(dot)));
       }
     }
 
-    // D. Subtle Swiss Church Bell Acoustic Ripples (when Reformierte Kirche / St. Elisabeth bells peal in Day/Sunset!)
+    // D. Subtle Swiss Church Bell Acoustic Ripples (Reformierte Kirche & St. Elisabeth peals in Day/Sunset!)
     if (!isNight) {
       const bellCycle = tSec % 52;
       if (bellCycle < 20) {
         const bellEnv = bellCycle < 2.2 ? (bellCycle / 2.2) : (bellCycle > 17.0 ? (20 - bellCycle) / 3.0 : 1.0);
-        const spires = [[0.29272, 0.3162], [0.40667, 0.3425]];
+        const spires = [[0.29035, 0.3120], [0.40667, 0.3425]];
         ctx.strokeStyle = isSunset ? '#ffd89b' : '#fff3c4';
         ctx.lineWidth = Math.max(1.0, 1.2 * s);
         for (let si = 0; si < spires.length; si++) {
           const sx = spires[si][0] * worldW * scale + offsetX;
-          const sy = (spires[si][1] - 0.004) * worldH * scale + offsetY;
+          const sy = spires[si][1] * worldH * scale + offsetY;
           if (sx < -80 || sx > canvas.width + 80 || sy < -80 || sy > canvas.height + 80) continue;
           for (let rIdx = 0; rIdx < 2; rIdx++) {
             const phase = ((tSec * 0.48 + rIdx * 0.5 + si * 0.25) % 1);
             const rad = (5 + phase * 26) * s;
-            ctx.globalAlpha = (1 - phase) * 0.34 * bellEnv;
+            ctx.globalAlpha = (1 - phase) * 0.32 * bellEnv;
             ctx.beginPath();
             ctx.ellipse(sx, sy, rad, rad * 0.62, 0, 0, Math.PI * 2);
             ctx.stroke();
@@ -2775,7 +3505,7 @@
     // E. Nighttime Park Fireflies (gentle warm-gold pixel glints drifting through Kilchberg's parks!)
     if (isNight) {
       const dot = Math.max(1.5, 1.4 * s);
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 36; i++) {
         const g = FIREFLY_GROVES[i % FIREFLY_GROVES.length];
         const baseU = g[0] + (hash01(i * 4.3 + 7) - 0.5) * 0.045;
         const baseV = g[1] + (hash01(i * 6.1 + 3) - 0.5) * 0.045;
@@ -2786,7 +3516,7 @@
         if (sx < -10 || sx > canvas.width + 10 || sy < -10 || sy > canvas.height + 10) continue;
         const glow = Math.pow(0.5 + 0.5 * Math.sin(tSec * (1.5 + hash01(i * 2.9) * 1.6) + i * 3.7), 3.0);
         if (glow < 0.15) continue;
-        ctx.globalAlpha = glow * 0.82;
+        ctx.globalAlpha = glow * 0.84;
         ctx.fillStyle = '#ffe57f';
         ctx.fillRect(Math.round(sx), Math.round(sy), Math.max(1.5, Math.round(dot)), Math.max(1.5, Math.round(dot)));
       }
@@ -2794,7 +3524,7 @@
 
     // F. Soft Drifting Swiss Cloud Shadows (Midday & Alpenglow — gentle SW->NE atmospheric motion!)
     if (!isNight) {
-      const cloudCol = isSunset ? 'rgba(34, 24, 52, 0.065)' : 'rgba(22, 38, 66, 0.055)';
+      const cloudCol = isSunset ? 'rgba(34, 24, 52, 0.062)' : 'rgba(22, 38, 66, 0.052)';
       ctx.globalAlpha = 1.0;
       ctx.fillStyle = cloudCol;
       for (let c = 0; c < 6; c++) {
@@ -3161,14 +3891,14 @@
           if (targetPos) break;
         }
       }
-    } else if (followTarget === 'boat' && (animData.boats || []).length) {
-      // Follow the flagship ZSG Lake Zurich steamer!
-      const b = animData.boats.find((x) => x.kind === 'steamer') || animData.boats[0];
+    } else if (followTarget === 'boat' && (animData.ships || []).length) {
+      // Follow the flagship ZSG Lake Zurich steamer (MS Helvetia)!
+      const b = animData.ships.find((x) => x.kind === 'zsg_steamer') || animData.ships[0];
       if (b) {
-        const cyc = (b.length_m / Math.max(0.5, b.speed_mps)) + (b.dwell_sec || 0);
-        const f = b.stop_frac != null
-          ? evalWithStationStop(tSec, b.length_m, b.speed_mps, b.stop_frac, b.dwell_sec || 0, b.phase || 0)
-          : (((tSec / cyc) + (b.phase || 0)) % 1 + 1) % 1;
+        const cyc = b.length_m / Math.max(0.5, b.speed_mps);
+        const f = b.closed
+          ? (((tSec / cyc) + (b.phase || 0)) % 1 + 1) % 1
+          : evalWithStationStop(tSec, b.length_m, b.speed_mps, b.stop_frac, b.dwell_sec || 0, b.phase || 0);
         targetPos = samplePathAt(b.pts, Math.max(0.02, Math.min(0.98, f)), worldW, worldH, 2);
       }
     }
