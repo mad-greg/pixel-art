@@ -41,6 +41,7 @@ def render_everything(
     mpp_crop: float = 0.22,
     presets: tuple[str, ...] = ("day", "sunset", "night"),
     skip_crops: bool = False,
+    skip_animations: bool = False,
 ) -> None:
     extract_scene(force=False)
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
@@ -91,7 +92,8 @@ def render_everything(
             img_c.save(DOCS_DIR / "assets" / fname.replace(".png", ".webp"), format="WEBP", lossless=True, method=4)
             print(f"[render] Crop {fname}: {img_c.size[0]}x{img_c.size[1]} @ {mpp_crop:.2f} m/px ({time.time() - t_c:.1f}s)")
 
-    export_animations(mpp_full=mpp_full)
+    if not skip_animations:
+        export_animations(mpp_full=mpp_full)
 
 
 if __name__ == "__main__":
@@ -100,10 +102,12 @@ if __name__ == "__main__":
     ap.add_argument("--mpp-full", type=float, default=0.25)
     ap.add_argument("--mpp-crop", type=float, default=0.22)
     ap.add_argument("--skip-crops", action="store_true")
+    ap.add_argument("--skip-animations", action="store_true")
     args = ap.parse_args()
     render_everything(
         mpp_full=args.mpp_full,
         mpp_crop=args.mpp_crop,
         presets=tuple(args.presets),
         skip_crops=args.skip_crops,
+        skip_animations=args.skip_animations,
     )

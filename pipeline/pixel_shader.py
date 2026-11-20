@@ -114,26 +114,26 @@ class LightingPreset:
 
 PRESETS: dict[str, LightingPreset] = {
     "day": LightingPreset(
-        name="90s SVGA Crisp Midday",
+        name="90s SVGA Crisp Alpine Midday",
         sun_az_deg=124.0,
         sun_alt_deg=43.0,
-        sun_rgb=(1.00, 0.99, 0.96),
-        amb_rgb=(0.54, 0.55, 0.58),
+        sun_rgb=(1.04, 1.00, 0.94),
+        amb_rgb=(0.53, 0.56, 0.62),
         sky_top_rgb=(24, 34, 52),
         sky_bot_rgb=(38, 52, 74),
         is_night=False,
-        dither_strength=8.0,
+        dither_strength=7.5,
     ),
     "sunset": LightingPreset(
         name="Alpenglow Golden Sunset",
         sun_az_deg=114.0,
         sun_alt_deg=22.0,
-        sun_rgb=(1.12, 0.76, 0.50),
-        amb_rgb=(0.42, 0.39, 0.52),
+        sun_rgb=(1.14, 0.77, 0.50),
+        amb_rgb=(0.42, 0.39, 0.53),
         sky_top_rgb=(34, 26, 48),
         sky_bot_rgb=(70, 44, 60),
         is_night=False,
-        dither_strength=9.0,
+        dither_strength=8.5,
     ),
     "night": LightingPreset(
         name="Zürichsee Lantern Night",
@@ -144,15 +144,15 @@ PRESETS: dict[str, LightingPreset] = {
         sky_top_rgb=(12, 17, 30),
         sky_bot_rgb=(20, 28, 48),
         is_night=True,
-        dither_strength=8.0,
+        dither_strength=7.5,
     ),
 }
 
 
 @lru_cache(maxsize=1)
 def build_90s_palette_and_lut() -> tuple[np.ndarray, np.ndarray]:
-    """Construct a curated 256-color 90s SVGA isometric city-builder palette calibrated to
-    authentic Swiss architecture, clinker brick, neutral concrete, terracotta roofs & Zürichsee water."""
+    """Construct a luminous curated 256-color 90s SVGA isometric city-builder palette calibrated to
+    Swiss architecture, Roland-Garros clay courts, lush alpine meadows, botanical trees & Zürichsee."""
     colors = []
 
     def add_ramp(c_dark, c_mid, c_light, n):
@@ -169,46 +169,47 @@ def build_90s_palette_and_lut() -> tuple[np.ndarray, np.ndarray]:
                 c = (1 - u) * c1 + u * c2
             colors.append(np.clip(np.round(c), 0, 255).astype(np.uint8))
 
-    # 1. Lush 90s Pixel-Art Swiss Foliage Greens (emerald, oak, sunlit lime, conifer, sedum, copper beech) — 40 colors
-    add_ramp((14, 32, 20), (42, 96, 44), (118, 184, 76), 10)
-    add_ramp((18, 38, 26), (56, 116, 52), (146, 204, 90), 9)
-    add_ramp((16, 36, 30), (34, 78, 56), (82, 142, 96), 7)     # Conifers / dark yew hedges
-    add_ramp((34, 40, 22), (88, 108, 48), (158, 176, 88), 8)   # Sedum green roofs, vineyards & dry meadow
-    add_ramp((34, 18, 24), (96, 44, 48), (162, 82, 78), 6)     # Copper beech (Blutbuche)
+    # 1. Lush 90s Pixel-Art Swiss Foliage, Stadium Turf, Meadows & Blossoms — 48 colors
+    add_ramp((14, 34, 22), (44, 102, 46), (126, 190, 78), 11)   # Deep emerald oak / stadium turf
+    add_ramp((20, 42, 24), (62, 126, 52), (156, 208, 92), 10)   # Sunlit meadow / linden / bright grass
+    add_ramp((14, 34, 30), (32, 76, 56), (80, 138, 94), 8)      # Alpine spruce / fir / dark yew hedges
+    add_ramp((38, 46, 24), (94, 118, 52), (168, 184, 92), 8)    # Warm sage upland meadow, sedum & vineyards
+    add_ramp((36, 18, 26), (88, 38, 46), (144, 68, 72), 5)      # Refined estate copper beech (Blutbuche)
+    add_ramp((124, 72, 82), (218, 162, 174), (252, 232, 238), 6)# Spring cherry & apple tree blossoms
 
-    # 2. Clinker Brick, Swiss Clay Roofs, Neutral Gravel/Concrete & Taupe-Greige Facades — 48 colors
-    add_ramp((42, 16, 16), (124, 44, 36), (178, 68, 54), 8)     # Deep Swiss ziegelrot clinker & 1899 red brick
-    add_ramp((52, 24, 18), (148, 72, 46), (212, 114, 74), 8)    # Classic Swiss terracotta clay roof tiles
-    add_ramp((38, 26, 20), (106, 72, 52), (176, 130, 98), 8)    # Weathered brown clay tile & dark barn timber
-    add_ramp((24, 26, 30), (96, 98, 102), (218, 220, 224), 8)   # Neutral anthracite / concrete / silver flat roof
-    add_ramp((20, 28, 48), (44, 64, 104), (96, 132, 182), 8)    # Rooftop solar PV arrays & skylights
-    add_ramp((46, 44, 40), (132, 126, 114), (196, 190, 176), 8) # Pebble-greige stucco & Lindt concrete frame
+    # 2. Clinker Brick, Clay Roofs, Roland-Garros Tennis Clay, Neutral Concrete & PV — 50 colors
+    add_ramp((44, 16, 14), (132, 46, 36), (186, 72, 52), 8)     # Deep Swiss ziegelrot clinker & 1899 red brick
+    add_ramp((54, 24, 16), (162, 78, 48), (222, 122, 74), 9)    # Classic Swiss terracotta clay roof & tennis clay
+    add_ramp((40, 26, 18), (112, 74, 52), (180, 132, 98), 8)    # Weathered brown clay tile & dark barn timber
+    add_ramp((22, 24, 28), (102, 104, 108), (236, 238, 240), 10)# Pure neutral slate / concrete / white pitch lines
+    add_ramp((18, 28, 50), (42, 64, 108), (94, 134, 188), 7)    # Crisp rooftop solar PV arrays & skylights
+    add_ramp((48, 44, 38), (136, 128, 114), (202, 194, 178), 8) # Pebble-greige stucco & Jura limestone pavers
 
-    # 3. Swiss Plaster Facades, Butter-Ochre, Dusty Rose, Sage Green & Shutters — 52 colors
-    add_ramp((52, 52, 56), (154, 152, 146), (242, 240, 234), 10)# Glazed white brick, alabaster & off-white plaster
-    add_ramp((52, 42, 32), (150, 134, 108), (224, 210, 182), 10)# Warm travertine, sand & cream stucco
-    add_ramp((62, 48, 22), (172, 144, 68), (242, 216, 112), 10) # Butter-yellow villas, buff brick, gold & crosswalks
-    add_ramp((56, 36, 34), (148, 106, 94), (214, 172, 156), 8)  # Historic dusty rose / terracotta-salmon stucco
+    # 3. Swiss Plaster Facades, Butter-Ochre, Dusty Rose, Sage Green & Shutters — 48 colors
+    add_ramp((54, 52, 54), (158, 154, 146), (246, 244, 238), 9) # Glazed white brick, alabaster & off-white plaster
+    add_ramp((54, 44, 32), (154, 138, 110), (228, 214, 184), 9) # Warm travertine, sand & cream stucco
+    add_ramp((64, 48, 22), (176, 146, 68), (246, 220, 116), 9)  # Butter-yellow villas, wildflowers, gold & crosswalks
+    add_ramp((58, 36, 34), (152, 108, 94), (218, 176, 158), 7)  # Historic dusty rose / terracotta-salmon stucco
     add_ramp((26, 48, 42), (76, 124, 108), (158, 192, 172), 6)  # Sage/pistachio pavilion, copper patina & teal shutters
-    add_ramp((18, 26, 40), (54, 82, 124), (118, 156, 204), 8)   # Window glass & cornflower/dove-blue Swiss shutters
+    add_ramp((18, 26, 40), (54, 84, 126), (122, 160, 208), 8)   # Window glass & cornflower/dove-blue Swiss shutters
 
     # 4. Streets, Asphalt, Courtyards, Railway Ballast & Cutaway Strata — 26 colors
-    add_ramp((18, 20, 26), (78, 82, 90), (194, 196, 200), 14)    # Asphalt -> concrete -> white markings
-    add_ramp((34, 30, 26), (96, 86, 74), (172, 158, 138), 12)    # Molasse sandstone, gravel & ballast
+    add_ramp((18, 20, 26), (78, 82, 90), (194, 196, 200), 14)    # Asphalt -> concrete -> crisp markings
+    add_ramp((34, 30, 26), (98, 88, 74), (176, 162, 140), 12)    # Molasse sandstone, gravel & ballast
 
-    # 5. Authentic Alpine Lake Zurich (Zürichsee jade-emerald -> deep alpine blue-teal) + Pools — 42 colors
-    add_ramp((12, 24, 34), (24, 62, 82), (44, 102, 114), 14)     # Deep alpine Zürichsee blue-teal
-    add_ramp((28, 52, 48), (56, 108, 96), (118, 172, 154), 14)   # Nearshore Zürichsee jade-olive & shallows
-    add_ramp((32, 104, 138), (68, 184, 214), (196, 242, 248), 14)# Crystal backyard pools & shore foam
+    # 5. Authentic Alpine Lake Zurich (Zürichsee jade-emerald -> deep alpine blue-teal) + Pools — 38 colors
+    add_ramp((12, 24, 34), (24, 62, 82), (44, 102, 114), 13)     # Deep alpine Zürichsee blue-teal
+    add_ramp((28, 52, 48), (56, 108, 96), (118, 172, 154), 13)   # Nearshore Zürichsee jade-olive & shallows
+    add_ramp((32, 104, 138), (68, 184, 214), (196, 242, 248), 12)# Crystal swimming pools & shore foam
 
-    # 6. Sunset Alpenglow, Night Twilight, Lantern Golds & Swiss Crest Red — 48 colors
+    # 6. Sunset Alpenglow, Night Twilight, Lantern Golds & Swiss Crest Red — 46 colors
     add_ramp((12, 16, 30), (34, 42, 68), (76, 88, 126), 12)      # Night indigo shadows & backdrop
     add_ramp((34, 24, 46), (86, 52, 68), (178, 104, 88), 12)     # Sunset violet-rose alpenglow
-    add_ramp((92, 58, 24), (212, 148, 54), (255, 238, 166), 14)  # Lit amber/gold windows & lamps
+    add_ramp((92, 58, 24), (212, 148, 54), (255, 238, 166), 12)  # Lit amber/gold windows & lamps
     add_ramp((96, 20, 20), (196, 38, 38), (248, 96, 88), 10)     # Swiss crest red & harbor buoys
 
     pal = np.array(colors[:256], dtype=np.uint8)
-    assert len(pal) == 256
+    assert len(pal) == 256, f"Expected 256 palette colors, got {len(pal)}"
 
     grid = np.linspace(0, 255, 64, dtype=np.float32)
     rg, gg, bg = np.meshgrid(grid, grid, grid, indexing="ij")
@@ -238,7 +239,7 @@ def quantize_to_90s_palette(rgb_float: np.ndarray, bayer_2d: np.ndarray, strengt
 
 
 class SceneData:
-    """Loaded Kilchberg 0.5m rasters, 3D bridges/viaducts, 25cm parapet masks, 3D LOD2 buildings & trees."""
+    """Loaded Kilchberg 0.5m rasters, 3D bridges/viaducts, 25cm parapet masks, 3D LOD2 buildings, sports & trees."""
 
     def __init__(self, cache_dir: Path = RAW_CACHE_DIR):
         s = np.load(cache_dir / "scene_kilchberg_05m.npz")
@@ -293,6 +294,8 @@ class SceneData:
         self.boats = meta["boats"]
         self.viaduct_piers = meta.get("viaduct_piers", [])
         self.catenary_portals = meta.get("catenary_portals", [])
+        self.sports_fields = meta.get("sports_fields", [])
+        self.sports_enclosures = meta.get("sports_enclosures", [])
 
         # Precompute 0.5m bare-earth terrain normals
         dz_drow, dz_dcol = np.gradient(ndimage.gaussian_filter(self.dem, sigma=0.75), GRID_RES)
@@ -302,20 +305,92 @@ class SceneData:
         self.terr_ny = (ny / nlen).astype(np.float32)
         self.terr_nz = (nz / nlen).astype(np.float32)
 
-        # Clean 0.5m mask of REAL moored boats, piers & Seebad rafts
+        # V6.0: Multi-scale smooth organic alpine meadow variation field (kills artificial mowing stripes!)
+        rng_m = np.random.default_rng(1350135)
+        raw_n = rng_m.standard_normal((GRID_H // 4 + 2, GRID_W // 4 + 2)).astype(np.float32)
+        coarse_n = ndimage.gaussian_filter(raw_n, sigma=6.5)
+        med_n = ndimage.gaussian_filter(raw_n, sigma=2.0)
+        comb_n = 0.65 * coarse_n + 0.35 * med_n
+        comb_n = (comb_n - comb_n.mean()) / max(1e-5, comb_n.std())
+        self.meadow_noise_05m = np.repeat(np.repeat(comb_n, 4, axis=0), 4, axis=1)[:GRID_H, :GRID_W].astype(np.float32)
+
+        # V6.0: Clean impervious residential courtyard / patio / driveway mask (0.5m)
+        # Strictly requires proximity to buildings or streets AND bright neutral-grey concrete/stone
+        # so shaded garden lawns & open Swiss meadows NEVER turn into dirty grey concrete soup!
         o_f = self.ortho_05m.astype(np.float32)
         lum05 = 0.299 * o_f[:, :, 0] + 0.587 * o_f[:, :, 1] + 0.114 * o_f[:, :, 2]
+        chroma05 = o_f.max(axis=2) - o_f.min(axis=2)
+        green_excess05 = o_f[:, :, 1] - 0.5 * (o_f[:, :, 0] + o_f[:, :, 2])
+        near_urban = ndimage.binary_dilation(
+            raw_rmask | np.isin(self.sem, [G_STREET_MAIN, G_STREET_MINOR, G_PARKING, G_PLATFORM_PIER]),
+            iterations=14,  # within 7m of buildings or streets
+        )
+        raw_pave = (
+            near_urban
+            & (self.sem == G_TERRAIN)
+            & (~self.lake_mask)
+            & (lum05 > 128.0)
+            & (chroma05 < 22.0)
+            & (green_excess05 < 3.0)
+        )
+        # Smooth out noisy 1px gravel/shadow speckles into crisp clean paved patios & drives
+        self.yard_pave_mask_05m = ndimage.binary_closing(
+            ndimage.binary_opening(raw_pave, structure=np.ones((2, 2), dtype=bool)),
+            structure=np.ones((3, 3), dtype=bool),
+        )
+
+        # V6.0: Crisp 0.5m white stone pool coping rim around every swimming pool
+        is_pool_m = self.sem == G_POOL
+        self.pool_rim_05m = ndimage.binary_dilation(is_pool_m, iterations=1) & (~is_pool_m) & (~self.lake_mask)
+
+        # V6.0: Glitch-free 0.5m rooftop Solar PV mask (morphologically verified sunlit panels ONLY —
+        # eliminates 100% of blue shadow static speckles on roofs!)
+        raw_pv05 = (
+            raw_rmask
+            & (o_f[:, :, 2] > (o_f[:, :, 0] + 19.0))
+            & (o_f[:, :, 2] > (o_f[:, :, 1] + 8.0))
+            & (lum05 >= 38.0)
+            & (lum05 <= 108.0)
+        )
+        opened_pv = ndimage.binary_opening(raw_pv05, structure=np.ones((3, 3), dtype=bool))
+        lbl_pv, n_pv = ndimage.label(opened_pv)
+        if n_pv > 0:
+            pv_counts = np.bincount(lbl_pv.ravel())
+            keep_pv = pv_counts >= 14  # >= 3.5 m^2 contiguous genuine PV array
+            keep_pv[0] = False
+            self.pv_clean_05m = ndimage.binary_closing(keep_pv[lbl_pv], structure=np.ones((2, 2), dtype=bool))
+        else:
+            self.pv_clean_05m = np.zeros((GRID_H, GRID_W), dtype=np.bool_)
+
+        # Clean 0.5m mask of REAL moored boats, piers & Seebad rafts (strictly nearshore so open lake stays spotless!)
         bg_lum05 = ndimage.uniform_filter(lum05, size=29)
-        open_water = ndimage.binary_erosion(self.lake_mask, iterations=3, border_value=0)
-        is_pier = self.sem == G_PLATFORM_PIER
-        is_lidar_obj = open_water & (self.chm >= 0.55) & (lum05 > 88.0) & ((o_f[:, :, 1] - o_f[:, :, 0]) < 8.0)
-        is_bright_float = open_water & (lum05 > 106.0) & ((lum05 - bg_lum05) > 24.0)
+        near_shore = ndimage.binary_dilation(~self.lake_mask, iterations=190)  # within 95 m of shore
+        open_water = ndimage.binary_erosion(self.lake_mask, iterations=1, border_value=0)
+        is_pier = (self.sem == G_PLATFORM_PIER) & self.lake_mask
+        is_lidar_obj = (
+            open_water
+            & near_shore
+            & (~self.bldg_roof_mask)
+            & (self.chm >= 0.45)
+            & (self.chm <= 4.2)
+            & (lum05 > 82.0)
+            & ((o_f[:, :, 1] - o_f[:, :, 0]) < 8.0)
+        )
+        is_bright_float = (
+            ndimage.binary_erosion(self.lake_mask, iterations=2, border_value=0)
+            & near_shore
+            & (~self.bldg_roof_mask)
+            & (self.chm <= 4.2)
+            & (lum05 > 114.0)
+            & ((lum05 - bg_lum05) > 26.0)
+            & ((o_f[:, :, 1] - o_f[:, :, 0]) < 10.0)
+        )
         cand_float = (is_lidar_obj | is_bright_float) & (~is_pier)
         lbl_f, n_f = ndimage.label(cand_float)
         clean_float = np.zeros_like(cand_float)
         if n_f > 0:
             counts = np.bincount(lbl_f.ravel())
-            valid_lbl = (counts >= 2) & (counts <= 1040)
+            valid_lbl = (counts >= 3) & (counts <= 1800)
             valid_lbl[0] = False
             clean_float = valid_lbl[lbl_f]
         self.harbor_obj_mask = is_pier | clean_float
@@ -355,7 +430,6 @@ class SceneData:
             vals = s_rgb[sl]
             ds = s_dot[sl]
             lm = s_lum[sl]
-            # Filter out overhanging green tree leaves unless building is genuinely a green eco-roof
             not_leaf = (vals[:, 1] - vals[:, 0]) <= 8.0
             good = (ds > 0.22) & (lm > 48.0) & (lm < 236.0) & not_leaf
             if good.sum() >= max(1, int(0.18 * cnt_u)):
@@ -365,7 +439,7 @@ class SceneData:
             elif (lm > 42.0).any():
                 self.bldg_sunlit_roof_rgb[bi_u] = np.percentile(vals[lm > 42.0], 68, axis=0)
 
-        # Clean up & stylize per-building roof base RGB into authentic 90s pixel-art roof materials
+        # Clean up & stylize per-building roof base RGB into jewel-like 90s pixel-art Swiss roof materials
         self.bldg_clean_roof_rgb = np.empty((nb, 3), dtype=np.float32)
         self.bldg_roof_kind = np.zeros(nb, dtype=np.uint8)  # 0=clay_tile, 1=dark_slate, 2=flat_gravel, 3=flat_green, 4=metal
         for i in range(nb):
@@ -373,35 +447,36 @@ class SceneData:
             lum_r = 0.299 * rr + 0.587 * rg + 0.114 * rb
             is_pit = bool(self.bldg_is_pitched[i])
             if is_pit:
-                if (rr - rb) >= 16.0 and rr >= 105.0:
-                    # Rich Swiss terracotta / red-brown clay tile
-                    warm = min(1.0, max(0.0, (rr - rg) / 36.0))
-                    c_tile = np.array([154.0 + 30.0 * warm, 86.0 + 6.0 * warm, 62.0 - 4.0 * warm], dtype=np.float32)
-                    self.bldg_clean_roof_rgb[i] = 0.58 * c_tile + 0.42 * np.clip([rr * 1.06, rg * 0.98, rb * 0.92], 50.0, 212.0)
+                if (rr - rb) >= 15.0 and rr >= 98.0:
+                    # Rich jewel-like Swiss terracotta clay tile
+                    warm = min(1.0, max(0.0, (rr - rg) / 34.0))
+                    c_tile = np.array([162.0 + 30.0 * warm, 82.0 + 8.0 * warm, 56.0 - 4.0 * warm], dtype=np.float32)
+                    self.bldg_clean_roof_rgb[i] = 0.65 * c_tile + 0.35 * np.clip([rr * 1.08, rg * 0.96, rb * 0.88], 48.0, 214.0)
                     self.bldg_roof_kind[i] = 0
-                elif (rr - rb) >= 8.0:
-                    # Weathered warm-brown clay tile
-                    self.bldg_clean_roof_rgb[i] = np.clip([rr * 1.04, rg * 0.98, rb * 0.94], 76.0, 186.0)
+                elif (rr - rb) >= 7.0:
+                    # Warm weathered sienna-brown Swiss clay tile
+                    c_brn = np.array([136.0, 92.0, 68.0], dtype=np.float32)
+                    self.bldg_clean_roof_rgb[i] = 0.55 * c_brn + 0.45 * np.clip([rr * 1.04, rg * 0.96, rb * 0.90], 72.0, 184.0)
                     self.bldg_roof_kind[i] = 0
                 else:
-                    # Dark alpine slate / anthracite tile (or copper-patina church spire)
-                    base_sl = np.clip(lum_r * 0.96, 68.0, 146.0)
-                    self.bldg_clean_roof_rgb[i] = [base_sl * 0.97, base_sl * 0.99, base_sl * 1.04]
+                    # Crisp alpine charcoal / slate tile (strictly neutral — zero accidental blue cast!)
+                    base_sl = np.clip(lum_r * 0.94, 70.0, 138.0)
+                    self.bldg_clean_roof_rgb[i] = [base_sl * 0.99, base_sl * 1.00, base_sl * 1.02]
                     self.bldg_roof_kind[i] = 1
             else:
-                if (rg - rr) > 7.5 and (rg - rb) > 10.0:
-                    # Sedum extensive green flat roof
-                    self.bldg_clean_roof_rgb[i] = [104.0, 134.0, 74.0]
+                if (rg - rr) > 7.0 and (rg - rb) > 9.0:
+                    # Lush sedum extensive green flat roof
+                    self.bldg_clean_roof_rgb[i] = [106.0, 138.0, 74.0]
                     self.bldg_roof_kind[i] = 3
                 elif lum_r > 158.0:
                     # Crisp light concrete / silver membrane flat roof
-                    v_l = np.clip(lum_r, 156.0, 198.0)
+                    v_l = np.clip(lum_r, 158.0, 198.0)
                     self.bldg_clean_roof_rgb[i] = [v_l, v_l * 0.995, v_l * 0.985]
                     self.bldg_roof_kind[i] = 4
                 else:
-                    # Neutral Swiss washed-pebble gravel flat roof
-                    v_g = np.clip(lum_r * 1.02, 108.0, 166.0)
-                    self.bldg_clean_roof_rgb[i] = [v_g * 1.01, v_g * 1.00, v_g * 0.98]
+                    # Clean warm-neutral Swiss washed-pebble gravel flat roof
+                    v_g = np.clip(lum_r * 1.04, 114.0, 168.0)
+                    self.bldg_clean_roof_rgb[i] = [v_g * 1.02, v_g * 1.00, v_g * 0.97]
                     self.bldg_roof_kind[i] = 2
 
         # Exact physical horizontal wall spans [wall_u_min, wall_u_max] per (building, 10°-normal-bin)
@@ -667,8 +742,13 @@ def _shade_drawn_ground_90s(
     gnz: np.ndarray,
     sub_chm_val: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Synthesize 100% crisp, distinctly drawn 90s pixel-art ground, mowed meadows, terraced vineyards,
-    clean asphalt streets with sidewalks & zebra crosswalks, SBB railway ballast/sleepers/rails & lake."""
+    """V6.0 Museum-Grade 90s Pixel-Art Ground Shader:
+    - Organic wildflower Swiss alpine meadows & lush manicured residential garden lawns (ZERO fake mowing stripes,
+      ZERO dirty grey concrete soup in shaded yards!)
+    - Exact vector FIFA regulation football pitches (alternating mown turf + crisp white markings)
+    - Exact vector ITF Roland-Garros clay tennis courts (crisp clay apron + regulation white court lines)
+    - Exact vector multi-sport school courts, terraced vineyards, stone-banked Swiss streams, road-aligned parking,
+      crisp limestone-coped swimming pools, clean asphalt streets & SBB railway tracks."""
     n_pts = len(ge)
     gcol = np.empty((n_pts, 3), dtype=np.float32)
     gmat = np.full(n_pts, M_GROUND, dtype=np.uint8)
@@ -682,85 +762,274 @@ def _shade_drawn_ground_90s(
     iy50 = iy25 >> 1
     p_hash = ((ix25 * 73856093) ^ (iy25 * 19349663)) & 0xFF
     h50 = ((ix50 * 83492791) ^ (iy50 * 40503)) & 0xFF
+    wf_hash = ((ix25 * 19349663) ^ (iy25 * 83492791) ^ 0x5A3C) & 0x3FF
 
-    # 1. Default open land (G_TERRAIN, G_PARK_CEMETERY, G_FOREST):
-    # Distinguish grass/lawn/meadow from stone courtyards, plazas & gravel drives using SWISSIMAGE!
-    is_lawn = ((ro[:, 1] >= ro[:, 0] * 0.95) & ((ro[:, 1] - ro[:, 2]) > 7.5)) | (gsem == G_FOREST) | (gsem == G_PARK_CEMETERY)
-    # Lush 90s pixel-art Swiss meadow / lawn with subtle mowed stripes & organic grass tufts!
-    mow_stripe = (((np.floor((ge * 0.92 - gn * 0.39) * 0.18).astype(np.int32)) & 1) == 0) & (gsem != G_FOREST)
-    tuft = (p_hash < 42)
-    dark_tuft = (p_hash >= 42) & (p_hash < 74)
-    lawn_col = np.full((n_pts, 3), [74.0, 128.0, 56.0], dtype=np.float32)
-    lawn_col[mow_stripe] = [84.0, 140.0, 62.0]
-    lawn_col[tuft] += [12.0, 16.0, 6.0]
-    lawn_col[dark_tuft] -= [10.0, 14.0, 6.0]
-    # Richer mossy forest floor under woodland
+    c05 = np.clip(((ge - E_MIN) * 2.0).astype(np.int32), 0, GRID_W - 1)
+    r05 = np.clip(((N_MAX - gn) * 2.0).astype(np.int32), 0, GRID_H - 1)
+    m_noise = scene.meadow_noise_05m[r05, c05]
+    is_pave = scene.yard_pave_mask_05m[r05, c05]
+    is_pool_rim = scene.pool_rim_05m[r05, c05]
+    rd_ang = scene.road_ang[r05, c05]
+
+    # 1. Organic Swiss Alpine Meadows, Residential Garden Lawns & Clean Limestone Courtyards:
+    # Multi-tone rolling organic pasture variation (NO artificial parallel mowing stripes!)
+    # Warm sunlit clover patches, rich mid emerald meadow, and cool valley sage grass
+    t_meadow = np.clip(0.5 + 0.34 * m_noise, 0.0, 1.0)[:, None]
+    lawn_col = (1.0 - t_meadow) * np.array([62.0, 118.0, 48.0], dtype=np.float32) + t_meadow * np.array([92.0, 148.0, 62.0], dtype=np.float32)
+    # Subtle warm upland sage tint on sunlit hillside pastures
+    warm_patch = m_noise > 0.72
+    if warm_patch.any():
+        lawn_col[warm_patch] += np.array([10.0, 8.0, -4.0], dtype=np.float32)
+    # Crisp 90s pixel-art grass blade tufts (micro-texture without noisy grain)
+    tuft = p_hash < 46
+    dark_tuft = (p_hash >= 46) & (p_hash < 86)
+    lawn_col[tuft] += np.array([11.0, 15.0, 5.0], dtype=np.float32)
+    lawn_col[dark_tuft] -= np.array([9.0, 13.0, 5.0], dtype=np.float32)
+
+    # Occasional tiny alpine wildflowers (golden buttercups & white daisies) in open meadows!
+    open_meadow = (gsem == G_TERRAIN) & (~is_pave) & (rd_dist > 5.5)
+    daisy = open_meadow & (wf_hash == 17)
+    buttercup = open_meadow & (wf_hash == 53)
+    if daisy.any():
+        lawn_col[daisy] = [232.0, 234.0, 224.0]
+    if buttercup.any():
+        lawn_col[buttercup] = [234.0, 206.0, 82.0]
+
+    # Deep mossy woodland floor under forests (G_FOREST)
     is_for = gsem == G_FOREST
     if is_for.any():
-        lawn_col[is_for] = np.where((h50[is_for] < 96)[:, None], [46.0, 82.0, 42.0], [56.0, 96.0, 48.0])
-    # Manicured park / cemetery emerald turf with crisp warm gravel walkways
+        f_moss = h50[is_for]
+        f_c = np.where((f_moss < 90)[:, None], [44.0, 80.0, 40.0], [56.0, 96.0, 48.0]).astype(np.float32)
+        f_c[p_hash[is_for] < 36] -= [6.0, 10.0, 4.0]
+        lawn_col[is_for] = f_c
+
+    # Manicured park, orchard & cemetery emerald turf with neat warm limestone gravel walkways
     is_park = gsem == G_PARK_CEMETERY
     if is_park.any():
-        park_gravel = is_park & (lum > 112.0) & ((ro[:, 1] - ro[:, 2]) < 11.0)
-        lawn_col[is_park] = np.where((p_hash[is_park] < 50)[:, None], [72.0, 134.0, 58.0], [64.0, 122.0, 52.0])
-        lawn_col[park_gravel] = [174.0, 164.0, 146.0]
+        park_gravel = is_park & (lum > 124.0) & ((ro[:, 1] - ro[:, 2]) < 9.0) & ((ro.max(axis=1) - ro.min(axis=1)) < 20.0)
+        lawn_col[is_park] = np.where((p_hash[is_park] < 54)[:, None], [70.0, 134.0, 56.0], [60.0, 120.0, 50.0])
+        lawn_col[park_gravel] = np.where((p_hash[park_gravel] < 90)[:, None], [182.0, 172.0, 154.0], [168.0, 158.0, 142.0])
 
-    # Clean stone courtyards, gravel yards & village plazas (non-lawn G_TERRAIN)
-    pave_joint = ((ix25 % 4) == 0) | ((iy25 % 4) == 0)
-    is_warm_yard = (ro[:, 0] - ro[:, 2]) > 14.0
-    yard_col = np.where(is_warm_yard[:, None], [164.0, 152.0, 134.0], [148.0, 148.0, 146.0]).astype(np.float32)
-    yard_col[pave_joint] *= 0.92
-    yard_col[p_hash < 38] *= 1.05
+    # Clean Jura limestone patios, terraces & paved residential driveways (ONLY true paved areas near buildings/streets!)
+    pave_joint = ((ix25 % 5) == 0) | ((iy25 % 5) == 0)
+    is_warm_yard = (ro[:, 0] - ro[:, 2]) > 10.0
+    yard_col = np.where(is_warm_yard[:, None], [174.0, 164.0, 148.0], [158.0, 156.0, 150.0]).astype(np.float32)
+    yard_col[pave_joint] *= 0.91
+    yard_col[p_hash < 36] *= 1.04
 
+    is_lawn = (~is_pave) | is_for | is_park
     gcol[:] = np.where(is_lawn[:, None], lawn_col, yard_col)
 
-    # 2. Terraced Kilchberg Vineyards (G_VINEYARD): warm soil + crisp 3D grapevine trellis rows!
+    # 2. Terraced Kilchberg Vineyards (G_VINEYARD): warm tilled loam + crisp 3D grapevine trellis rows!
     is_vin = gsem == G_VINEYARD
     if is_vin.any():
         vi = np.nonzero(is_vin)[0]
-        # Rows run roughly perpendicular to hillside slope (N-S / NNW-SSE) every 2.0m
-        u_row = (ge[vi] * 0.94 + gn[vi] * 0.34) % 2.1
-        on_vine = u_row < 0.82
-        vcol = np.full((len(vi), 3), [132.0, 114.0, 88.0], dtype=np.float32)  # Warm vineyard soil/grass aisle
-        vcol[p_hash[vi] < 80] = [104.0, 126.0, 68.0]  # Grass strip between vine rows
-        vine_leaf = np.where((p_hash[vi] < 110)[:, None], [76.0, 136.0, 52.0], [56.0, 108.0, 42.0])
+        u_row = (ge[vi] * 0.94 + gn[vi] * 0.34) % 2.15
+        on_vine = u_row < 0.84
+        vine_sh = (u_row >= 0.84) & (u_row < 1.18)
+        vcol = np.full((len(vi), 3), [138.0, 118.0, 88.0], dtype=np.float32)
+        vcol[p_hash[vi] < 92] = [108.0, 130.0, 68.0]  # Green grass cover-crop between trellis rows
+        vcol[vine_sh] *= 0.78  # Crisp dark trellis under-shadow
+        vine_leaf = np.where((p_hash[vi] < 110)[:, None], [74.0, 138.0, 50.0], [52.0, 108.0, 40.0])
         vcol[on_vine] = vine_leaf[on_vine]
         gcol[vi] = vcol
-        gz[vi[on_vine]] += 0.85
+        gz[vi[on_vine]] += 0.90
 
-    # 3. Sports Pitches & Tennis Courts (G_PITCH)
-    is_pitch = gsem == G_PITCH
-    if is_pitch.any():
-        pi = np.nonzero(is_pitch)[0]
-        is_clay_court = (ro[pi, 0] > ro[pi, 1] * 1.12) & (ro[pi, 0] > 95.0)
-        pcol = np.full((len(pi), 3), [66.0, 138.0, 62.0], dtype=np.float32)
-        p_stripe = ((np.floor((ge[pi] * 0.90 + gn[pi] * 0.44) * 0.22).astype(np.int32)) & 1) == 0
-        pcol[p_stripe] = [78.0, 152.0, 70.0]
-        pcol[is_clay_court] = [176.0, 96.0, 68.0]
-        # Crisp white court / pitch line markings where ortho shows bright line
-        bright_line = lum[pi] > 168.0
-        pcol[bright_line] = [232.0, 232.0, 228.0]
-        gcol[pi] = pcol
+    # 3. MUSEUM-GRADE VECTOR SPORTS FIELDS: Football Pitches, Roland-Garros Tennis Courts & Multi-Sport Courts!
+    # First give any fallback G_PITCH cell clean lush turf, then paint exact vector markings for every extracted entity!
+    is_pitch_sem = gsem == G_PITCH
+    if is_pitch_sem.any():
+        gcol[is_pitch_sem] = [66.0, 138.0, 58.0]
 
-    # 4. Streams (G_STREAM)
+    ge_min_b = float(ge.min()) - 8.0
+    ge_max_b = float(ge.max()) + 8.0
+    gn_min_b = float(gn.min()) - 8.0
+    gn_max_b = float(gn.max()) + 8.0
+
+    for sf in scene.sports_fields:
+        fe_c, fn_c = float(sf["e"]), float(sf["n"])
+        L_f, W_f = float(sf["length"]), float(sf["width"])
+        ang = float(sf["angle"])
+        kind = sf["kind"]
+        rad_max = 0.5 * math.hypot(L_f, W_f) + 6.0
+        if fe_c + rad_max < ge_min_b or fe_c - rad_max > ge_max_b or fn_c + rad_max < gn_min_b or fn_c - rad_max > gn_max_b:
+            continue
+
+        near = (np.abs(ge - fe_c) <= rad_max) & (np.abs(gn - fn_c) <= rad_max)
+        if not near.any():
+            continue
+        ni = np.nonzero(near)[0]
+        de = ge[ni] - fe_c
+        dn = gn[ni] - fn_c
+        ca, sa = math.cos(ang), math.sin(ang)
+        # Local pitch axes: u along length [-L/2, L/2], v along width [-W/2, W/2]
+        u = de * ca + dn * sa
+        v = -de * sa + dn * ca
+        au = np.abs(u)
+        av = np.abs(v)
+
+        if kind == "football":
+            # Playing field inset cleanly inside MVT polygon (apron ~2.0m)
+            hl = max(28.0, 0.5 * L_f - 2.2)
+            hw = max(18.0, 0.5 * W_f - 2.0)
+            in_apron = (au <= hl + 2.8) & (av <= hw + 2.6) & (~glake[ni])
+            if not in_apron.any():
+                continue
+            ai = ni[in_apron]
+            ua, va, aua, ava = u[in_apron], v[in_apron], au[in_apron], av[in_apron]
+            in_play = (aua <= hl) & (ava <= hw)
+
+            # Lush Wimbledon/Swiss stadium alternating mown turf stripes (6.5m bands perpendicular to pitch length!)
+            stripe = ((np.floor((ua + hl) / 6.5).astype(np.int32)) & 1) == 0
+            fcol = np.full((len(ai), 3), [52.0, 118.0, 48.0], dtype=np.float32)  # Deeper green perimeter apron
+            fcol[in_play & (~stripe)] = [58.0, 134.0, 52.0]
+            fcol[in_play & stripe] = [74.0, 152.0, 62.0]
+            # Subtle crisp pixel turf texture
+            fcol[p_hash[ai] < 38] += [5.0, 8.0, 3.0]
+            fcol[(p_hash[ai] >= 38) & (p_hash[ai] < 72)] -= [5.0, 7.0, 3.0]
+
+            # Razor-sharp FIFA regulation white pitch markings (lw = 0.36m crisp architectural lines!)
+            lw = 0.36
+            # Outer touchlines & goal lines
+            on_line = (
+                ((np.abs(aua - hl) <= lw) & (ava <= hw + lw))
+                | ((np.abs(ava - hw) <= lw) & (aua <= hl + lw))
+            )
+            # Halfway line + Center circle (R = min(9.15m, hw*0.36)) + Center spot
+            r_cc = min(9.15, hw * 0.36)
+            r_cent = np.hypot(ua, va)
+            on_line |= (aua <= lw * 0.9) & (ava <= hw)
+            on_line |= np.abs(r_cent - r_cc) <= lw
+            on_line |= r_cent <= 0.65
+
+            # Both 18-yard penalty areas & 6-yard goal areas (scaled smoothly for slightly narrower training pitches)
+            pen_d = min(16.5, hl * 0.34)
+            pen_hw = min(20.16, hw * 0.66)
+            goal_d = min(5.5, hl * 0.12)
+            goal_hw = min(9.16, hw * 0.32)
+            pen_spot_u = hl - min(11.0, pen_d * 0.68)
+
+            # Penalty box lines
+            on_line |= (np.abs(aua - (hl - pen_d)) <= lw) & (ava <= pen_hw + lw)
+            on_line |= (np.abs(ava - pen_hw) <= lw) & (aua >= hl - pen_d - lw) & (aua <= hl)
+            # Goal area (6-yard box) lines
+            on_line |= (np.abs(aua - (hl - goal_d)) <= lw) & (ava <= goal_hw + lw)
+            on_line |= (np.abs(ava - goal_hw) <= lw) & (aua >= hl - goal_d - lw) & (aua <= hl)
+            # Penalty spots + Penalty arcs outside penalty box
+            r_pen = np.hypot(aua - pen_spot_u, va)
+            on_line |= r_pen <= 0.54
+            on_line |= (np.abs(r_pen - r_cc) <= lw) & (aua < (hl - pen_d))
+            # Four corner arcs (R = 1.65m)
+            r_cor = np.hypot(hl - aua, hw - ava)
+            on_line |= in_play & (np.abs(r_cor - 1.65) <= lw)
+
+            fcol[on_line] = [238.0, 240.0, 236.0]
+            gcol[ai] = fcol
+
+        elif kind in ("tennis", "tennis_pad"):
+            # ITF Regulation Clay Tennis Court: 23.77m x 10.97m playing area inside rich terracotta clay apron!
+            hl_c = 11.885
+            hw_d = 5.485
+            hw_s = 4.115
+            u_srv = 6.40
+            # Clay runoff apron joins adjacent side-by-side club courts cleanly without narrow grass slivers
+            hl_ap = max(hl_c + 2.4, 0.5 * L_f + 1.2)
+            hw_ap = max(hw_d + 2.1, 0.5 * W_f + 1.35)
+            in_apron = (au <= hl_ap) & (av <= hw_ap) & (~glake[ni])
+            if not in_apron.any():
+                continue
+            ai = ni[in_apron]
+            aua, ava = au[in_apron], av[in_apron]
+            in_court = (aua <= hl_c) & (ava <= hw_d)
+
+            # Rich Roland-Garros terracotta clay (deeper burnt-clay runoff apron + warm vibrant red-clay court!)
+            ccol = np.full((len(ai), 3), [158.0, 74.0, 48.0], dtype=np.float32)
+            ccol[in_court] = [188.0, 92.0, 56.0]
+            # Fine 2-tone pixel-art rolled red-clay grain
+            ccol[p_hash[ai] < 52] += [8.0, 5.0, 3.0]
+            ccol[(p_hash[ai] >= 52) & (p_hash[ai] < 96)] -= [7.0, 4.0, 3.0]
+            # Crisp dark-green perimeter apron border line on baselines
+            border_c = (np.abs(aua - hl_ap) <= 0.35)
+            ccol[border_c] = [44.0, 86.0, 46.0]
+
+            # Razor-sharp ITF white regulation court lines (lw = 0.32m so every line pops clearly!)
+            lw = 0.32
+            on_line = (
+                # Baselines & doubles sidelines
+                ((np.abs(aua - hl_c) <= lw) & (ava <= hw_d + lw))
+                | ((np.abs(ava - hw_d) <= lw) & (aua <= hl_c + lw))
+                # Singles sidelines
+                | ((np.abs(ava - hw_s) <= lw) & (aua <= hl_c))
+                # Service lines
+                | ((np.abs(aua - u_srv) <= lw) & (ava <= hw_s))
+                # Center service line
+                | ((ava <= lw * 0.85) & (aua <= u_srv))
+                # Center baseline hash marks
+                | ((ava <= lw * 0.8) & (aua >= hl_c - 0.65) & (aua <= hl_c))
+            )
+            ccol[on_line] = [242.0, 242.0, 238.0]
+            # Subtle dark shadow directly beneath the center tennis net (u ≈ 0)
+            net_sh = (aua <= 0.42) & (ava <= hw_d + 0.9)
+            ccol[net_sh] *= 0.76
+            gcol[ai] = ccol
+
+        elif kind == "multisport":
+            # Crisp Swiss red-tartan schoolyard basketball/handball court inside clean slate surround
+            hl = max(10.0, 0.5 * L_f - 1.4)
+            hw = max(6.5, 0.5 * W_f - 1.2)
+            in_apron = (au <= hl + 1.8) & (av <= hw + 1.6) & (~glake[ni])
+            if not in_apron.any():
+                continue
+            ai = ni[in_apron]
+            aua, ava = au[in_apron], av[in_apron]
+            in_play = (aua <= hl) & (ava <= hw)
+            mcol = np.full((len(ai), 3), [104.0, 108.0, 114.0], dtype=np.float32)  # Slate surround
+            mcol[in_play] = [164.0, 76.0, 58.0]  # Red-ochre tartan sport surface
+            mcol[p_hash[ai] < 48] += [5.0, 4.0, 3.0]
+            lw = 0.34
+            r_cc = min(3.2, hw * 0.34)
+            r_cent = np.hypot(aua, ava)
+            on_line = (
+                ((np.abs(aua - hl) <= lw) & (ava <= hw + lw))
+                | ((np.abs(ava - hw) <= lw) & (aua <= hl + lw))
+                | ((aua <= lw * 0.85) & (ava <= hw))
+                | (np.abs(r_cent - r_cc) <= lw)
+                | (np.abs(np.hypot(hl - aua, ava) - min(5.2, hw * 0.56)) <= lw) & in_play
+            )
+            mcol[on_line] = [238.0, 240.0, 236.0]
+            gcol[ai] = mcol
+
+    # 4. Streams (G_STREAM — Dorfbach): natural mossy stone-banked Swiss alpine brook (no neon cyan!)
     is_str = gsem == G_STREAM
     if is_str.any():
-        gcol[is_str] = [56.0, 116.0, 128.0]
+        si = np.nonzero(is_str)[0]
+        # Riffle sparkle + cool mossy alpine stream tones
+        scol = np.where((p_hash[si] < 85)[:, None], [44.0, 92.0, 104.0], [34.0, 78.0, 92.0]).astype(np.float32)
+        scol[p_hash[si] > 236] = [148.0, 188.0, 194.0]  # Tiny 1px white water riffle sparkle
+        scol[h50[si] < 32] = [74.0, 98.0, 68.0]         # Mossy pebble bank edge
+        gcol[si] = scol
+        gz[si] -= 0.25
 
-    # 5. Footpaths & Garden Walkways (G_FOOTPATH): crisp warm limestone gravel + 1px dark edge
+    # 5. Footpaths & Garden Walkways (G_FOOTPATH): crisp warm Jura limestone gravel
     is_fp = gsem == G_FOOTPATH
     if is_fp.any():
         fi = np.nonzero(is_fp)[0]
-        fcol = np.where((p_hash[fi] < 95)[:, None], [166.0, 158.0, 144.0], [152.0, 144.0, 132.0]).astype(np.float32)
+        fcol = np.where((p_hash[fi] < 95)[:, None], [174.0, 166.0, 150.0], [158.0, 150.0, 136.0]).astype(np.float32)
         gcol[fi] = fcol
 
-    # 6. Parking Lots (G_PARKING): clean slate asphalt + neat white bay lines
+    # 6. Parking Lots (G_PARKING): clean slate asphalt + neat bay lines aligned to adjacent street angle!
     is_pk = gsem == G_PARKING
     if is_pk.any():
         ki = np.nonzero(is_pk)[0]
-        kcol = np.where((p_hash[ki] < 70)[:, None], [96.0, 100.0, 108.0], [88.0, 92.0, 100.0]).astype(np.float32)
-        bay_line = (((ge[ki] % 2.6) < 0.16) & ((gn[ki] % 5.4) < 4.2))
-        kcol[bay_line] = [186.0, 188.0, 192.0]
+        kcol = np.where((p_hash[ki] < 70)[:, None], [94.0, 98.0, 106.0], [86.0, 90.0, 98.0]).astype(np.float32)
+        ka = rd_ang[ki]
+        ck, sk = np.cos(ka), np.sin(ka)
+        ku = (ge[ki] - E_MIN) * ck + (gn[ki] - N_MIN) * sk
+        kv = -(ge[ki] - E_MIN) * sk + (gn[ki] - N_MIN) * ck
+        # Clean aligned parking bays with central driving aisle
+        in_bay_band = (kv % 11.5) < 4.6
+        bay_line = in_bay_band & (((ku % 2.65) < 0.20) | ((kv % 11.5) < 0.20))
+        kcol[bay_line] = [196.0, 198.0, 202.0]
         gcol[ki] = kcol
 
     # 7. Minor Village Streets (G_STREET_MINOR): clean 90s pixel-art slate asphalt + crisp 1px granite curb!
@@ -769,15 +1038,14 @@ def _shade_drawn_ground_90s(
         mi = np.nonzero(is_min)[0]
         m_d = rd_dist[mi]
         m_hw = np.maximum(2.0, rd_hw[mi])
-        mcol = np.where((p_hash[mi] < 65)[:, None], [96.0, 100.0, 108.0], [88.0, 92.0, 100.0]).astype(np.float32)
+        mcol = np.where((p_hash[mi] < 65)[:, None], [94.0, 98.0, 106.0], [86.0, 90.0, 98.0]).astype(np.float32)
         curb_m = m_d >= (m_hw - 0.42)
-        mcol[curb_m] = [148.0, 148.0, 146.0]
+        mcol[curb_m] = [158.0, 156.0, 150.0]
         gutter_m = (m_d >= (m_hw - 0.72)) & (~curb_m)
-        mcol[gutter_m] = [70.0, 74.0, 82.0]
+        mcol[gutter_m] = [68.0, 72.0, 80.0]
         gcol[mi] = mcol
 
     # 8. Main Roads (G_STREET_MAIN — Seestrasse, Dorfstrasse, Bahnhofstrasse, Alte Landstrasse):
-    # Clean slate asphalt, raised granite sidewalks, 1px curbs, dashed white centerlines & Swiss yellow crosswalks!
     is_main = gsem == G_STREET_MAIN
     if is_main.any():
         ai = np.nonzero(is_main)[0]
@@ -786,32 +1054,28 @@ def _shade_drawn_ground_90s(
         a_hw = np.maximum(3.8, rd_hw[ai])
         sw_start = a_hw - 1.32
 
-        acol = np.where((p_hash[ai] < 62)[:, None], [90.0, 94.0, 102.0], [82.0, 86.0, 94.0]).astype(np.float32)
-        # Subtle asphalt tire-wear track shading
+        acol = np.where((p_hash[ai] < 62)[:, None], [88.0, 92.0, 100.0], [80.0, 84.0, 92.0]).astype(np.float32)
         lane_mid = np.abs(a_d - 1.55) < 0.55
         acol[lane_mid] *= 0.94
 
-        # Crisp white dashed centerline!
         dash_c = (a_d < 0.26) & ((a_s % 5.6) < 2.5)
-        acol[dash_c] = [226.0, 228.0, 232.0]
+        acol[dash_c] = [230.0, 232.0, 236.0]
 
-        # Crisp dark gutter + raised light-stone sidewalk with 1.5m paving joints!
         on_curb = (a_d >= (sw_start - 0.30)) & (a_d < sw_start)
         on_sw = a_d >= sw_start
-        acol[on_curb] = [62.0, 66.0, 74.0]
+        acol[on_curb] = [60.0, 64.0, 72.0]
         sw_joint = on_sw & ((a_s % 1.6) < 0.22)
-        acol[on_sw] = [164.0, 162.0, 156.0]
-        acol[sw_joint] = [138.0, 136.0, 132.0]
+        acol[on_sw] = [170.0, 166.0, 158.0]
+        acol[sw_joint] = [142.0, 138.0, 132.0]
         gz[ai[on_sw]] += 0.18
         gcol[ai] = acol
 
-    # 8b. Crisp Geometric Swiss Yellow Zebra Crosswalks on Main Roads (Seestrasse, Dorfstrasse, Alte Landstrasse)!
+    # 8b. Crisp Geometric Swiss Yellow Zebra Crosswalks on Main Roads!
     is_xw = xwalk & (gsem == G_STREET_MAIN)
     if is_xw.any():
         xi = np.nonzero(is_xw)[0]
-        # Crisp parallel yellow bars perpendicular to road centerline!
         bar = ((rd_dist[xi] % 0.95) < 0.48) & (rd_dist[xi] <= np.maximum(2.0, rd_hw[xi] - 1.45))
-        gcol[xi[bar]] = [236.0, 194.0, 56.0]
+        gcol[xi[bar]] = [238.0, 198.0, 58.0]
 
     # 9. A3 Motorway (G_MOTORWAY): dark highway asphalt, double dashed lane lines, white shoulders & steel barriers
     is_mw = gsem == G_MOTORWAY
@@ -821,12 +1085,11 @@ def _shade_drawn_ground_90s(
         w_s = rd_along[wi]
         w_hw = np.maximum(3.4, rd_hw[wi])
         wcol = np.where((p_hash[wi] < 55)[:, None], [74.0, 78.0, 86.0], [68.0, 72.0, 80.0]).astype(np.float32)
-        # Lane dashes & solid shoulder edge lines
         w_dash = (np.abs(w_d - 1.8) < 0.24) & ((w_s % 6.5) < 2.8)
         w_edge = np.abs(w_d - (w_hw - 0.85)) < 0.25
         w_guard = w_d >= (w_hw - 0.42)
-        wcol[w_dash | w_edge] = [228.0, 230.0, 234.0]
-        wcol[w_guard] = [154.0, 160.0, 168.0]
+        wcol[w_dash | w_edge] = [232.0, 234.0, 238.0]
+        wcol[w_guard] = [158.0, 164.0, 172.0]
         gz[wi[w_guard]] += 0.72
         gcol[wi] = wcol
 
@@ -836,17 +1099,12 @@ def _shade_drawn_ground_90s(
         ri = np.nonzero(is_rl)[0]
         r_d = rl_dist[ri]
         r_s = rl_along[ri]
-        # Dithered crushed-stone grey-brown granite ballast
         rcol = np.where((p_hash[ri] < 115)[:, None], [116.0, 108.0, 98.0], [96.0, 88.0, 80.0]).astype(np.float32)
-        rcol[r_d > 2.05] = [84.0, 78.0, 70.0]  # Ballast embankment shoulder
-
-        # Dark timber/concrete cross-sleepers every 0.85m
+        rcol[r_d > 2.05] = [84.0, 78.0, 70.0]
         sleeper = (r_d <= 1.22) & ((r_s % 0.85) < 0.30)
         rcol[sleeper] = [64.0, 52.0, 44.0]
-
-        # Twin gleaming parallel steel rails at standard Swiss gauge (+-0.72m from track centerline!)
         rail_steel = np.abs(r_d - 0.72) <= 0.22
-        rcol[rail_steel] = [196.0, 202.0, 210.0]
+        rcol[rail_steel] = [200.0, 206.0, 214.0]
         gz[ri[rail_steel]] += 0.14
         gcol[ri] = rcol
         gmat[ri] = M_RAIL
@@ -855,56 +1113,72 @@ def _shade_drawn_ground_90s(
     is_pl = (gsem == G_PLATFORM_PIER) & (~glake)
     if is_pl.any():
         pli = np.nonzero(is_pl)[0]
-        pcol = np.full((len(pli), 3), [176.0, 174.0, 168.0], dtype=np.float32)
-        # Paving slab joints
+        pcol = np.full((len(pli), 3), [178.0, 176.0, 170.0], dtype=np.float32)
         slab = ((ix50[pli] % 3) == 0) | ((iy50[pli] % 3) == 0)
-        pcol[slab] = [156.0, 154.0, 148.0]
-        # Crisp white safety edge stripe facing the railway tracks
+        pcol[slab] = [158.0, 156.0, 150.0]
         tactile = (rl_dist[pli] >= 1.55) & (rl_dist[pli] <= 2.05)
-        pcol[tactile] = [232.0, 232.0, 228.0]
+        pcol[tactile] = [236.0, 236.0, 232.0]
         gcol[pli] = pcol
         gz[pli] += 0.58
 
-    # 12. Crisp Backyard & Lakeside Swimming Pools (G_POOL) with white coping rim
+    # 12. Crisp Swimming Pools (G_POOL) with white Jura-stone coping rim & Seebad swimming lanes!
+    if is_pool_rim.any():
+        gcol[is_pool_rim] = [220.0, 218.0, 212.0]
+        gz[is_pool_rim] += 0.14
     is_pool = gsem == G_POOL
     if is_pool.any():
         p_i = np.nonzero(is_pool)[0]
         shimmer = ((ix25[p_i] + iy25[p_i]) & 3) == 0
-        pcol = np.where(shimmer[:, None], [108.0, 214.0, 236.0], [66.0, 186.0, 216.0]).astype(np.float32)
+        pcol = np.where(shimmer[:, None], [116.0, 218.0, 238.0], [64.0, 186.0, 218.0]).astype(np.float32)
+        # Subtle turquoise lane dividers on Seebad Kilchberg pool (E≈2684240..2684305, N≈1241440..1241520)
+        in_seebad = (ge[p_i] >= 2684235.0) & (ge[p_i] <= 2684310.0) & (gn[p_i] >= 1241435.0) & (gn[p_i] <= 1241525.0)
+        if in_seebad.any():
+            lane = in_seebad & ((((ge[p_i] * 0.85 - gn[p_i] * 0.52) % 2.4) < 0.24))
+            pcol[lane] = [42.0, 134.0, 178.0]
         gcol[p_i] = pcol
         gnx[p_i], gny[p_i], gnz[p_i] = 0.0, 0.0, 1.0
 
-    # 13. Lake Zurich (Zürichsee): authentic alpine jade-emerald shallows -> deep glacial teal-blue + real piers!
+    # 13. Lake Zurich (Zürichsee): authentic alpine jade-emerald shallows -> deep glacial teal-blue + crisp timber piers & moored boats!
     if glake.any():
         li = np.nonzero(glake)[0]
-        is_real_harbor_obj = gharbor[li] & (gsem[li] == G_PLATFORM_PIER)
+        is_real_harbor_obj = gharbor[li]
 
         wi = li[~is_real_harbor_obj]
         if len(wi) > 0:
             depth_m = np.clip(LAKE_SURFACE_Z - gbathy[wi], 0.0, 65.0)
-            we_w, wn_w = ge[wi], gn[wi]
             t_sh = np.clip(depth_m / 6.0, 0.0, 1.0)[:, None]
             t_dp = np.clip((depth_m - 6.0) / 30.0, 0.0, 1.0)[:, None]
-            w_col = (1.0 - t_sh) * np.array([68.0, 118.0, 102.0]) + t_sh * (
-                (1.0 - t_dp) * np.array([38.0, 86.0, 96.0]) + t_dp * np.array([24.0, 60.0, 82.0])
+            w_col = (1.0 - t_sh) * np.array([68.0, 122.0, 106.0]) + t_sh * (
+                (1.0 - t_dp) * np.array([38.0, 88.0, 98.0]) + t_dp * np.array([24.0, 60.0, 84.0])
             )
-            shallow_tint = np.clip((4.5 - depth_m) / 4.5, 0.0, 1.0)[:, None] * 0.24
-            ortho_w = np.clip(raw_ortho[wi].astype(np.float32) * 1.15, 22.0, 165.0)
+            shallow_tint = np.clip((4.5 - depth_m) / 4.5, 0.0, 1.0)[:, None] * 0.22
+            ortho_w = np.clip(raw_ortho[wi].astype(np.float32) * 1.14, 24.0, 165.0)
             w_col = (1.0 - shallow_tint) * w_col + shallow_tint * ortho_w
 
-            shore_f = depth_m < 0.48
-            w_col[shore_f] = 0.65 * w_col[shore_f] + 0.35 * np.array([176.0, 212.0, 204.0])
+            shore_f = depth_m < 0.50
+            w_col[shore_f] = 0.65 * w_col[shore_f] + 0.35 * np.array([182.0, 216.0, 208.0])
             gcol[wi] = w_col
             gmat[wi] = M_WATER_LAKE
             gnx[wi], gny[wi], gnz[wi] = 0.0, 0.0, 1.0
 
         bi_h = li[is_real_harbor_obj]
         if len(bi_h) > 0:
-            real_h = np.clip(sub_chm_val[bi_h], 0.55, 3.6)
+            real_h = np.clip(sub_chm_val[bi_h], 0.65, 3.6)
             gz[bi_h] = LAKE_SURFACE_Z + real_h
-            is_wpier = gsem[bi_h] == G_PLATFORM_PIER
-            hcol = condition_90s_albedo(raw_ortho[bi_h], shadow_knee=70.0, vibrancy=1.18)
-            hcol[is_wpier] = np.where((p_hash[bi_h[is_wpier]] < 90)[:, None], [164.0, 154.0, 136.0], [148.0, 138.0, 122.0])
+            raw_h = raw_ortho[bi_h].astype(np.float32)
+            hlum = 0.299 * raw_h[:, 0] + 0.587 * raw_h[:, 1] + 0.114 * raw_h[:, 2]
+            is_wpier = (gsem[bi_h] == G_PLATFORM_PIER) | (hlum < 176.0)
+            hcol = condition_90s_albedo(raw_ortho[bi_h], shadow_knee=74.0, vibrancy=1.16)
+            # Crisp warm timber pier planks & stone jetties!
+            plank = ((ix25[bi_h[is_wpier]] + iy25[bi_h[is_wpier]]) % 3) == 0
+            warm_wood = (raw_h[is_wpier, 0] - raw_h[is_wpier, 2]) > 8.0
+            pier_base = np.where(warm_wood[:, None], [176.0, 154.0, 124.0], [170.0, 166.0, 158.0]).astype(np.float32)
+            pier_base[plank] *= 0.87
+            hcol[is_wpier] = 0.72 * pier_base + 0.28 * hcol[is_wpier]
+            # Bright sunlit white moored sailboat & motorboat hulls!
+            is_boat = ~is_wpier
+            if is_boat.any():
+                hcol[is_boat] = np.clip(hcol[is_boat] * 1.06 + 8.0, 185.0, 242.0)
             gcol[bi_h] = hcol
             gmat[bi_h] = M_HARBOR_OBJ
             gnx[bi_h], gny[bi_h], gnz[bi_h] = 0.15, -0.15, 0.97
@@ -1242,6 +1516,303 @@ def _render_elevated_bridges_and_rail_portals(
             shadow_buf[iy[w_m], ix[w_m]] = False
 
 
+def _render_3d_sports_details(
+    scene: SceneData,
+    camera: IsometricCamera,
+    shift_x: float,
+    shift_y: float,
+    W: int,
+    H: int,
+    zbuf: np.ndarray,
+    rgb_buf: np.ndarray,
+    mat_buf: np.ndarray,
+    obj_buf: np.ndarray,
+    norm_buf: np.ndarray,
+    shadow_buf: np.ndarray,
+    is_night: bool,
+    crop_box_lv95: tuple[float, float, float, float] | None,
+) -> None:
+    """STAGE 2.6: True 3D pixel-art sports architecture:
+    - Tennis nets (posts, white headband tape, dithered mesh), umpire chairs & dark-green perimeter windscreens
+    - Football goals (white posts, crossbars, rear stanchions & netted frames), corner flags, dugouts & floodlights
+    - Multi-sport court basketball hoops."""
+    mpp = camera.mpp
+    step_l = max(0.18, mpp * 0.65)
+    step_z = max(0.18, mpp * 0.60)
+
+    def _draw_3d_seg(e0, n0, z0, e1, n1, z1, col, mat_c=M_BRIDGE, oid=230000, thick=False, dither_mesh=False):
+        dist = math.sqrt((e1 - e0) ** 2 + (n1 - n0) ** 2 + (z1 - z0) ** 2)
+        ns = max(2, int(math.ceil(dist / step_l)) + 1)
+        t = np.linspace(0.0, 1.0, ns, dtype=np.float64)
+        es = e0 + (e1 - e0) * t
+        ns_a = n0 + (n1 - n0) * t
+        zs = z0 + (z1 - z0) * t
+        px, py, pd = camera.project(es, ns_a, zs)
+        ix = np.round(px + shift_x).astype(np.int32)
+        iy = np.round(py + shift_y).astype(np.int32)
+        v = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
+        if not v.any():
+            return
+        ix, iy, pd = ix[v], iy[v], pd[v]
+        if dither_mesh:
+            keep = ((ix + iy) & 1) == 0
+            ix, iy, pd = ix[keep], iy[keep], pd[keep]
+            if len(ix) == 0:
+                return
+        offs = ((0, 0), (1, 0)) if thick else ((0, 0),)
+        for ox, oy in offs:
+            tx = np.clip(ix + ox, 0, W - 1)
+            ty = np.clip(iy + oy, 0, H - 1)
+            win = pd < zbuf[ty, tx]
+            if win.any():
+                wy, wx = ty[win], tx[win]
+                zbuf[wy, wx] = pd[win]
+                rgb_buf[wy, wx] = col
+                mat_buf[wy, wx] = mat_c
+                obj_buf[wy, wx] = oid
+                norm_buf[wy, wx] = [0.25, -0.25, 0.93]
+                shadow_buf[wy, wx] = False
+
+    def _draw_3d_panel(e0, n0, e1, n1, z_bot, z_top, col_body, col_top=None, oid=230100, mesh_only=False):
+        hlen = math.hypot(e1 - e0, n1 - n0)
+        if hlen < 0.2:
+            return
+        nh = max(2, int(math.ceil(hlen / step_l)) + 1)
+        nv = max(2, int(math.ceil((z_top - z_bot) / step_z)) + 1)
+        th = np.linspace(0.0, 1.0, nh, dtype=np.float64)
+        tv = np.linspace(0.0, 1.0, nv, dtype=np.float64)
+        th_g, tv_g = np.meshgrid(th, tv)
+        es = (e0 + (e1 - e0) * th_g).ravel()
+        ns_a = (n0 + (n1 - n0) * th_g).ravel()
+        zs = (z_bot + (z_top - z_bot) * tv_g).ravel()
+        is_top_row = (tv_g >= (1.0 - 1.5 / max(2, nv))).ravel()
+        px, py, pd = camera.project(es, ns_a, zs)
+        ix = np.round(px + shift_x).astype(np.int32)
+        iy = np.round(py + shift_y).astype(np.int32)
+        v = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
+        if not v.any():
+            return
+        ix, iy, pd, is_top_row = ix[v], iy[v], pd[v], is_top_row[v]
+        if mesh_only:
+            keep = is_top_row | (((ix + iy) & 1) == 0)
+            ix, iy, pd, is_top_row = ix[keep], iy[keep], pd[keep], is_top_row[keep]
+            if len(ix) == 0:
+                return
+        win = pd < zbuf[iy, ix]
+        if win.any():
+            wy, wx = iy[win], ix[win]
+            zbuf[wy, wx] = pd[win]
+            if col_top is not None:
+                c_arr = np.where(is_top_row[win, None], col_top, col_body).astype(np.float32)
+            else:
+                c_arr = col_body
+            rgb_buf[wy, wx] = c_arr
+            mat_buf[wy, wx] = M_BRIDGE
+            obj_buf[wy, wx] = oid
+            norm_buf[wy, wx] = [0.22, -0.22, 0.94]
+            shadow_buf[wy, wx] = False
+
+    def _sample_dem(e_p, n_p):
+        cc = int(np.clip((e_p - E_MIN) / GRID_RES, 0, GRID_W - 1))
+        rr = int(np.clip((N_MAX - n_p) / GRID_RES, 0, GRID_H - 1))
+        return float(scene.dem[rr, cc])
+
+    for sf_i, sf in enumerate(scene.sports_fields):
+        fe_c, fn_c = float(sf["e"]), float(sf["n"])
+        L_f, W_f = float(sf["length"]), float(sf["width"])
+        ang = float(sf["angle"])
+        kind = sf["kind"]
+        if crop_box_lv95 is not None:
+            rad_c = 0.5 * math.hypot(L_f, W_f) + 12.0
+            if fe_c + rad_c < crop_box_lv95[0] or fe_c - rad_c > crop_box_lv95[2] or fn_c + rad_c < crop_box_lv95[1] or fn_c - rad_c > crop_box_lv95[3]:
+                continue
+        # Quick screen-space viewport cull
+        px_c, py_c, _ = camera.project(np.array([fe_c]), np.array([fn_c]), np.array([float(sf["z"])]))
+        r_scr = (0.65 * math.hypot(L_f, W_f)) / mpp + 40.0
+        if px_c[0] + shift_x + r_scr < 0 or px_c[0] + shift_x - r_scr > W or py_c[0] + shift_y + r_scr < 0 or py_c[0] + shift_y - r_scr > H:
+            continue
+
+        ca, sa = math.cos(ang), math.sin(ang)
+
+        def to_world(u_loc, v_loc):
+            e_w = fe_c + u_loc * ca - v_loc * sa
+            n_w = fn_c + u_loc * sa + v_loc * ca
+            return e_w, n_w, _sample_dem(e_w, n_w)
+
+        if kind in ("tennis", "tennis_pad"):
+            # 1. Crisp 3D Tennis Net (posts at v=+-6.2m, white headband at h=1.08m, dark-grey dithered mesh!)
+            e_l, n_l, z_l = to_world(0.0, -6.15)
+            e_r, n_r, z_r = to_world(0.0, 6.15)
+            z_net = 0.5 * (z_l + z_r)
+            _draw_3d_panel(
+                e_l, n_l, e_r, n_r, z_net + 0.12, z_net + 1.12,
+                col_body=np.array([48.0, 52.0, 58.0], dtype=np.float32),
+                col_top=np.array([244.0, 244.0, 240.0], dtype=np.float32),
+                oid=231000 + sf_i, mesh_only=True,
+            )
+            # Dark-green steel net posts
+            _draw_3d_seg(e_l, n_l, z_l, e_l, n_l, z_l + 1.25, [32.0, 68.0, 42.0], oid=231000 + sf_i, thick=True)
+            _draw_3d_seg(e_r, n_r, z_r, e_r, n_r, z_r + 1.25, [32.0, 68.0, 42.0], oid=231000 + sf_i, thick=True)
+            # Crisp white umpire chair beside one net post
+            eu, nu, zu = to_world(0.0, 6.95)
+            _draw_3d_seg(eu, nu, zu, eu, nu, zu + 2.05, [224.0, 224.0, 220.0], oid=231000 + sf_i, thick=True)
+
+            # 2. Dark-green windscreen back-fence along both baselines of the court surround!
+            hl_ap = max(14.2, 0.5 * L_f + 1.1)
+            hw_ap = max(7.0, 0.5 * W_f + 0.8)
+            for sgn_u in (-1.0, 1.0):
+                ef0, nf0, zf0 = to_world(sgn_u * hl_ap, -hw_ap)
+                ef1, nf1, zf1 = to_world(sgn_u * hl_ap, hw_ap)
+                zf_m = 0.5 * (zf0 + zf1)
+                # Bottom 1.75m solid dark-green privacy windscreen
+                _draw_3d_panel(
+                    ef0, nf0, ef1, nf1, zf_m, zf_m + 1.75,
+                    col_body=np.array([34.0, 74.0, 44.0], dtype=np.float32),
+                    col_top=np.array([48.0, 96.0, 56.0], dtype=np.float32),
+                    oid=231200 + sf_i, mesh_only=False,
+                )
+                # Top chain-link mesh up to 2.7m + steel posts
+                _draw_3d_panel(
+                    ef0, nf0, ef1, nf1, zf_m + 1.75, zf_m + 2.75,
+                    col_body=np.array([78.0, 88.0, 84.0], dtype=np.float32),
+                    col_top=np.array([116.0, 124.0, 122.0], dtype=np.float32),
+                    oid=231200 + sf_i, mesh_only=True,
+                )
+                for vp in np.linspace(-hw_ap, hw_ap, 4):
+                    ep, np_, zp = to_world(sgn_u * hl_ap, float(vp))
+                    _draw_3d_seg(ep, np_, zp, ep, np_, zp + 2.8, [64.0, 74.0, 72.0], oid=231200 + sf_i)
+
+        elif kind == "football":
+            hl = max(28.0, 0.5 * L_f - 2.2)
+            hw = max(18.0, 0.5 * W_f - 2.0)
+            goal_hw = 3.66
+            goal_h = 2.65
+            goal_d = 2.20
+
+            # 1. TRUE 3D WHITE FOOTBALL GOALS WITH NETS AT BOTH ENDS!
+            for sgn_u in (-1.0, 1.0):
+                u_front = sgn_u * hl
+                u_back = sgn_u * (hl + goal_d)
+                e_fl, n_fl, z_fl = to_world(u_front, -goal_hw)
+                e_fr, n_fr, z_fr = to_world(u_front, goal_hw)
+                e_bl, n_bl, z_bl = to_world(u_back, -goal_hw)
+                e_br, n_br, z_br = to_world(u_back, goal_hw)
+                zg = 0.5 * (z_fl + z_fr)
+                white_p = [246.0, 246.0, 242.0]
+                net_c = np.array([216.0, 224.0, 220.0], dtype=np.float32)
+
+                # Back net & side nets (dithered translucent white mesh!)
+                _draw_3d_panel(e_bl, n_bl, e_br, n_br, zg, zg + goal_h * 0.88, net_c, white_p, oid=232000 + sf_i, mesh_only=True)
+                _draw_3d_panel(e_fl, n_fl, e_bl, n_bl, zg, zg + goal_h * 0.88, net_c, white_p, oid=232000 + sf_i, mesh_only=True)
+                _draw_3d_panel(e_fr, n_fr, e_br, n_br, zg, zg + goal_h * 0.88, net_c, white_p, oid=232000 + sf_i, mesh_only=True)
+                # Crisp white twin posts, crossbar & top roof depth bars
+                _draw_3d_seg(e_fl, n_fl, zg, e_fl, n_fl, zg + goal_h, white_p, oid=232000 + sf_i, thick=True)
+                _draw_3d_seg(e_fr, n_fr, zg, e_fr, n_fr, zg + goal_h, white_p, oid=232000 + sf_i, thick=True)
+                _draw_3d_seg(e_fl, n_fl, zg + goal_h, e_fr, n_fr, zg + goal_h, white_p, oid=232000 + sf_i, thick=True)
+                _draw_3d_seg(e_fl, n_fl, zg + goal_h, e_bl, n_bl, zg + goal_h * 0.85, white_p, oid=232000 + sf_i)
+                _draw_3d_seg(e_fr, n_fr, zg + goal_h, e_br, n_br, zg + goal_h * 0.85, white_p, oid=232000 + sf_i)
+
+            # 2. Four Swiss red corner flags!
+            for sgn_u in (-1.0, 1.0):
+                for sgn_v in (-1.0, 1.0):
+                    ec, nc, zc = to_world(sgn_u * hl, sgn_v * hw)
+                    _draw_3d_seg(ec, nc, zc, ec, nc, zc + 1.65, [234.0, 234.0, 230.0], oid=232100 + sf_i)
+                    _draw_3d_seg(ec, nc, zc + 1.35, ec + 0.55, nc, zc + 1.55, [218.0, 42.0, 42.0], oid=232100 + sf_i, thick=True)
+
+            # 3. Team bench dugouts along the touchline!
+            for u_dug in (-10.0, 10.0):
+                ed0, nd0, zd0 = to_world(u_dug - 2.6, hw + 2.2)
+                ed1, nd1, zd1 = to_world(u_dug + 2.6, hw + 2.2)
+                zd_m = 0.5 * (zd0 + zd1)
+                _draw_3d_panel(
+                    ed0, nd0, ed1, nd1, zd_m, zd_m + 2.1,
+                    col_body=np.array([58.0, 82.0, 96.0], dtype=np.float32),
+                    col_top=np.array([214.0, 218.0, 222.0], dtype=np.float32),
+                    oid=232200 + sf_i,
+                )
+
+            # 4. Tall stadium floodlight masts around main pitches (glowing warm gold in night mode!)
+            if L_f >= 92.0:
+                lamp_mat = M_WINDOW_LIT if is_night else M_BRIDGE
+                lamp_col = [255.0, 240.0, 182.0] if is_night else [228.0, 232.0, 236.0]
+                for sgn_u in (-0.62, 0.62):
+                    for sgn_v in (-1.0, 1.0):
+                        em, nm, zm = to_world(sgn_u * hl, sgn_v * (hw + 3.2))
+                        _draw_3d_seg(em, nm, zm, em, nm, zm + 14.5, [138.0, 144.0, 152.0], oid=232300 + sf_i, thick=True)
+                        # Floodlight crossbar lamp bank at top of mast
+                        el0, nl0, _ = to_world(sgn_u * hl - 1.1, sgn_v * (hw + 3.2))
+                        el1, nl1, _ = to_world(sgn_u * hl + 1.1, sgn_v * (hw + 3.2))
+                        _draw_3d_seg(el0, nl0, zm + 14.5, el1, nl1, zm + 14.5, lamp_col, mat_c=lamp_mat, oid=232300 + sf_i, thick=True)
+
+        elif kind == "multisport":
+            hl = max(10.0, 0.5 * L_f - 1.4)
+            for sgn_u in (-1.0, 1.0):
+                eb, nb, zb = to_world(sgn_u * (hl + 0.4), 0.0)
+                _draw_3d_seg(eb, nb, zb, eb, nb, zb + 3.4, [96.0, 102.0, 110.0], oid=233000 + sf_i)
+                e0_b, n0_b, _ = to_world(sgn_u * hl, -0.95)
+                e1_b, n1_b, _ = to_world(sgn_u * hl, 0.95)
+                _draw_3d_panel(e0_b, n0_b, e1_b, n1_b, zb + 2.8, zb + 3.85, np.array([238.0, 240.0, 242.0], dtype=np.float32), oid=233000 + sf_i)
+
+    # 5. Charming Swiss Pasture Details: Grazing Braunvieh & Holstein Cows in Kilchberg's Upper Farm Meadows!
+    if not is_night:
+        cow_herds = [
+            # Upper farm pasture beside the historic red-roofed farmstead (Brunnenmoos / Stocken ridge)
+            (2683312.0, 1242048.0, 0.3, 0), (2683319.0, 1242058.0, 1.1, 1), (2683328.0, 1242044.0, -0.5, 0),
+            (2683304.0, 1242068.0, 2.2, 1), (2683336.0, 1242063.0, 0.8, 0), (2683344.0, 1242052.0, -1.2, 1),
+            (2683295.0, 1242038.0, 0.2, 0), (2683322.0, 1242078.0, 1.8, 1),
+            # Upper sunlit meadow near Sportplatz Hochweid / ridge footpath
+            (2683228.0, 1241690.0, 0.6, 0), (2683236.0, 1241702.0, -0.8, 1), (2683246.0, 1241684.0, 1.4, 0),
+            (2683219.0, 1241712.0, 2.1, 1), (2683254.0, 1241706.0, 0.4, 0),
+        ]
+        for ci, (ce, cn, cang, cbreed) in enumerate(cow_herds):
+            if crop_box_lv95 is not None and not (crop_box_lv95[0] <= ce <= crop_box_lv95[2] and crop_box_lv95[1] <= cn <= crop_box_lv95[3]):
+                continue
+            cz = _sample_dem(ce, cn)
+            ca_c, sa_c = math.cos(cang), math.sin(cang)
+            body_c = [138.0, 96.0, 66.0] if cbreed == 0 else [234.0, 234.0, 228.0]
+            spot_c = [212.0, 198.0, 178.0] if cbreed == 0 else [42.0, 42.0, 46.0]
+            # Crisp 3D miniature cow torso + head
+            _draw_3d_seg(ce - 0.8 * ca_c, cn - 0.8 * sa_c, cz + 0.72, ce + 0.8 * ca_c, cn + 0.8 * sa_c, cz + 0.76, body_c, oid=234000 + ci, thick=True)
+            _draw_3d_seg(ce - 0.2 * ca_c, cn - 0.2 * sa_c, cz + 0.82, ce + 0.35 * ca_c, cn + 0.35 * sa_c, cz + 0.84, spot_c, oid=234000 + ci)
+            _draw_3d_seg(ce + 0.85 * ca_c, cn + 0.85 * sa_c, cz + 0.55, ce + 1.15 * ca_c, cn + 1.15 * sa_c, cz + 0.48, spot_c, oid=234000 + ci)
+
+    # 6. Crisp Static 90s Pixel-Art Parked Cars neatly aligned inside Parking Lots (Lindt, Bahnhof, Village)!
+    pk_rows, pk_cols = np.nonzero(scene.sem == G_PARKING)
+    if len(pk_rows) > 0:
+        # Subsample onto a clean 4.5m x 6.5m deterministic grid strictly inside G_PARKING
+        sel_pk = ((pk_rows % 9) == 4) & ((pk_cols % 11) == 5)
+        pr_s, pc_s = pk_rows[sel_pk], pk_cols[sel_pk]
+        car_pal = [
+            [218.0, 220.0, 224.0],  # Swiss silver/white
+            [52.0, 64.0, 86.0],     # Dark navy
+            [176.0, 44.0, 44.0],    # Swiss red
+            [74.0, 78.0, 84.0],     # Anthracite metallic
+            [184.0, 174.0, 152.0],  # Warm champagne
+            [44.0, 88.0, 68.0],     # Alpine dark green
+        ]
+        for pi_k in range(len(pr_s)):
+            rr_k, cc_k = int(pr_s[pi_k]), int(pc_s[pi_k])
+            kh = ((rr_k * 73856093) ^ (cc_k * 19349663)) & 0xFF
+            if (kh % 3) == 0:  # ~66% parking lot occupancy looks super authentic!
+                continue
+            pe_k = E_MIN + (cc_k + 0.5) * GRID_RES
+            pn_k = N_MAX - (rr_k + 0.5) * GRID_RES
+            if crop_box_lv95 is not None and not (crop_box_lv95[0] <= pe_k <= crop_box_lv95[2] and crop_box_lv95[1] <= pn_k <= crop_box_lv95[3]):
+                continue
+            # Quick screen cull
+            px_k, py_k, _ = camera.project(np.array([pe_k]), np.array([pn_k]), np.array([float(scene.dem[rr_k, cc_k])]))
+            if px_k[0] + shift_x < -12 or px_k[0] + shift_x > W + 12 or py_k[0] + shift_y < -12 or py_k[0] + shift_y > H + 12:
+                continue
+            pz_k = float(scene.dem[rr_k, cc_k])
+            ang_k = float(scene.road_ang[rr_k, cc_k]) + (math.pi * 0.5)
+            ck, sk = math.cos(ang_k), math.sin(ang_k)
+            ccol = car_pal[kh % len(car_pal)]
+            # Lower car body + upper cabin/windshield!
+            _draw_3d_seg(pe_k - 1.65 * ck, pn_k - 1.65 * sk, pz_k + 0.55, pe_k + 1.65 * ck, pn_k + 1.65 * sk, pz_k + 0.55, ccol, oid=235000 + pi_k, thick=True)
+            _draw_3d_seg(pe_k - 1.65 * ck, pn_k - 1.65 * sk, pz_k + 0.92, pe_k + 1.65 * ck, pn_k + 1.65 * sk, pz_k + 0.92, ccol, oid=235000 + pi_k, thick=True)
+            _draw_3d_seg(pe_k - 0.85 * ck, pn_k - 0.85 * sk, pz_k + 1.32, pe_k + 0.85 * ck, pn_k + 0.85 * sk, pz_k + 1.32, [68.0, 92.0, 118.0], oid=235000 + pi_k, thick=True)
+
+
 def _render_sculpted_pixel_art_trees_and_hedges(
     scene: SceneData,
     camera: IsometricCamera,
@@ -1266,47 +1837,57 @@ def _render_sculpted_pixel_art_trees_and_hedges(
     sun_vec: np.ndarray,
     crop_box_lv95: tuple[float, float, float, float] | None,
 ) -> None:
-    """STAGE 4: Render 100% distinctly drawn 90s pixel-art 3D trees (14,639 real LiDAR trees)
-    and neat trimmed garden hedges — zero blurry aerial photo blobs!"""
+    """STAGE 4 (V6.0): Hand-crafted 90s pixel-art 3D trees (6 distinct botanical archetypes,
+    randomized asymmetric multi-cluster leaf crowns, 5-tone leaf dithering & grounded canopy shadows)
+    plus sculpted beveled garden boxwood hedges & flowering shrubs!"""
     # -------------------------------------------------------------------------
-    # 4A. Neat Beveled 90s Pixel-Art Garden Hedges (hedge_mask)
+    # 4A. Sculpted 3D Beveled Boxwood Hedges & Flowering Garden Bushes
     # -------------------------------------------------------------------------
-    sub_hedge_raw = sub_mask & scene.hedge_mask[r0:r1, c0:c1]
-    # Drop tiny noisy 1px roadside flecks so only genuine trimmed garden hedges render cleanly!
-    sub_hedge = ndimage.binary_opening(sub_hedge_raw, structure=np.ones((2, 2), dtype=bool))
+    sub_hedge = sub_mask & scene.hedge_mask[r0:r1, c0:c1]
     if sub_hedge.any():
         hr, hc = np.nonzero(sub_hedge)
         he = E_MIN + (hc + c0 + 0.5) * GRID_RES
         hn = N_MAX - (hr + r0 + 0.5) * GRID_RES
         hz_base = sub_dem[hr, hc]
-        hh = np.clip(sub_chm[hr, hc], 0.90, 1.95)
-        h_hash = ((hc + c0) * 19 + (hr + r0) * 37) & 0xF
-        # 3-tone crisp privet / boxwood hedge leaf clusters (natural botanical emerald)
+        hh = np.clip(sub_chm[hr, hc], 0.95, 2.05)
+        h_hash = (((hc + c0) * 73856093) ^ ((hr + r0) * 19349663)) & 0xFF
+        # Rich 3-tone leafy privet/boxwood top + subtle garden rose/hydrangea blossoms!
         h_top_col = np.where(
-            (h_hash < 5)[:, None],
-            [68.0, 114.0, 50.0],
-            np.where((h_hash < 11)[:, None], [52.0, 96.0, 42.0], [38.0, 76.0, 34.0]),
+            (h_hash < 72)[:, None],
+            [82.0, 134.0, 56.0],
+            np.where((h_hash < 176)[:, None], [58.0, 108.0, 46.0], [42.0, 86.0, 38.0]),
         ).astype(np.float32)
-        h_side_col = h_top_col * 0.78
-        # Single shared OID for all hedges so sel-out outlines only appear on outer boundary!
+        # Occasional delicate garden blossoms on residential hedges
+        is_rose = (h_hash == 251)
+        is_lav = (h_hash == 253)
+        h_top_col[is_rose] = [226.0, 152.0, 166.0]
+        h_top_col[is_lav] = [214.0, 198.0, 146.0]
+        h_side_col = h_top_col * 0.72
+        h_base_col = h_top_col * 0.54
         h_oid = np.full(len(hr), 190000, dtype=np.int32)
 
-        for frac_z, is_top in ((0.40, False), (0.74, False), (1.0, True)):
+        # Render 4 sculpted height tiers (grounded dark base -> leafy mid sides -> sunlit rounded crown)
+        for frac_z, col_arr, nz_v, rad_offs in (
+            (0.25, h_base_col, 0.55, ((0, 0), (1, 0), (0, 1), (1, 1))),
+            (0.55, h_side_col, 0.70, ((0, 0), (1, 0), (0, 1), (1, 1))),
+            (0.84, h_side_col * 1.12, 0.85, ((0, 0), (1, 0), (0, 1))),
+            (1.00, h_top_col, 0.98, ((0, 0), (1, 0))),
+        ):
             zc = hz_base + hh * frac_z
             px, py, pd = camera.project(he, hn, zc)
             ix = np.round(px + shift_x).astype(np.int32)
             iy = np.round(py + shift_y).astype(np.int32)
-            vh = (ix >= 0) & (ix < W - 1) & (iy >= 0) & (iy < H - 1)
+            vh = (ix >= 0) & (ix < W - 2) & (iy >= 0) & (iy < H - 2)
             if not vh.any():
                 continue
             ix, iy, pd = ix[vh], iy[vh], pd[vh]
-            col_use = h_top_col[vh] if is_top else h_side_col[vh]
+            col_use = col_arr[vh]
             oid_use = h_oid[vh]
             sh_use = sub_shadow[hr[vh], hc[vh]]
             ord_h = np.argsort(pd)[::-1]
             ix, iy, pd = ix[ord_h], iy[ord_h], pd[ord_h]
             col_use, oid_use, sh_use = col_use[ord_h], oid_use[ord_h], sh_use[ord_h]
-            for ox, oy in ((0, 0), (1, 0), (0, 1)):
+            for ox, oy in rad_offs:
                 tx, ty = ix + ox, iy + oy
                 db = pd + (0.04 if (ox or oy) else 0.0)
                 win = db < zbuf[ty, tx]
@@ -1315,12 +1896,12 @@ def _render_sculpted_pixel_art_trees_and_hedges(
                 mat_buf[ty[win], tx[win]] = M_TREE
                 obj_buf[ty[win], tx[win]] = oid_use[win]
                 shadow_buf[ty[win], tx[win]] = sh_use[win]
-                norm_buf[ty[win], tx[win], 0] = 0.0 if is_top else 0.45
-                norm_buf[ty[win], tx[win], 1] = 0.0 if is_top else -0.45
-                norm_buf[ty[win], tx[win], 2] = 0.96 if is_top else 0.65
+                norm_buf[ty[win], tx[win], 0] = 0.0 if nz_v > 0.9 else 0.35
+                norm_buf[ty[win], tx[win], 1] = 0.0 if nz_v > 0.9 else -0.35
+                norm_buf[ty[win], tx[win], 2] = nz_v
 
     # -------------------------------------------------------------------------
-    # 4B. All 14,639 Individual Real 3D Pixel-Art Trees!
+    # 4B. All 16,000+ Individual Hand-Crafted 90s Pixel-Art 3D Trees!
     # -------------------------------------------------------------------------
     te = scene.tree_e
     tn = scene.tree_n
@@ -1338,14 +1919,13 @@ def _render_sculpted_pixel_art_trees_and_hedges(
     if len(te) == 0:
         return
 
-    # Screen-space frustum cull for fast tiled rendering
     px_base, py_base, pd_base = camera.project(te, tn, tz)
     px_top, py_top, _ = camera.project(te, tn, tz + th)
-    r_px_est = (trad * 1.35 / camera.mpp) + 10.0
+    r_px_est = (trad * 1.45 / camera.mpp) + 12.0
     in_vp = (
         (px_base + shift_x + r_px_est >= -6.0)
         & (px_base + shift_x - r_px_est <= W + 6.0)
-        & (py_base + shift_y + 10.0 >= -6.0)
+        & (py_base + shift_y + 12.0 >= -6.0)
         & (py_top + shift_y - r_px_est <= H + 6.0)
     )
     if not in_vp.any():
@@ -1360,32 +1940,33 @@ def _render_sculpted_pixel_art_trees_and_hedges(
     py_top = py_top[in_vp] + shift_y
     pd_base = pd_base[in_vp]
 
-    # Sort trees back-to-front by camera depth
     t_ord = np.argsort(pd_base)[::-1]
     te, tn, tz, th, trad, tsp, t_ids = (
         te[t_ord], tn[t_ord], tz[t_ord], th[t_ord], trad[t_ord], tsp[t_ord], t_ids[t_ord]
     )
     px_base, py_base, py_top, pd_base = px_base[t_ord], py_base[t_ord], py_top[t_ord], pd_base[t_ord]
 
-    # Species 4-tone natural botanical SVGA pixel-art foliage ramps: [deep_shadow, mid_shade, sunlit_mid, highlight]
-    # Calibrated for Stage 5 sun lighting so greens look rich, painterly & organic (never neon lime!)
+    # 6 Botanical 5-Tone Painterly 90s Pixel-Art Foliage Ramps:
+    # [0=deep_under_shadow, 1=cool_mid_shade, 2=rich_mid_leaf, 3=sunlit_leaf, 4=crisp_sun_tip]
     SPECIES_RAMPS = np.array(
         [
-            # 0: Deep Swiss Oak / Beech (rich forest emerald)
-            [[18.0, 44.0, 24.0], [32.0, 72.0, 34.0], [52.0, 102.0, 44.0], [78.0, 132.0, 56.0]],
-            # 1: Sunlit Linden / Maple / Meadow Tree (warm olive-emerald)
-            [[24.0, 52.0, 26.0], [42.0, 86.0, 36.0], [66.0, 118.0, 48.0], [98.0, 148.0, 62.0]],
-            # 2: Alpine Conifer (Spruce / Silver Fir — cool pine blue-green)
-            [[14.0, 34.0, 28.0], [24.0, 56.0, 42.0], [38.0, 80.0, 56.0], [58.0, 106.0, 72.0]],
-            # 3: Slender Cypress / Lombardy Poplar
-            [[18.0, 40.0, 28.0], [30.0, 66.0, 40.0], [46.0, 92.0, 52.0], [70.0, 118.0, 66.0]],
-            # 4: Copper Beech (Blutbuche — deep burgundy-plum)
-            [[38.0, 18.0, 22.0], [66.0, 30.0, 34.0], [98.0, 46.0, 46.0], [132.0, 70.0, 64.0]],
+            # 0: Majestic Swiss Oak / Beech (rich deep forest emerald -> warm sunlit tips)
+            [[14.0, 36.0, 24.0], [24.0, 58.0, 32.0], [40.0, 88.0, 40.0], [64.0, 120.0, 50.0], [94.0, 148.0, 62.0]],
+            # 1: Sunlit Linden / Birch / Fruit Orchard (warm olive -> golden-apple leaf clusters)
+            [[20.0, 46.0, 24.0], [34.0, 76.0, 34.0], [56.0, 110.0, 44.0], [86.0, 142.0, 56.0], [122.0, 172.0, 70.0]],
+            # 2: Alpine Spruce / Silver Fir (cool mountain blue-green needles)
+            [[12.0, 30.0, 26.0], [20.0, 48.0, 40.0], [32.0, 72.0, 52.0], [48.0, 96.0, 66.0], [68.0, 122.0, 80.0]],
+            # 3: Slender Cypress / Lombardy Poplar (refined Mediterranean-Zürichsee green)
+            [[16.0, 36.0, 26.0], [26.0, 60.0, 38.0], [40.0, 86.0, 50.0], [60.0, 114.0, 62.0], [86.0, 140.0, 74.0]],
+            # 4: Stately Estate Copper Beech (refined deep aubergine-plum -> warm bronze-burgundy)
+            [[34.0, 18.0, 24.0], [56.0, 26.0, 32.0], [82.0, 38.0, 42.0], [112.0, 54.0, 54.0], [142.0, 74.0, 68.0]],
+            # 5: Spring Cherry / Apple Blossom Tree (dusty rose shadow -> soft pink -> sunlit creamy-white petals!)
+            [[116.0, 68.0, 80.0], [164.0, 106.0, 120.0], [206.0, 150.0, 164.0], [234.0, 196.0, 206.0], [250.0, 232.0, 236.0]],
         ],
         dtype=np.float32,
     )
 
-    # Precompute screen-space lighting vector (from sun_vec projected onto screen +X, -Y, and front-normal +Z)
+    # Precompute screen-space lighting vector
     e_right, e_depth, sp_c, cp_c = camera.basis
     sx_l = float(sun_vec[0] * e_right[0] + sun_vec[1] * e_right[1])
     sd_l = float(sun_vec[0] * e_depth[0] + sun_vec[1] * e_depth[1])
@@ -1398,9 +1979,8 @@ def _render_sculpted_pixel_art_trees_and_hedges(
     mpp = camera.mpp
     z_px_per_m = (cp_c * camera.z_exag) / mpp
 
-    # Render each individual tree with natural billowing 90s pixel-art proportions & per-tree obj_buf ID!
     for i in range(len(te)):
-        sp_k = int(tsp[i])
+        sp_k = min(5, int(tsp[i]))
         tid = int(t_ids[i])
         oid = 100000 + tid
         h_m = float(th[i])
@@ -1409,34 +1989,61 @@ def _render_sculpted_pixel_art_trees_and_hedges(
         cy0 = float(py_base[i])
         d0 = float(pd_base[i])
 
-        # Natural botanical proportions: broadleaf trees have wide rounded crowns (never vertical pickles!)
-        if sp_k in (0, 1, 4):
-            r_px = max(3.6, (r_m * 1.24) / mpp)
-            h_px = max(7.0, min(h_m * z_px_per_m, r_px * 2.55))
-            crown_ry = max(3.4, min(h_px * 0.44, r_px * 0.94))
-            trunk_h_px = max(2.2, h_px - crown_ry * 1.92)
-        else:
-            r_px = max(3.0, (r_m * 1.05) / mpp)
-            h_px = max(8.0, min(h_m * z_px_per_m, r_px * 3.8))
-            trunk_h_px = max(1.8, h_px * 0.14)
-            crown_ry = max(3.2, 0.5 * (h_px - trunk_h_px))
+        # Deterministic per-tree variation seeds (NO two trees share the same silhouette!)
+        s0 = ((tid * 73856093) ^ 0x5A5A) & 0xFFFF
+        s1 = ((tid * 19349663) ^ 0xA53C) & 0xFFFF
+        s2 = ((tid * 83492791) ^ 0x3C71) & 0xFFFF
+        w_var = 0.88 + 0.24 * ((s0 & 255) / 255.0)
+        h_var = 0.90 + 0.20 * (((s0 >> 8) & 255) / 255.0)
 
-        # 1. Draw crisp dark timber trunk beneath crown
+        if sp_k in (0, 1, 4, 5):
+            r_px = max(3.6, (r_m * 1.24 * w_var) / mpp)
+            h_px = max(7.0, min(h_m * z_px_per_m * h_var, r_px * 2.55))
+            crown_ry = max(3.4, min(h_px * 0.45, r_px * 0.92))
+            trunk_h_px = max(2.4, h_px - crown_ry * 1.88)
+        else:
+            r_px = max(3.0, (r_m * 1.06 * w_var) / mpp)
+            h_px = max(8.5, min(h_m * z_px_per_m * h_var, r_px * 3.9))
+            trunk_h_px = max(1.8, h_px * 0.14)
+            crown_ry = max(3.4, 0.5 * (h_px - trunk_h_px))
+
+        # 0. Soft Grounded Canopy Contact Shadow directly on ground beneath tree!
+        sh_rx = int(math.ceil(r_px * 0.88))
+        sh_ry = max(2, int(math.ceil(r_px * 0.40)))
+        sx0 = max(0, int(round(cx0 - sh_rx * 0.75)))
+        sx1 = min(W - 1, int(round(cx0 + sh_rx * 1.10)))
+        sy0 = max(0, int(round(cy0 - sh_ry * 0.65)))
+        sy1 = min(H - 1, int(round(cy0 + sh_ry * 0.85)))
+        if sx1 >= sx0 and sy1 >= sy0:
+            sxs = np.arange(sx0, sx1 + 1, dtype=np.float32)
+            sys = np.arange(sy0, sy1 + 1, dtype=np.float32)
+            sgx, sgy = np.meshgrid(sxs, sys)
+            sr2 = ((sgx - (cx0 + r_px * 0.16)) / max(1.5, sh_rx)) ** 2 + ((sgy - (cy0 + 0.5)) / max(1.2, sh_ry)) ** 2
+            in_sh = (sr2 <= 1.0) & (mat_buf[sy0 : sy1 + 1, sx0 : sx1 + 1] == M_GROUND) & (zbuf[sy0 : sy1 + 1, sx0 : sx1 + 1] > (d0 - 3.5))
+            # Soft dithered edge on outer ring of contact shadow
+            outer_sh = in_sh & (sr2 > 0.58)
+            dith_keep = (((sgx.astype(np.int32) + sgy.astype(np.int32)) & 1) == 0)
+            apply_sh = (in_sh & (~outer_sh)) | (outer_sh & dith_keep)
+            if apply_sh.any():
+                rgb_buf[sy0 : sy1 + 1, sx0 : sx1 + 1][apply_sh] *= 0.80
+
+        # 1. Crisp warm timber trunk (+ subtle root flare & visible Y-fork on taller broadleaf trees)
         tx_i = int(round(cx0))
         ty_bot = int(round(cy0))
-        ty_top = int(round(cy0 - trunk_h_px - 2.0))
-        tw_half = 1 if r_px >= 7.5 else 0
+        ty_top = int(round(cy0 - trunk_h_px - 2.5))
+        tw_half = 1 if r_px >= 6.8 else 0
         y_lo_t = max(0, ty_top)
         y_hi_t = min(H - 1, ty_bot)
         x_lo_t = max(0, tx_i - tw_half)
         x_hi_t = min(W - 1, tx_i + tw_half)
         if y_hi_t >= y_lo_t and x_hi_t >= x_lo_t:
             sl_z = zbuf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1]
-            d_tr = d0 + 0.15
+            d_tr = d0 + 0.14
             w_tr = d_tr < sl_z
             if w_tr.any():
                 sl_z[w_tr] = d_tr
-                rgb_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = [84.0, 58.0, 38.0]
+                bark_c = [152.0, 144.0, 132.0] if (sp_k == 1 and (s2 & 3) == 0) else [86.0, 60.0, 40.0]
+                rgb_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = bark_c
                 mat_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = M_TRUNK
                 obj_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = oid
                 norm_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = [0.5, -0.5, 0.35]
@@ -1446,11 +2053,11 @@ def _render_sculpted_pixel_art_trees_and_hedges(
         crown_bot_y = cy0 - trunk_h_px
         crown_top_y = crown_bot_y - crown_ry * 2.0
         crown_cy = 0.5 * (crown_bot_y + crown_top_y)
-        pad_x = int(math.ceil(r_px * 1.25)) + 1
+        pad_x = int(math.ceil(r_px * 1.35)) + 2
 
         x0_b = max(0, int(math.floor(cx0)) - pad_x)
         x1_b = min(W - 1, int(math.ceil(cx0)) + pad_x)
-        y0_b = max(0, int(math.floor(crown_top_y)) - 3)
+        y0_b = max(0, int(math.floor(crown_top_y)) - 4)
         y1_b = min(H - 1, int(math.ceil(crown_bot_y)) + 2)
         if x1_b < x0_b or y1_b < y0_b:
             continue
@@ -1461,12 +2068,13 @@ def _render_sculpted_pixel_art_trees_and_hedges(
         dx = gx - cx0
         v_h = (crown_bot_y - gy) / max(1.0, (crown_bot_y - crown_top_y))
 
-        # Deterministic per-tree silhouette & slight hue variation
-        s1 = ((tid * 73856093) ^ 0x5A5A) & 0xFF
-        jitter_x = ((s1 / 255.0) - 0.5) * 0.32 * r_px
+        # Slight deterministic per-tree brightness/hue shift so adjacent forest trees read as individuals!
         ramp = SPECIES_RAMPS[sp_k]
+        hue_shift = (((s2 & 31) / 31.0) - 0.5) * 0.14
+        if abs(hue_shift) > 0.01:
+            ramp = np.clip(ramp * np.array([1.0 + hue_shift * 0.8, 1.0 + hue_shift * 0.5, 1.0 - hue_shift * 0.4], dtype=np.float32), 8.0, 252.0)
 
-        # True non-periodic 2D spatial hashes (uint32 avalanche mixing — ZERO diagonal stripes!)
+        # True non-periodic 2D spatial hashes for crisp 90s pixel-art leaf-cluster stippling!
         ix = gx.astype(np.uint32)
         iy = gy.astype(np.uint32)
         cx2 = ix >> np.uint32(1)
@@ -1484,55 +2092,72 @@ def _render_sculpted_pixel_art_trees_and_hedges(
         bayer_t = BAYER_4X4[iy & np.uint32(3), ix & np.uint32(3)]
 
         if sp_k == 2:
-            # ALPINE SPRUCE / FIR CONIFER: 4 stacked scalloped conical pine tiers with organic pine needles!
-            in_v = (v_h >= -0.04) & (v_h <= 1.04)
+            # ALPINE SPRUCE / SILVER FIR: 5 distinct scalloped drooping conifer bough tiers!
+            in_v = (v_h >= -0.04) & (v_h <= 1.05)
             v_c = np.clip(v_h, 0.0, 1.0)
-            tier_wave = 0.74 + 0.32 * (1.0 - ((v_c * 4.0) % 1.0))
-            half_w_y = np.maximum(0.9, r_px * (1.0 - 0.88 * v_c) * tier_wave)
-            edge_n = clump_2x2 * 1.15 + micro_1x1 * 0.65
+            n_tiers = 5.0 if h_px >= 14.0 else 4.0
+            t_ph = (v_c * n_tiers) % 1.0
+            # Scalloped bough flare at bottom of each tier + drooping outer tips
+            tier_wave = 0.62 + 0.44 * ((1.0 - t_ph) ** 0.85)
+            half_w_y = np.maximum(0.85, r_px * (1.02 - 0.90 * v_c) * tier_wave)
+            edge_n = clump_2x2 * 1.45 + micro_1x1 * 0.85
             nx_n = dx / np.maximum(1.0, half_w_y + edge_n)
             inside = in_v & (np.abs(nx_n) <= 1.0)
             if not inside.any():
                 continue
             nz_n = np.sqrt(np.maximum(0.05, 1.0 - np.minimum(0.98, nx_n * nx_n)))
-            ny_n = 0.28 + 0.45 * v_c - 0.28 * (((v_c * 4.0) % 1.0))
-            tier_sh = np.where(((v_c * 4.0) % 1.0) < 0.26, -0.26, 0.0)
-            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s + tier_sh + clump_2x2 * 0.34 + micro_1x1 * 0.16 + bayer_t * 0.22
+            ny_n = 0.25 + 0.48 * v_c - 0.34 * t_ph
+            # Crisp dark shadow tucked underneath each overlapping pine bough tier
+            tier_sh = np.where(t_ph > 0.72, -0.32, np.where(t_ph < 0.22, 0.16, 0.0))
+            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s + tier_sh + clump_2x2 * 0.46 + micro_1x1 * 0.22 + bayer_t * 0.18
             d_surf = d0 - nz_n * (r_m * 0.78) - v_c * (h_m * 0.45 * sp_c)
 
         elif sp_k == 3:
-            # SLENDER CYPRESS / LOMBARDY POPLAR: Crisp tall flame-shaped spire with leafy edge texture!
-            in_v = (v_h >= -0.02) & (v_h <= 1.04)
+            # SLENDER CYPRESS / LOMBARDY POPLAR: Feathery asymmetric spire!
+            in_v = (v_h >= -0.02) & (v_h <= 1.05)
             v_c = np.clip(v_h, 0.0, 1.0)
-            flame = np.sin(np.power(v_c, 0.72) * math.pi)
-            half_w_y = np.maximum(0.9, r_px * (0.28 + 0.85 * flame) + micro_1x1 * 0.6)
+            flame = np.sin(np.power(v_c, 0.70) * math.pi)
+            half_w_y = np.maximum(0.85, r_px * (0.24 + 0.86 * flame) + clump_2x2 * 0.9 + micro_1x1 * 0.65)
             nx_n = dx / half_w_y
             inside = in_v & (np.abs(nx_n) <= 1.0)
             if not inside.any():
                 continue
             nz_n = np.sqrt(np.maximum(0.05, 1.0 - np.minimum(0.98, nx_n * nx_n)))
             ny_n = (v_c - 0.45) * 0.8
-            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s + clump_2x2 * 0.32 + micro_1x1 * 0.14 + bayer_t * 0.20
+            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s + clump_2x2 * 0.42 + micro_1x1 * 0.18 + bayer_t * 0.18
             d_surf = d0 - nz_n * (r_m * 0.75) - v_c * (h_m * 0.45 * sp_c)
 
         else:
-            # BROADLEAF DECIDUOUS (Oak, Beech, Linden, Maple, Copper Beech):
-            # Wide, billowing 6-puff 90s pixel-art leaf canopy with organic leaf-cluster stipple & nibbled rim!
+            # BROADLEAF DECIDUOUS & SPRING BLOSSOM (Oak, Beech, Linden, Copper Beech, Cherry Blossom):
+            # Per-tree randomized asymmetric 9-cluster organic leafy bough canopy (ZERO cloned broccoli balls!)
             dy_c = gy - crown_cy
+            jx1 = (((s1 & 15) / 15.0) - 0.5) * 0.36 * r_px
+            jy1 = ((((s1 >> 4) & 15) / 15.0) - 0.5) * 0.24 * crown_ry
+            jx2 = ((((s1 >> 8) & 15) / 15.0) - 0.5) * 0.34 * r_px
+            jy2 = ((((s1 >> 12) & 15) / 15.0) - 0.5) * 0.24 * crown_ry
+            asym = ((((s2 >> 6) & 15) / 15.0) - 0.5) * 0.26 * r_px
+
             lobes = (
-                (0.0, -0.22 * crown_ry, 0.68 * r_px, 0.66 * crown_ry),
-                (-0.52 * r_px + jitter_x * 0.35, 0.14 * crown_ry, 0.60 * r_px, 0.56 * crown_ry),
-                (0.52 * r_px + jitter_x * 0.35, 0.12 * crown_ry, 0.60 * r_px, 0.56 * crown_ry),
-                (-0.32 * r_px, -0.44 * crown_ry, 0.52 * r_px, 0.48 * crown_ry),
-                (0.30 * r_px, -0.38 * crown_ry, 0.50 * r_px, 0.46 * crown_ry),
-                (0.06 * r_px, 0.32 * crown_ry, 0.62 * r_px, 0.48 * crown_ry),
+                # Upper sunlit bough clusters
+                (asym * 0.6 + jx1 * 0.4, -0.44 * crown_ry + jy1 * 0.5, 0.52 * r_px, 0.46 * crown_ry),
+                (-0.42 * r_px + jx2 * 0.5, -0.34 * crown_ry + jy2 * 0.5, 0.46 * r_px, 0.42 * crown_ry),
+                (0.42 * r_px + jx1 * 0.5, -0.28 * crown_ry - jy1 * 0.4, 0.46 * r_px, 0.42 * crown_ry),
+                # Mid-crown spreading leafy boughs
+                (-0.62 * r_px + jx1 * 0.3, 0.08 * crown_ry + jy2 * 0.5, 0.48 * r_px, 0.44 * crown_ry),
+                (0.60 * r_px - jx2 * 0.3, 0.12 * crown_ry + jy1 * 0.4, 0.48 * r_px, 0.44 * crown_ry),
+                (0.04 * r_px + asym * 0.4, -0.08 * crown_ry, 0.58 * r_px, 0.52 * crown_ry),
+                # Lower shaded bough skirt (slightly irregular so bottom doesn't look cut with scissors)
+                (-0.32 * r_px + jx2 * 0.4, 0.34 * crown_ry, 0.46 * r_px, 0.38 * crown_ry),
+                (0.32 * r_px + jx1 * 0.4, 0.32 * crown_ry, 0.46 * r_px, 0.38 * crown_ry),
+                (0.0, 0.40 * crown_ry + jy2 * 0.3, 0.48 * r_px, 0.36 * crown_ry),
             )
             best_z = np.full(gx.shape, -1.0, dtype=np.float32)
             best_nx = np.zeros(gx.shape, dtype=np.float32)
             best_ny = np.zeros(gx.shape, dtype=np.float32)
-            for l_ox, l_oy, l_rx, l_ry in lobes:
-                ux = (dx - l_ox) / max(1.5, l_rx)
-                uy = (dy_c - l_oy) / max(1.5, l_ry)
+            best_lobe_bias = np.zeros(gx.shape, dtype=np.float32)
+            for l_idx, (l_ox, l_oy, l_rx, l_ry) in enumerate(lobes):
+                ux = (dx - l_ox) / max(1.4, l_rx)
+                uy = (dy_c - l_oy) / max(1.4, l_ry)
                 r2 = ux * ux + uy * uy
                 in_l = r2 < 1.0
                 if not in_l.any():
@@ -1542,21 +2167,24 @@ def _render_sculpted_pixel_art_trees_and_hedges(
                 best_z[better] = lz[better]
                 best_nx[better] = ux[better]
                 best_ny[better] = -uy[better]
+                # Subtle self-shadowing depth between upper vs lower overlapping leaf boughs!
+                best_lobe_bias[better] = 0.14 if l_idx < 3 else (-0.16 if l_idx >= 6 else 0.0)
 
-            # Organic nibbled outer foliage rim so silhouettes look leafy instead of smooth ovals
-            rim_thresh = 0.08 + clump_2x2 * 0.16 + micro_1x1 * 0.10
+            # Organic nibbled leafy perimeter silhouette (breaks smooth circles into crisp pixel foliage!)
+            rim_thresh = 0.14 + clump_2x2 * 0.24 + micro_1x1 * 0.14
             inside = best_z > np.maximum(0.0, rim_thresh)
             if not inside.any():
                 continue
             nz_n = best_z
-            nd_s = best_nx * lx_s + best_ny * ly_s + nz_n * lz_s
-            # Organic 2x2 leaf clusters + 1x1 leaf highlights + 4x4 Bayer ordered dither (breaks concentric rings!)
-            leaf_tex = clump_2x2 * 0.44 + micro_1x1 * 0.18 + bayer_t * 0.24
-            nd_s = nd_s + leaf_tex - np.clip(0.32 - v_h, 0.0, 0.35) * 0.52
+            nd_s = best_nx * lx_s + best_ny * ly_s + nz_n * lz_s + best_lobe_bias
+            # Crisp 90s pixel-art leaf-cluster texture (stronger clump stipple kills smooth airbrush look!)
+            leaf_tex = clump_2x2 * 0.56 + micro_1x1 * 0.24 + bayer_t * 0.18
+            nd_s = nd_s + leaf_tex - np.clip(0.34 - v_h, 0.0, 0.36) * 0.58
             d_surf = d0 - nz_n * (r_m * 0.82) - np.clip(v_h, 0.0, 1.0) * (h_m * 0.42 * sp_c)
 
-        # Quantize lighting into all 4 crisp hand-drawn 90s pixel-art leaf tones!
-        tone_idx = np.clip(np.floor((nd_s + 0.04) * 2.85).astype(np.int32), 0, 3)
+        # Quantize lighting into all 5 crisp hand-drawn 90s botanical pixel-art leaf tones
+        # (deep emerald & mid-green dominate; tone 4 sparks only on sunlit outer leaf tips!)
+        tone_idx = np.clip(np.floor((nd_s + 0.06) * 3.10).astype(np.int32), 0, 4)
 
         sub_z = zbuf[y0_b : y1_b + 1, x0_b : x1_b + 1]
         win = inside & (d_surf < sub_z)
@@ -1570,8 +2198,8 @@ def _render_sculpted_pixel_art_trees_and_hedges(
         rgb_buf[gy_w, gx_w] = ramp[tone_idx[wy, wx]]
         mat_buf[gy_w, gx_w] = M_TREE
         obj_buf[gy_w, gx_w] = oid
-        norm_buf[gy_w, gx_w, 0] = 0.20
-        norm_buf[gy_w, gx_w, 1] = -0.15
+        norm_buf[gy_w, gx_w, 0] = 0.18
+        norm_buf[gy_w, gx_w, 1] = -0.14
         norm_buf[gy_w, gx_w, 2] = 0.96
         shadow_buf[gy_w, gx_w] = False
 
@@ -1884,31 +2512,37 @@ def render_diorama(
                 s_d = gdepth[si]
                 s_sh = gsh[si]
                 s_nx, s_ny, s_nz = gnx[si], gny[si], gnz[si]
-                # Steep retaining wall (>44°) -> warm Swiss limestone masonry; moderate bank -> shaded terrain
+                # Steep retaining wall (>44°) -> warm Swiss Jura-limestone ashlar masonry; moderate bank -> shaded terrain
                 is_rwall = s_nz < 0.72
-                s_col = np.where(is_rwall[:, None], [146.0, 142.0, 134.0], gcol[si] * 0.86).astype(np.float32)
+                s_col = np.where(is_rwall[:, None], [156.0, 150.0, 138.0], gcol[si] * 0.88).astype(np.float32)
                 max_drop = np.clip(np.round((1.0 - s_nz) * 24.0).astype(np.int32), 2, 10)
                 for oy in range(2, 11):
                     act = max_drop >= oy
                     if not act.any():
                         continue
                     ai = np.nonzero(act)[0]
+                    # Subtle horizontal stone mortar course every 3px on retaining walls
+                    course_mul = 0.88 if (oy % 3 == 0) else 1.0
                     for ox in (0, 1):
                         tx = np.clip(s_ix[ai] + ox, 0, W - 1)
                         ty = np.clip(s_iy[ai] + oy, 0, H - 1)
-                        # Slight positive depth bias so skirt only fills true gaps behind foreground terrain
                         d_b = s_d[ai] + 0.16 + oy * 0.03
                         win = d_b <= zbuf[ty, tx]
                         if win.any():
                             wy, wx = ty[win], tx[win]
+                            w_ai = ai[win]
                             zbuf[wy, wx] = d_b[win]
-                            rgb_buf[wy, wx] = s_col[ai[win]]
+                            c_out = s_col[w_ai].copy()
+                            rw_w = is_rwall[w_ai]
+                            if rw_w.any():
+                                c_out[rw_w] *= course_mul
+                            rgb_buf[wy, wx] = c_out
                             mat_buf[wy, wx] = M_GROUND
                             obj_buf[wy, wx] = 0
-                            shadow_buf[wy, wx] = s_sh[ai[win]]
-                            norm_buf[wy, wx, 0] = s_nx[ai[win]]
-                            norm_buf[wy, wx, 1] = s_ny[ai[win]]
-                            norm_buf[wy, wx, 2] = np.maximum(0.45, s_nz[ai[win]])
+                            shadow_buf[wy, wx] = np.where(rw_w, False, s_sh[w_ai])
+                            norm_buf[wy, wx, 0] = s_nx[w_ai]
+                            norm_buf[wy, wx, 1] = s_ny[w_ai]
+                            norm_buf[wy, wx, 2] = np.maximum(0.58, s_nz[w_ai])
 
     # -------------------------------------------------------------------------
     # STAGE 2.5: True 3D Elevated Viaducts (Dorfstrasse!), Piers & SBB Catenary Portals!
@@ -1918,6 +2552,15 @@ def render_diorama(
         sub_mask, sub_dem, sub_shadow,
         zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
         crop_box_lv95,
+    )
+
+    # -------------------------------------------------------------------------
+    # STAGE 2.6: True 3D Sports Architecture (Tennis Nets/Fences, Football Goals/Floodlights!)
+    # -------------------------------------------------------------------------
+    _render_3d_sports_details(
+        scene, camera, shift_x, shift_y, W, H,
+        zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+        preset.is_night, crop_box_lv95,
     )
 
     # -------------------------------------------------------------------------
@@ -2082,7 +2725,7 @@ def render_diorama(
             f_mat = np.where(st_f == 1, M_ROOF, M_WALL).astype(np.uint8)
 
             # -----------------------------------------------------------------
-            # A. ROOF PIXELS: 100% Drawn 90s Pixel-Art Roofs (Clay Tiles, Flat Parapets & PV!)
+            # A. ROOF PIXELS (V6.0): Jewel-Like 90s Pixel-Art Roofs, Zero Blue Shadow Static!
             # -----------------------------------------------------------------
             rm = st_f == 1
             if rm.any():
@@ -2095,22 +2738,57 @@ def render_diorama(
                 r_kind = scene.bldg_roof_kind[r_bi]
                 pitched = r_norms[:, 2] < 0.93
 
-                # 1. Pitched Roofs: Crisp staggered 90s pixel-art clay/slate tile courses!
+                # 1. Pitched Roofs: Crisp overlapping Swiss clay/slate tile courses with sunlit top lip & dark overlap!
                 if pitched.any():
                     pi_r = np.nonzero(pitched)[0]
-                    course_idx = np.floor(rz_r[pi_r] * 1.65).astype(np.int32)
-                    in_course = (rz_r[pi_r] * 1.65) - course_idx
-                    u_tile = (ru_r[pi_r] * 1.85 + (course_idx & 1) * 0.5) % 1.0
-                    # Subtle per-tile tonal variation + crisp horizontal course shadow + vertical seam
-                    t_var = (((course_idx * 17 + np.floor(ru_r[pi_r] * 1.85).astype(np.int32) * 31) & 7) - 3.5) * 2.2
-                    r_alb[pi_r] = np.clip(r_alb[pi_r] + t_var[:, None], 28.0, 236.0)
-                    r_alb[pi_r[in_course < 0.24]] *= 0.86
-                    r_alb[pi_r[u_tile < 0.16]] *= 0.93
-                    # Crisp eave shadow at bottom edge of pitched roof
-                    eave_d = rz_r[pi_r] - scene.bldg_eave_z[r_bi[pi_r]]
-                    r_alb[pi_r[(eave_d >= -0.2) & (eave_d < 0.35)]] *= 0.85
+                    rz_p = rz_r[pi_r]
+                    ru_p = ru_r[pi_r]
+                    rb_p = r_bi[pi_r]
+                    course_f = rz_p * 1.80
+                    course_idx = np.floor(course_f).astype(np.int32)
+                    in_course = course_f - course_idx
+                    u_f = ru_p * 2.05 + (course_idx & 1) * 0.5
+                    u_idx = np.floor(u_f).astype(np.int32)
+                    u_tile = u_f - u_idx
 
-                # 2. Flat Roofs: Crisp perimeter parapet coping rim + inner shadow + clean gravel/green surface!
+                    # Organic per-tile warm/cool tonal variation (real kiln-fired Swiss clay tiles!)
+                    t_hash = ((course_idx * 73856093) ^ (u_idx * 19349663) ^ (rb_p * 40503)) & 15
+                    t_var = ((t_hash.astype(np.float32) / 15.0) - 0.5) * 16.0
+                    is_clay = r_kind[pi_r] == 0
+                    r_alb[pi_r] = np.clip(
+                        r_alb[pi_r] + np.where(is_clay[:, None], t_var[:, None] * np.array([1.15, 0.85, 0.65]), t_var[:, None] * 0.65),
+                        28.0, 238.0,
+                    )
+                    # Crisp 1px dark under-lap shadow + sunlit top ridge lip on each overlapping tile row!
+                    r_alb[pi_r[in_course < 0.25]] *= 0.80
+                    r_alb[pi_r[(in_course >= 0.76) & (in_course < 0.94)]] = np.minimum(242.0, r_alb[pi_r[(in_course >= 0.76) & (in_course < 0.94)]] * 1.07)
+                    # Subtle vertical tile side seam
+                    r_alb[pi_r[u_tile < 0.14]] *= 0.92
+                    # Crisp dark eave shadow band along bottom edge of pitched roof
+                    eave_d = rz_p - scene.bldg_eave_z[rb_p]
+                    r_alb[pi_r[(eave_d >= -0.25) & (eave_d < 0.38)]] *= 0.80
+
+                    # Crisp Velux roof skylights cleanly placed (1-2 per roof) on ~35% of medium pitched Swiss houses (NOT barns!)
+                    bldg_fw_arr = np.array([b["footprint_w"] for b in scene.buildings], dtype=np.float32)
+                    bldg_fl_arr = np.array([b["footprint_l"] for b in scene.buildings], dtype=np.float32)
+                    r_mid_z = 0.52 * scene.bldg_eave_z[rb_p] + 0.48 * bldg_z1[rb_p]
+                    has_sky = (
+                        ((rb_p % 3) == 1)
+                        & ((bldg_z1[rb_p] - scene.bldg_eave_z[rb_p]) >= 2.2)
+                        & (bldg_fw_arr[rb_p] <= 22.0)
+                        & (bldg_fl_arr[rb_p] <= 22.0)
+                        & (rb_p != 1715)
+                    )
+                    # Place 1-2 skylights neatly near roof center (|ru_p| <= 3.6m)
+                    sky_u = np.where((rb_p & 1) == 0, ru_p, np.abs(ru_p) - 2.15)
+                    sky_dz = rz_p - r_mid_z
+                    in_sky_frame = has_sky & (np.abs(sky_u) <= 0.68) & (np.abs(sky_dz) <= 0.56) & (eave_d >= 0.9)
+                    in_sky_glass = has_sky & (np.abs(sky_u) <= 0.50) & (np.abs(sky_dz) <= 0.40) & (eave_d >= 0.9)
+                    if in_sky_frame.any():
+                        r_alb[pi_r[in_sky_frame]] = [176.0, 180.0, 184.0]
+                        r_alb[pi_r[in_sky_glass]] = [58.0, 84.0, 118.0] if not preset.is_night else [242.0, 196.0, 108.0]
+
+                # 2. Flat Roofs: Clean limestone parapet coping + inner shadow + gravel ballast / lush sedum eco-roof!
                 flat = ~pitched
                 if flat.any():
                     fi_r = np.nonzero(flat)[0]
@@ -2118,39 +2796,58 @@ def render_diorama(
                     rx25 = np.floor((re_r[fi_r] - E_MIN) * 4.0).astype(np.int32)
                     ry25 = np.floor((rn_r[fi_r] - N_MIN) * 4.0).astype(np.int32)
                     rhash = ((rx25 * 73856093) ^ (ry25 * 19349663)) & 0xFF
-                    # Subtle 2-tone pixel gravel / sedum texture on flat interior
                     is_eco = r_kind[fi_r] == 3
-                    r_alb[fi_r[(~is_eco) & (rhash < 72)]] *= 0.95
-                    r_alb[fi_r[(~is_eco) & (rhash >= 188)]] *= 1.04
-                    r_alb[fi_r[is_eco & (rhash < 85)]] *= 0.88
+                    # Gravel ballast interior: subtle crisp pebble stipple + clean architectural expansion seams
+                    r_alb[fi_r[(~is_eco) & (rhash < 64)]] *= 0.94
+                    r_alb[fi_r[(~is_eco) & (rhash >= 192)]] *= 1.04
+                    f_seam = (~is_eco) & (est >= 3) & ((((re_r[fi_r] * 0.85 - rn_r[fi_r] * 0.52) % 8.5) < 0.28))
+                    r_alb[fi_r[f_seam]] *= 0.90
+                    # Sedum extensive green roof: lush multi-tone moss/sedum + neat gravel drainage rim near parapet!
+                    eco_drain = is_eco & (est == 3)
+                    r_alb[fi_r[is_eco & (rhash < 85)]] *= 0.87
                     r_alb[fi_r[is_eco & (rhash >= 175)]] *= 1.10
+                    r_alb[fi_r[eco_drain]] = [148.0, 146.0, 140.0]
 
-                    # Outer 0.50m crisp concrete/metal parapet coping rim & inner drop shadow!
+                    # Lindt Home of Chocolate (bi == 1443): Iconic 4 oval/rectangular glass atrium skylights!
+                    is_hoc_roof = r_bi[fi_r] == 1443
+                    if is_hoc_roof.any():
+                        hi_rf = np.nonzero(is_hoc_roof)[0]
+                        he_r, hn_r = re_r[fi_r[hi_rf]], rn_r[fi_r[hi_rf]]
+                        # Local roof axis along Lindt HoC building (angled ~-22 deg from North)
+                        ang_h = math.radians(-22.0)
+                        uh = (he_r - 2684094.0) * math.cos(ang_h) + (hn_r - 1241434.0) * math.sin(ang_h)
+                        vh = -(he_r - 2684094.0) * math.sin(ang_h) + (hn_r - 1241434.0) * math.cos(ang_h)
+                        on_sky_f = np.zeros(len(hi_rf), dtype=np.bool_)
+                        on_sky_g = np.zeros(len(hi_rf), dtype=np.bool_)
+                        for v_c in (-18.0, -6.0, 6.0, 18.0):
+                            on_sky_f |= (np.abs(uh) <= 4.4) & (np.abs(vh - v_c) <= 3.6)
+                            on_sky_g |= (np.abs(uh) <= 3.7) & (np.abs(vh - v_c) <= 2.9)
+                        if on_sky_f.any():
+                            r_alb[fi_r[hi_rf[on_sky_f]]] = [212.0, 214.0, 216.0]
+                            r_alb[fi_r[hi_rf[on_sky_g]]] = [64.0, 96.0, 134.0] if not preset.is_night else [248.0, 208.0, 118.0]
+
+                    # Outer 0.50m crisp light-limestone/aluminum parapet coping rim & inner drop shadow!
                     is_coping = est == 1
                     is_p_sh = est == 2
-                    r_alb[fi_r[is_coping]] = np.clip(r_alb[fi_r[is_coping]] * 0.45 + np.array([124.0, 124.0, 122.0]), 120.0, 224.0)
-                    r_alb[fi_r[is_p_sh]] *= 0.78
+                    r_alb[fi_r[is_coping]] = np.clip(r_alb[fi_r[is_coping]] * 0.35 + np.array([144.0, 142.0, 138.0]), 146.0, 228.0)
+                    r_alb[fi_r[is_p_sh]] *= 0.76
 
-                # 3. Crisp Geometric Rooftop Solar PV Arrays (detected from 25cm SWISSIMAGE deep-blue PV panels!)
-                raw_roof = sample_ortho_25cm(scene, re_r, rn_r).astype(np.float32)
-                raw_lum = 0.299 * raw_roof[:, 0] + 0.587 * raw_roof[:, 1] + 0.114 * raw_roof[:, 2]
-                is_pv = (
-                    (raw_roof[:, 2] > (raw_roof[:, 0] + 14.0))
-                    & (raw_roof[:, 2] > (raw_roof[:, 1] + 5.0))
-                    & (raw_lum >= 32.0)
-                    & (raw_lum <= 116.0)
-                )
+                # 3. Glitch-Free Architectural Rooftop Solar PV Arrays (strictly from morphologically verified pv_clean_05m!
+                # ZERO blue shadow static noise anywhere on roofs!)
+                pv_c05 = np.clip(((re_r - E_MIN) * 2.0).astype(np.int32), 0, GRID_W - 1)
+                pv_r05 = np.clip(((N_MAX - rn_r) * 2.0).astype(np.int32), 0, GRID_H - 1)
+                is_pv = scene.pv_clean_05m[pv_r05, pv_c05]
                 if is_pv.any():
                     pvi = np.nonzero(is_pv)[0]
-                    # Draw crisp dark-blue PV cells with 1px silver aluminum panel grid!
-                    pv_grid = (((re_r[pvi] * 0.95) % 1.0) < 0.11) | (((rn_r[pvi] * 0.95) % 1.0) < 0.11)
-                    r_alb[pvi] = [30.0, 52.0, 96.0]
-                    r_alb[pvi[pv_grid]] = [162.0, 174.0, 190.0]
+                    # Crisp deep-navy solar panels with clean 1px silver aluminum module grid!
+                    pv_grid = (((re_r[pvi] * 0.90) % 1.0) < 0.10) | (((rn_r[pvi] * 0.90) % 1.0) < 0.10)
+                    r_alb[pvi] = [32.0, 54.0, 96.0]
+                    r_alb[pvi[pv_grid]] = [166.0, 176.0, 190.0]
 
                 f_col[rm] = r_alb
 
             # -----------------------------------------------------------------
-            # B. WALL PIXELS: Realistic Per-Wall Swiss Facades, Doors, Shutters & Landmarks!
+            # B. WALL PIXELS: Rich Tactile Swiss Stucco, Shutters, Balconies & Landmarks!
             # -----------------------------------------------------------------
             wm = st_f == 0
             if wm.any():
@@ -2176,10 +2873,15 @@ def render_diorama(
                 d_center = w_u - 0.5 * (u_min_w + u_max_w)
                 edge_dist = np.minimum(u_local, wall_len - u_local)
 
-                # Crisp stone plinth at ground, cornice shadow under eaves, and subtle corner bevel!
-                w_base[h_rel < 0.55] *= 0.84
-                w_base[(top_dist > 0.0) & (top_dist < 0.42)] *= 0.80
-                w_base[(edge_dist < 0.28) & (wall_len > 3.2)] *= 0.93
+                # Subtle tactile plaster / stone masonry micro-texture (kills flat untextured wall boxes!)
+                wh_tex = ((np.floor(w_u * 3.0).astype(np.int32) * 73856093) ^ (np.floor(w_z * 3.0).astype(np.int32) * 19349663)) & 31
+                w_base[wh_tex < 6] *= 0.97
+                w_base[wh_tex > 26] = np.minimum(246.0, w_base[wh_tex > 26] * 1.025)
+
+                # Crisp stone foundation plinth, deep roof eave shadow, and subtle vertical corner shade!
+                w_base[h_rel < 0.65] *= 0.82
+                w_base[(top_dist > 0.0) & (top_dist < 0.50)] *= 0.78
+                w_base[(edge_dist < 0.28) & (wall_len > 3.2)] *= 0.92
 
                 # Buff-brick Lindt smokestack (bi == 1773)
                 is_chimney = w_bi == 1773
@@ -2197,10 +2899,13 @@ def render_diorama(
                     le, ln, lz, lh = w_e[hi_l], w_n[hi_l], w_z[hi_l], h_rel[hi_l]
                     lu = u_local[hi_l]
                     in_white_curve = (le >= 2684107.5) & (ln >= 1241401.5) & (ln <= 1241437.2)
-                    w_base[hi_l[in_white_curve]] = [236.0, 234.0, 228.0]
+                    w_base[hi_l[in_white_curve]] = [238.0, 236.0, 230.0]
+                    # Subtle horizontal glazed white brick courses on curved atrium!
+                    w_course = in_white_curve & (((lz * 1.8) % 1.0) < 0.16)
+                    w_base[hi_l[w_course]] *= 0.96
 
                     brick_m = ~in_white_curve
-                    bcourse = brick_m & (((lz * 2.4) % 1.0) < 0.28)
+                    bcourse = brick_m & (((lz * 2.4) % 1.0) < 0.24)
                     bpier = brick_m & (lh > 4.2) & (((lu % 4.6) < 0.45))
                     w_base[hi_l[bcourse]] *= 0.91
                     w_base[hi_l[bpier]] *= 0.93
@@ -2213,14 +2918,14 @@ def render_diorama(
                     lt_d = top_dist[hi_l]
                     gold_frieze = (
                         in_white_curve
-                        & (lt_d >= 0.65)
-                        & (lt_d <= 2.05)
+                        & (lt_d >= 0.70)
+                        & (lt_d <= 1.95)
                         & (((arc_u * 1.45) % 1.0) >= 0.28)
                         & (arc_u >= 3.5)
                     )
                     if gold_frieze.any():
                         gf_idx = hi_l[gold_frieze]
-                        w_base[gf_idx] = [224.0, 184.0, 74.0]
+                        w_base[gf_idx] = [228.0, 188.0, 74.0]
                         if preset.is_night:
                             f_mat[wi[gf_idx]] = M_WINDOW_LIT
 
@@ -2243,7 +2948,7 @@ def render_diorama(
                             w_base[hw_idx] = [255.0, 222.0, 138.0]
                             f_mat[wi[hw_idx]] = M_WINDOW_LIT
                         else:
-                            w_base[hw_idx] = [52.0, 72.0, 96.0]
+                            w_base[hw_idx] = [48.0, 68.0, 92.0]
                             f_mat[wi[hw_idx]] = M_WINDOW_DAY
 
                 # B1b. Main Seestrasse 204 Lindt & Sprüngli Complex (Building 1642, 1473, 1720)
@@ -2254,21 +2959,22 @@ def render_diorama(
                     mu = u_local[m_i]
                     mtd = top_dist[m_i]
 
+                    # Clean stately 1899 red clinker-brick wing with limestone pilasters & cornice (no noisy checker spam!)
                     wing_poly = mn >= 1241403.0
                     if wing_poly.any():
                         pi = m_i[wing_poly]
                         ph = mh[wing_poly]
                         pu = mu[wing_poly]
                         pz = mz[wing_poly]
-                        pcol = np.full((len(pi), 3), [162.0, 68.0, 52.0], dtype=np.float32)
-                        yellow_band = (((pz * 0.95) % 1.0) < 0.34) | ((pu % 3.6) < 0.72)
-                        pcol[yellow_band] = [214.0, 190.0, 138.0]
-                        pcol[ph < 4.5] = [146.0, 142.0, 134.0]
-                        frieze_z = (ph >= 15.0) & (ph < 16.8)
-                        checker = (((np.floor(pu * 1.4) + np.floor(pz * 1.4)).astype(np.int32)) & 1) == 0
-                        pcol[frieze_z] = np.where(checker[frieze_z, None], [218.0, 192.0, 134.0], [156.0, 62.0, 48.0])
-                        pcol[(ph >= 16.8) & (ph < 17.5)] = [92.0, 78.0, 70.0]
-                        pcol[(ph >= 17.5) & ((pu % 3.2) < 0.55)] = [216.0, 212.0, 202.0]
+                        pcol = np.full((len(pi), 3), [158.0, 66.0, 50.0], dtype=np.float32)
+                        brick_line = ((pz * 2.2) % 1.0) < 0.22
+                        pcol[brick_line] *= 0.90
+                        # Clean vertical limestone pilasters every 4.2m + crisp horizontal stringcourse per floor
+                        pilaster_l = (pu % 4.2) < 0.58
+                        string_c = ((ph % 4.1) < 0.34) & (ph >= 3.8)
+                        pcol[pilaster_l | string_c] = [212.0, 196.0, 158.0]
+                        pcol[ph < 4.2] = [148.0, 144.0, 136.0]
+                        pcol[(ph >= 15.8) & (ph < 16.9)] = [216.0, 200.0, 162.0]
                         w_base[pi] = pcol
 
                     wing_mid = (mn >= 1241362.0) & (mn < 1241403.0)
@@ -2664,6 +3370,57 @@ def render_diorama(
                     mat_buf[iy[w_m], ix[w_m]] = M_WALL
                     obj_buf[iy[w_m], ix[w_m]] = b["idx"] + 1
 
+    # 3D Pixel-Art Rooftop Brick Chimneys (pitched Swiss houses) & Architectural HVAC/Skylight Boxes (flat roofs)!
+    for b in scene.buildings:
+        bi_r = b["idx"]
+        obj_r = b["objektart"]
+        if obj_r in ("Hochkamin", "Lagertank", "Flugdach", "Offenes Gebaeude", "Mauer gross", "Sakraler Turm"):
+            continue
+        be_c, bn_c = b["e"], b["n"]
+        if crop_box_lv95 is not None:
+            if not (crop_box_lv95[0] + 2 <= be_c <= crop_box_lv95[2] - 2 and crop_box_lv95[1] + 2 <= bn_c <= crop_box_lv95[3] - 2):
+                continue
+        fw, fl = b["footprint_w"], b["footprint_l"]
+        if fw < 6.0 or fl < 6.0:
+            continue
+        # Quick screen-space cull
+        px_r, py_r, _ = camera.project(np.array([be_c]), np.array([bn_c]), np.array([b["z_roof"]]))
+        if px_r[0] + shift_x < -20 or px_r[0] + shift_x > W + 20 or py_r[0] + shift_y < -20 or py_r[0] + shift_y > H + 20:
+            continue
+
+        b_seed = ((bi_r * 73856093) ^ 0x5A3C) & 0xFF
+        if scene.bldg_is_pitched[bi_r] and (b_seed % 5) < 2 and obj_r != "Sakrales Gebaeude":
+            # Crisp Swiss terracotta/stone chimney stack protruding just beside the roof ridge!
+            off_e = (((b_seed & 7) / 7.0) - 0.5) * min(2.4, fw * 0.24)
+            off_n = ((((b_seed >> 3) & 7) / 7.0) - 0.5) * min(2.4, fl * 0.24)
+            z_top_ch = b["z_roof"] + 0.95
+            z_bot_ch = max(b["z_ground"] + 2.0, b["z_roof"] - 1.4)
+            ch_col = (152.0, 96.0, 76.0) if (b_seed & 1) == 0 else (168.0, 162.0, 152.0)
+            _draw_3d_box_column(
+                camera, shift_x, shift_y, W, H,
+                zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                be_c + off_e, bn_c + off_n, z_bot_ch, z_top_ch,
+                0.38, ch_col, bi_r + 1, M_WALL,
+            )
+            # Crisp dark chimney cap rim at top
+            _draw_3d_box_column(
+                camera, shift_x, shift_y, W, H,
+                zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                be_c + off_e, bn_c + off_n, z_top_ch - 0.15, z_top_ch + 0.14,
+                0.45, (74.0, 74.0, 78.0), bi_r + 1, M_WALL,
+            )
+        elif (not scene.bldg_is_pitched[bi_r]) and fw >= 12.0 and fl >= 12.0 and (b_seed % 3) != 0:
+            # Clean silver-grey rooftop HVAC / elevator penthouse unit on larger flat roofs!
+            off_e = (((b_seed & 7) / 7.0) - 0.5) * min(4.0, fw * 0.22)
+            off_n = ((((b_seed >> 3) & 7) / 7.0) - 0.5) * min(4.0, fl * 0.22)
+            z_rf = b["z_roof"]
+            _draw_3d_box_column(
+                camera, shift_x, shift_y, W, H,
+                zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                be_c + off_e, bn_c + off_n, z_rf - 0.2, z_rf + 1.05,
+                1.15, (166.0, 168.0, 172.0), bi_r + 1, M_WALL,
+            )
+
     # -------------------------------------------------------------------------
     # STAGE 4: Sculpted 90s Pixel-Art 3D Trees & Trimmed Garden Hedges!
     # -------------------------------------------------------------------------
@@ -2713,7 +3470,7 @@ def render_diorama(
 
     dither_map = bayer_tiled.copy()
     clean_m = np.isin(mat_buf, [M_WALL, M_WINDOW_LIT, M_WINDOW_DAY, M_BG, M_TREE, M_BRIDGE])
-    dither_map[clean_m] *= 0.30
+    dither_map[clean_m] *= 0.28
 
     final_u8 = quantize_to_90s_palette(rgb_buf, dither_map, preset.dither_strength)
 
@@ -2740,7 +3497,7 @@ def _apply_pixel_art_outlines_float(
     norm_buf: np.ndarray,
     is_night: bool,
 ) -> None:
-    """Apply crisp 1px 90s selective pixel-art outlines (sel-out) on buildings, viaducts, trees & roof ridges."""
+    """Apply refined 1px 90s selective pixel-art outlines (sel-out) on buildings, viaducts, trees & roof ridges."""
     dz_r = zbuf[:, 1:] - zbuf[:, :-1]
     dz_d = zbuf[1:, :] - zbuf[:-1, :]
     diff_r = obj_buf[:, 1:] != obj_buf[:, :-1]
@@ -2749,7 +3506,7 @@ def _apply_pixel_art_outlines_float(
     is_bldg_or_br = (mat_buf == M_WALL) | (mat_buf == M_ROOF) | (mat_buf == M_BRIDGE) | (mat_buf == M_HARBOR_OBJ)
     is_tree_m = mat_buf == M_TREE
 
-    # Crisp 0.65m silhouette threshold for buildings & viaducts, 0.85m for individual 3D trees!
+    # Crisp 0.65m silhouette threshold for buildings & viaducts, 0.95m for individual 3D trees!
     bldg_edge = np.zeros(zbuf.shape, dtype=np.bool_)
     bldg_edge[:, :-1] |= diff_r & (dz_r > 0.65) & is_bldg_or_br[:, :-1]
     bldg_edge[:, 1:] |= diff_r & (dz_r < -0.65) & is_bldg_or_br[:, 1:]
@@ -2761,23 +3518,24 @@ def _apply_pixel_art_outlines_float(
     bldg_edge[:-1, :] |= eave_d
 
     tree_edge = np.zeros(zbuf.shape, dtype=np.bool_)
-    tree_edge[:, :-1] |= diff_r & (dz_r > 0.85) & is_tree_m[:, :-1]
-    tree_edge[:, 1:] |= diff_r & (dz_r < -0.85) & is_tree_m[:, 1:]
-    tree_edge[:-1, :] |= diff_d & (dz_d > 0.85) & is_tree_m[:-1, :]
-    tree_edge[1:, :] |= diff_d & (dz_d < -0.85) & is_tree_m[1:, :]
+    tree_edge[:, :-1] |= diff_r & (dz_r > 0.95) & is_tree_m[:, :-1]
+    tree_edge[:, 1:] |= diff_r & (dz_r < -0.95) & is_tree_m[:, 1:]
+    tree_edge[:-1, :] |= diff_d & (dz_d > 0.95) & is_tree_m[:-1, :]
+    tree_edge[1:, :] |= diff_d & (dz_d < -0.95) & is_tree_m[1:, :]
 
     if bldg_edge.any():
         ey, ex = np.nonzero(bldg_edge)
-        rgb_buf[ey, ex] *= 0.50 if not is_night else 0.58
+        rgb_buf[ey, ex] *= 0.58 if not is_night else 0.62
     if tree_edge.any():
         ty, tx = np.nonzero(tree_edge)
-        rgb_buf[ty, tx] *= 0.58 if not is_night else 0.66
+        # Soft botanical dark-green sel-out (kills heavy black cartoon circles around canopies!)
+        rgb_buf[ty, tx] *= np.array([0.70, 0.76, 0.72], dtype=np.float32) if not is_night else 0.74
 
     island_fg = mat_buf > M_DROP_SHADOW
     island_border = island_fg & (~ndimage.binary_erosion(island_fg, iterations=1, border_value=0))
     if island_border.any():
         by, bx = np.nonzero(island_border)
-        rgb_buf[by, bx] *= 0.42
+        rgb_buf[by, bx] *= 0.44
 
     if not is_night:
         roof_m = mat_buf == M_ROOF
@@ -2790,7 +3548,7 @@ def _apply_pixel_art_outlines_float(
         ridge = same_b & (ndot < 0.86) & (np.abs(zbuf[:-1, :] - zbuf[1:, :]) < 1.6)
         if ridge.any():
             ry, rx = np.nonzero(ridge)
-            rgb_buf[ry, rx] = np.minimum(255.0, rgb_buf[ry, rx] + 24.0)
+            rgb_buf[ry, rx] = np.minimum(255.0, rgb_buf[ry, rx] + 28.0)
 
 
 def _extract_interactive_metadata(

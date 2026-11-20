@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '5.4';
+  const ASSET_VER = '6.0';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -3013,38 +3013,22 @@
     }
 
     // =========================================================================
-    // 3. TC KILCHBERG CLAY TENNIS COURTS — 2 Live Animated Pixel-Art Tennis Matches!
+    // 3. TC KILCHBERG CLAY TENNIS COURTS — 3 Live Animated Matches on Exact 3D Courts!
     // =========================================================================
-    if (!isNight && boxInView(0.158, 0.338, 0.184, 0.360)) {
+    if (!isNight && boxInView(0.156, 0.335, 0.188, 0.362)) {
       const courts = [
-        { swU: 0.1736, swV: 0.3484, neU: 0.1794, neV: 0.3418, latU: 0.0012, latV: 0.0020, ph: 0.0, freq: 1.55 },
-        { swU: 0.1616, swV: 0.3544, neU: 0.1670, neV: 0.3484, latU: 0.0011, latV: 0.0019, ph: 2.1, freq: 1.38 },
+        { swU: 0.17391, swV: 0.34386, neU: 0.17963, neV: 0.33954, latU: 0.00074, latV: 0.00125, ph: 0.0, freq: 1.55 },
+        { swU: 0.17698, swV: 0.34871, neU: 0.18261, neV: 0.34424, latU: 0.00076, latV: 0.00123, ph: 1.3, freq: 1.42 },
+        { swU: 0.16397, swV: 0.35390, neU: 0.16963, neV: 0.34947, latU: 0.00076, latV: 0.00124, ph: 2.1, freq: 1.36 },
       ];
       for (let ci = 0; ci < courts.length; ci++) {
         const c = courts[ci];
         if (!boxInView(c.swU - 0.003, c.neV - 0.004, c.neU + 0.003, c.swV + 0.004)) continue;
 
-        const netU0 = (c.swU + c.neU) * 0.5 - c.latU * 0.92;
-        const netV0 = (c.swV + c.neV) * 0.5 - c.latV * 0.92;
-        const netU1 = (c.swU + c.neU) * 0.5 + c.latU * 0.92;
-        const netV1 = (c.swV + c.neV) * 0.5 + c.latV * 0.92;
-        const nx0 = toX(netU0); const ny0 = toY(netV0);
-        const nx1 = toX(netU1); const ny1 = toY(netV1);
-        ctx.strokeStyle = isSunset ? 'rgba(255,235,215,0.78)' : 'rgba(248,250,252,0.84)';
-        ctx.lineWidth = Math.max(1.0, 1.1 * s);
-        ctx.beginPath();
-        ctx.moveTo(nx0, ny0);
-        ctx.lineTo(nx1, ny1);
-        ctx.stroke();
-        const postSz = Math.max(1.5, Math.round(1.4 * s));
-        ctx.fillStyle = '#1f2937';
-        ctx.fillRect(Math.round(nx0 - postSz * 0.5), Math.round(ny0 - postSz * 0.5), postSz, postSz);
-        ctx.fillRect(Math.round(nx1 - postSz * 0.5), Math.round(ny1 - postSz * 0.5), postSz, postSz);
-
         const cyc = (tSec * c.freq + c.ph) % 2.0;
         const ballF = cyc < 1.0 ? cyc : (2.0 - cyc);
-        const latA = Math.sin(tSec * 0.78 + ci * 2.4) * 0.62;
-        const latB = Math.cos(tSec * 0.85 + ci * 1.7) * 0.62;
+        const latA = Math.sin(tSec * 0.78 + ci * 2.4) * 0.68;
+        const latB = Math.cos(tSec * 0.85 + ci * 1.7) * 0.68;
         const ballLat = latA * (1 - ballF) + latB * ballF;
 
         const pAx = toX(c.swU + c.latU * latA);
@@ -3052,13 +3036,13 @@
         const pBx = toX(c.neU + c.latU * latB);
         const pBy = toY(c.neV + c.latV * latB);
         const whiteKit = isSunset ? '#ffe8d4' : '#f4f7fa';
-        const shortCol = ci === 0 ? '#1e3a5f' : '#991b1b';
-        drawMiniPerson(pBx, pBy, s * 0.92, whiteKit, shortCol, hairs[ci], false, tSec * 10.0 + 1.0);
-        drawMiniPerson(pAx, pAy, s * 0.92, whiteKit, '#1e3a5f', hairs[ci + 2], false, tSec * 10.0);
+        const shortCol = ci === 0 ? '#1e3a5f' : (ci === 1 ? '#991b1b' : '#166534');
+        drawMiniPerson(pBx, pBy, s * 0.90, whiteKit, shortCol, hairs[ci % hairs.length], false, tSec * 10.0 + 1.0);
+        drawMiniPerson(pAx, pAy, s * 0.90, whiteKit, '#1e3a5f', hairs[(ci + 2) % hairs.length], false, tSec * 10.0);
 
         const bu = c.swU + (c.neU - c.swU) * ballF + c.latU * ballLat;
         const bv = c.swV + (c.neV - c.swV) * ballF + c.latV * ballLat;
-        const arcH = Math.sin(ballF * Math.PI) * 9.0 * s;
+        const arcH = Math.sin(ballF * Math.PI) * 8.5 * s;
         const bx = toX(bu);
         const by = toY(bv);
         const bSz = Math.max(1.6, 1.8 * s);
@@ -3066,6 +3050,86 @@
         ctx.fillRect(Math.round(bx - bSz * 0.4), Math.round(by), Math.max(1.5, Math.round(bSz * 0.8)), Math.max(1, Math.round(bSz * 0.6)));
         ctx.fillStyle = '#d9ff3b';
         ctx.fillRect(Math.round(bx - bSz * 0.5), Math.round(by - arcH - bSz * 0.5), Math.max(2, Math.round(bSz)), Math.max(2, Math.round(bSz)));
+      }
+    }
+
+    // =========================================================================
+    // 3b. SPORTPLATZ HOCHWEID — Live FC Kilchberg Football Match & Night Floodlights!
+    // =========================================================================
+    if (boxInView(0.292, 0.208, 0.336, 0.252)) {
+      const fCU = 0.31377, fCV = 0.22952;
+      const fLenU = 0.01364, fLenV = -0.00936; // Half-length vector along pitch
+      const fLatU = 0.00506, fLatV = 0.00946;  // Half-width vector across pitch
+      const fieldUV = (lu, lv) => ({
+        u: fCU + lu * fLenU + lv * fLatU,
+        v: fCV + lu * fLenV + lv * fLatV,
+      });
+
+      if (isNight) {
+        // Warm golden stadium floodlight pools illuminating Sportplatz Hochweid main turf at night!
+        const masts = [[-0.58, -1.04], [0.58, -1.04], [-0.58, 1.04], [0.58, 1.04]];
+        for (let mi = 0; mi < masts.length; mi++) {
+          const p = fieldUV(masts[mi][0], masts[mi][1]);
+          const gx = toX(p.u);
+          const gy = toY(p.v);
+          const rad = 52 * s;
+          const grad = ctx.createRadialGradient(gx, gy, 2 * s, gx, gy, rad);
+          grad.addColorStop(0, 'rgba(255, 240, 195, 0.26)');
+          grad.addColorStop(0.55, 'rgba(255, 224, 155, 0.10)');
+          grad.addColorStop(1, 'rgba(255, 210, 120, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.ellipse(gx, gy, rad * 1.15, rad * 0.68, -0.32, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        // Live 5v5 + 2 Goalkeepers FC Kilchberg (Royal Blue) vs Guests (Swiss Red) match!
+        const ballAng = tSec * 0.42;
+        const ballLU = Math.sin(ballAng) * 0.64 + Math.sin(ballAng * 2.3) * 0.16;
+        const ballLV = Math.cos(ballAng * 1.35) * 0.56;
+        const blueKit = isSunset ? '#2e64b8' : '#2563eb';
+        const redKit = isSunset ? '#c83434' : '#dc2626';
+        const gkA = isSunset ? '#e6c238' : '#facc15';
+        const gkB = isSunset ? '#58c448' : '#4ade80';
+
+        // Build players list with screen Y so we painter-sort cleanly back-to-front
+        const players = [
+          // 2 Goalkeepers guarding each 3D goalmouth
+          { lu: -0.92, lv: Math.sin(tSec * 1.4) * 0.14, kit: gkA, shorts: '#1e293b', hi: 0 },
+          { lu: 0.92, lv: Math.cos(tSec * 1.3) * 0.14, kit: gkB, shorts: '#1e293b', hi: 1 },
+          // 5 FC Kilchberg Blue outfield players
+          { lu: -0.52 + ballLU * 0.35 + Math.sin(tSec * 0.9) * 0.08, lv: -0.34 + ballLV * 0.28, kit: blueKit, shorts: '#f8fafc', hi: 2 },
+          { lu: -0.45 + ballLU * 0.38 + Math.cos(tSec * 1.1) * 0.09, lv: 0.32 + ballLV * 0.30, kit: blueKit, shorts: '#f8fafc', hi: 3 },
+          { lu: ballLU * 0.88 - 0.06, lv: ballLV * 0.86 + Math.sin(tSec * 1.6) * 0.07, kit: blueKit, shorts: '#f8fafc', hi: 4 },
+          { lu: 0.18 + ballLU * 0.45 + Math.sin(tSec * 1.2 + 1.0) * 0.11, lv: -0.28 + ballLV * 0.36, kit: blueKit, shorts: '#f8fafc', hi: 0 },
+          { lu: 0.26 + ballLU * 0.44 + Math.cos(tSec * 1.0 + 2.0) * 0.10, lv: 0.36 + ballLV * 0.32, kit: blueKit, shorts: '#f8fafc', hi: 1 },
+          // 5 Red visiting outfield players
+          { lu: 0.52 + ballLU * 0.34 + Math.cos(tSec * 0.95) * 0.08, lv: -0.30 + ballLV * 0.28, kit: redKit, shorts: '#f8fafc', hi: 2 },
+          { lu: 0.46 + ballLU * 0.36 + Math.sin(tSec * 1.05) * 0.09, lv: 0.30 + ballLV * 0.30, kit: redKit, shorts: '#f8fafc', hi: 3 },
+          { lu: ballLU * 0.86 + 0.07, lv: ballLV * 0.84 + Math.cos(tSec * 1.5) * 0.08, kit: redKit, shorts: '#f8fafc', hi: 4 },
+          { lu: -0.18 + ballLU * 0.45 + Math.cos(tSec * 1.15 + 1.4) * 0.10, lv: -0.36 + ballLV * 0.34, kit: redKit, shorts: '#f8fafc', hi: 0 },
+          { lu: -0.24 + ballLU * 0.42 + Math.sin(tSec * 1.25 + 2.6) * 0.10, lv: 0.28 + ballLV * 0.34, kit: redKit, shorts: '#f8fafc', hi: 1 },
+        ];
+        const drawList = players.map((pl, idx) => {
+          const p = fieldUV(Math.max(-0.94, Math.min(0.94, pl.lu)), Math.max(-0.88, Math.min(0.88, pl.lv)));
+          return { x: toX(p.u), y: toY(p.v), pl, idx };
+        });
+        drawList.sort((a, b) => a.y - b.y);
+        for (let di = 0; di < drawList.length; di++) {
+          const d = drawList[di];
+          drawMiniPerson(d.x, d.y, s * 0.88, d.pl.kit, d.pl.shorts, hairs[d.pl.hi % hairs.length], false, tSec * 9.0 + d.idx * 1.3);
+        }
+
+        // Bouncing crisp white pixel football!
+        const bp = fieldUV(ballLU, ballLV);
+        const fbx = toX(bp.u);
+        const fby = toY(bp.v);
+        const bounceH = Math.abs(Math.sin(tSec * 3.4)) * 5.2 * s;
+        const fbSz = Math.max(1.8, 2.0 * s);
+        ctx.fillStyle = 'rgba(20, 32, 18, 0.36)';
+        ctx.fillRect(Math.round(fbx - fbSz * 0.4), Math.round(fby), Math.max(1.5, Math.round(fbSz * 0.9)), Math.max(1, Math.round(fbSz * 0.55)));
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(Math.round(fbx - fbSz * 0.5), Math.round(fby - bounceH - fbSz * 0.5), Math.max(2, Math.round(fbSz)), Math.max(2, Math.round(fbSz)));
       }
     }
 

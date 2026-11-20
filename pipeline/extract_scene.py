@@ -507,8 +507,98 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     _burn([g for g, p in mvt.get("landuse", []) if p.get("class") in ("cemetery", "hospital", "school")], G_PARK_CEMETERY)
     _burn([g for g, p in mvt.get("landcover", []) if p.get("subclass") in ("park", "orchard", "plant_nursery")], G_PARK_CEMETERY)
     _burn([g for g, p in mvt.get("landcover", []) if p.get("subclass") == "vineyard"], G_VINEYARD)
-    _burn([g for g, p in mvt.get("landuse", []) if p.get("class") in ("pitch", "sports")], G_PITCH)
     _burn([g for g, p in mvt.get("landuse", []) if p.get("class") == "parking"], G_PARKING)
+
+    # Extract exact oriented vector Sports Fields (Football Pitches, Tennis Courts & Multi-Sport Courts)
+    # directly from swisstopo MVT polygons so they render with crisp regulation markings & 3D nets/goals/fences!
+    sports_fields: list[dict] = []
+    sports_enclosures: list[list[list[float]]] = []
+    pitch_polys_raw = [g for g, p in mvt.get("landuse", []) if p.get("class") == "pitch"]
+    sports_polys_raw = [g for g, p in mvt.get("landuse", []) if p.get("class") == "sports"]
+    # Union adjacent MVT tile-split pieces so no court/field is cut across a tile seam!
+    pitch_union = unary_union([g for g in pitch_polys_raw if g is not None and not g.is_empty]) if pitch_polys_raw else Polygon()
+    sports_union = unary_union([g for g in sports_polys_raw if g is not None and not g.is_empty]) if sports_polys_raw else Polygon()
+
+    def _iter_polys(geom):
+        if geom is None or geom.is_empty:
+            return []
+        if geom.geom_type == "Polygon":
+            return [geom]
+        if geom.geom_type in ("MultiPolygon", "GeometryCollection"):
+            out = []
+            for part in geom.geoms:
+                out.extend(_iter_polys(part))
+            return out
+        return []
+
+    valid_pitch_geoms = []
+    for poly in _iter_polys(pitch_union):
+        if poly.area < 120.0 or not poly.intersects(diorama_poly):
+            continue
+        c_pt = poly.centroid
+        if not diorama_poly.buffer(15.0).contains(c_pt):
+            continue
+        mrr = poly.minimum_rotated_rectangle
+        if mrr.geom_type != "Polygon":
+            continue
+        rc = list(mrr.exterior.coords)
+        if len(rc) < 4:
+            continue
+        d1 = math.hypot(rc[1][0] - rc[0][0], rc[1][1] - rc[0][1])
+        d2 = math.hypot(rc[2][0] - rc[1][0], rc[2][1] - rc[1][1])
+        if d1 >= d2:
+            length_m, width_m = d1, d2
+            ang = math.atan2(rc[1][1] - rc[0][1], rc[1][0] - rc[0][0])
+        else:
+            length_m, width_m = d2, d1
+            ang = math.atan2(rc[2][1] - rc[1][1], rc[2][0] - rc[1][0])
+        # Normalize angle to (-pi/2, pi/2]
+        while ang <= -math.pi * 0.5:
+            ang += math.pi
+        while ang > math.pi * 0.5:
+            ang -= math.pi
+        cx_p, cy_p = float(mrr.centroid.x), float(mrr.centroid.y)
+        cc_i = int(np.clip((cx_p - E_MIN) / GRID_RES, 0, GRID_W - 1))
+        cr_i = int(np.clip((N_MAX - cy_p) / GRID_RES, 0, GRID_H - 1))
+        z_p = float(dem[cr_i, cc_i])
+        # Classify by regulation Swiss / ITF / FIFA dimensions
+        if length_m >= 62.0 and width_m >= 38.0:
+            kind = "football"
+        elif 19.0 <= length_m <= 28.0 and 9.0 <= width_m <= 14.5:
+            kind = "tennis"
+        elif 18.0 <= length_m <= 58.0 and 11.0 <= width_m <= 36.0:
+            # Check if it is a combined multi-court block (e.g. 2-3 tennis courts merged by MVT!)
+            # Sample median ortho redness to check clay vs tarmac/turf
+            rc_c0 = max(0, int((poly.bounds[0] - E_MIN) / GRID_RES))
+            rc_c1 = min(GRID_W, int((poly.bounds[2] - E_MIN) / GRID_RES))
+            rc_r0 = max(0, int((N_MAX - poly.bounds[3]) / GRID_RES))
+            rc_r1 = min(GRID_H, int((N_MAX - poly.bounds[1]) / GRID_RES))
+            sub_o = ortho[rc_r0:rc_r1, rc_c0:rc_c1].astype(np.float32)
+            is_red = bool(sub_o.size > 0 and np.median(sub_o[:, :, 0] - sub_o[:, :, 1]) > 14.0)
+            kind = "tennis_pad" if is_red else "multisport"
+        else:
+            continue
+        valid_pitch_geoms.append(poly)
+        sports_fields.append({
+            "kind": kind,
+            "e": round(cx_p, 2),
+            "n": round(cy_p, 2),
+            "z": round(z_p, 2),
+            "length": round(float(length_m), 2),
+            "width": round(float(width_m), 2),
+            "angle": round(float(ang), 5),
+        })
+
+    for spoly in _iter_polys(sports_union):
+        if spoly.area < 400.0 or not spoly.intersects(diorama_poly):
+            continue
+        # Store simplified perimeter ring for tennis club perimeter windscreens
+        simp = spoly.simplify(0.6)
+        if simp.geom_type == "Polygon":
+            sports_enclosures.append([[round(float(x), 2), round(float(y), 2)] for x, y in simp.exterior.coords])
+
+    _burn(valid_pitch_geoms, G_PITCH)
+    print(f"[scene] Extracted {len(sports_fields)} oriented vector sports fields (football/tennis/multisport) & {len(sports_enclosures)} enclosures!")
 
     # Waterways / streams
     _burn([g.buffer(1.4) for g, p in mvt.get("waterway", []) if p.get("class") == "stream"], G_STREAM)
@@ -614,10 +704,10 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     bhf_plat = (sub_rd >= 1.55) & (sub_rd <= 4.25)
     sem[bhf_r0:bhf_r1, bhf_c0:bhf_c1][bhf_plat] = G_PLATFORM_PIER
 
-    # Swimming pools & Lake Zurich on top
+    # Swimming pools & Lake Zurich on top (preserving real wooden/stone lake piers as G_PLATFORM_PIER!)
     pool_geoms = [g for g, p in mvt.get("water", []) if p.get("class") == "pool"]
     _burn(pool_geoms, G_POOL)
-    sem[lake_mask] = G_LAKE
+    sem[lake_mask & (sem != G_PLATFORM_PIER)] = G_LAKE
 
     # Clean geometric Swiss yellow pedestrian crosswalk zones detected from SWISSIMAGE on streets
     r_ch = ortho[:, :, 0].astype(np.float32)
@@ -1097,11 +1187,12 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     exact_roof_mask = np.load(cache_dir / "bldg_roof_mask_05m.npy")
     bldg_excl = ndimage.binary_dilation(exact_roof_mask, iterations=2)
     bridge_excl = ndimage.binary_dilation(bridge_cls > 0, iterations=4)  # 2.0m strict buffer around every viaduct/bridge!
+    pitch_excl = ndimage.binary_dilation(sem == G_PITCH, iterations=5)   # 2.5m strict buffer around tennis/football aprons!
     hard_surface_excl = np.isin(
         sem,
         [G_LAKE, G_POOL, G_PITCH, G_STREET_MINOR, G_STREET_MAIN, G_MOTORWAY, G_RAILWAY, G_PLATFORM_PIER, G_PARKING],
     )
-    non_veg = bldg_excl | bridge_excl | hard_surface_excl
+    non_veg = bldg_excl | bridge_excl | pitch_excl | hard_surface_excl
 
     greenness = g_ch - 0.50 * r_ch - 0.44 * b_ch
     lum = 0.299 * r_ch + 0.587 * g_ch + 0.114 * b_ch
@@ -1131,24 +1222,37 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     tree_rad = np.clip((0.95 + 0.215 * tree_h) * np.clip(0.75 + 0.42 * compact_ratio, 0.72, 1.15), 1.30, 5.10).astype(np.float32)
 
     # Classify species from leaf-off March SWISSIMAGE + crown geometry:
-    # 0 = Lush Emerald Broadleaf (Oak / Beech / Sycamore)
-    # 1 = Sunlit Warm-Lime Broadleaf (Linden / Maple / Orchard)
-    # 2 = Alpine Spruce / Fir Conifer (already deep evergreen in early-spring SWISSIMAGE!)
+    # 0 = Lush Deep-Emerald Broadleaf (Swiss Oak / Beech / Sycamore)
+    # 1 = Sunlit Warm-Olive Broadleaf (Linden / Maple / Birch / Orchard)
+    # 2 = Alpine Spruce / Fir Conifer (deep evergreen in early-spring SWISSIMAGE + mixed alpine woods)
     # 3 = Slender Cypress / Lombardy Poplar (slender crown along villas & cemetery)
-    # 4 = Copper Beech / Blutbuche (majestic Zürichsee parkland estates)
+    # 4 = Stately Copper Beech / Blutbuche (rare ~2% park/estate specimen — NEVER clumped in forests!)
+    # 5 = Spring Blossom / Flowering Cherry & Apple Tree (delicate ~4% villa/orchard accent!)
     tr_r = r_ch[tr_rows, tr_cols]
     tr_g = g_ch[tr_rows, tr_cols]
     tr_b = b_ch[tr_rows, tr_cols]
     tr_lum = lum[tr_rows, tr_cols]
+    tr_sem = sem[tr_rows, tr_cols]
     tr_hash = ((tr_cols.astype(np.int64) * 73856093) ^ (tr_rows.astype(np.int64) * 19349663)) & 0xFFFF
 
-    is_evergreen = ((tr_g > tr_r + 4.5) & (tr_lum < 86.0)) | ((sem[tr_rows, tr_cols] == G_FOREST) & ((tr_hash % 5) == 0))
-    is_slender = (compact_ratio < 0.56) & (tree_h >= 5.5) & (~(sem[tr_rows, tr_cols] == G_FOREST))
+    is_evergreen = ((tr_g > tr_r + 5.0) & (tr_lum < 86.0)) | ((tr_sem == G_FOREST) & ((tr_hash % 3) == 0))
+    is_slender = (compact_ratio < 0.56) & (tree_h >= 5.5) & (tr_sem != G_FOREST)
+    # Copper beech is a rare majestic estate/park specimen — never triggered by brown winter forest twigs!
     is_copper = (
         (~is_evergreen)
         & (~is_slender)
-        & (tree_h >= 9.5)
-        & (((tr_r > tr_g * 1.18) & (tr_r > 68.0)) | ((sem[tr_rows, tr_cols] == G_PARK_CEMETERY) & ((tr_hash % 19) == 3)) | ((tr_hash % 43) == 7))
+        & (tr_sem != G_FOREST)
+        & (tree_h >= 11.5)
+        & (((tr_sem == G_PARK_CEMETERY) & ((tr_hash % 29) == 3)) | ((tr_hash % 67) == 11))
+    )
+    is_blossom = (
+        (~is_evergreen)
+        & (~is_slender)
+        & (~is_copper)
+        & (tr_sem != G_FOREST)
+        & (tree_h >= 3.2)
+        & (tree_h <= 8.8)
+        & ((tr_hash % 31) == 5)
     )
 
     tree_species = np.where(
@@ -1160,7 +1264,11 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
             np.where(
                 is_copper,
                 4,
-                np.where((tr_hash & 1) == 0, 0, 1),
+                np.where(
+                    is_blossom,
+                    5,
+                    np.where((tr_hash % 3) == 0, 1, 0),
+                ),
             ),
         ),
     ).astype(np.uint8)
@@ -1168,9 +1276,27 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     tree_rad = np.where(tree_species == 3, np.clip(tree_h * 0.14, 0.95, 2.15), tree_rad).astype(np.float32)
     tree_rad = np.where(tree_species == 2, np.clip(tree_rad * 0.84, 1.25, 3.85), tree_rad).astype(np.float32)
 
-    # Trimmed garden hedges & low shrubs (0.85m <= chm < 2.25m, strictly outside roads/bridges/buildings)
-    hedge_mask = diorama_mask & (~non_veg) & (chm >= 0.85) & (chm < 2.25) & is_veg_low
-    print(f"[scene] Extracted {len(tree_e):,} individual 3D trees & {int(hedge_mask.sum()):,} hedge cells across Kilchberg ZH!")
+    # Clean, continuous trimmed garden hedges & low shrubs (0.90m <= chm < 2.25m, strictly clear of roads/pitches)
+    raw_hedge = diorama_mask & (~non_veg) & (chm >= 0.95) & (chm < 2.25) & is_veg_low
+    # Close tiny 1-cell gaps along real trimmed hedge lines, then strip noisy isolated specks!
+    closed_hedge = ndimage.binary_closing(raw_hedge, structure=np.ones((3, 3), dtype=bool)) & diorama_mask & (~non_veg)
+    lbl_h, n_h = ndimage.label(closed_hedge)
+    if n_h > 0:
+        h_counts = np.bincount(lbl_h.ravel())
+        keep_h = h_counts >= 8
+        keep_h[0] = False
+        hedge_mask = keep_h[lbl_h]
+        # Inside parks/cemeteries only keep true long continuous hedges (>=18 cells), never noisy gravestone specks!
+        in_cem = hedge_mask & (sem == G_PARK_CEMETERY)
+        if in_cem.any():
+            lbl_c, n_c = ndimage.label(in_cem)
+            c_counts = np.bincount(lbl_c.ravel())
+            drop_c = (c_counts < 18)
+            drop_c[0] = False
+            hedge_mask[drop_c[lbl_c]] = False
+    else:
+        hedge_mask = closed_hedge
+    print(f"[scene] Extracted {len(tree_e):,} individual 3D trees & {int(hedge_mask.sum()):,} clean hedge cells across Kilchberg ZH!")
 
     # 7. Detect real moored boats on Lake Zurich from SWISSIMAGE DOP10
     offshore_zone = diorama_mask & lake_mask & (dist_offshore_m > 10.0) & (dist_offshore_m < 240.0) & (sem != G_PLATFORM_PIER)
@@ -1252,6 +1378,8 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                 "boats": boats,
                 "viaduct_piers": viaduct_piers,
                 "catenary_portals": catenary_portals,
+                "sports_fields": sports_fields,
+                "sports_enclosures": sports_enclosures,
             },
             indent=2,
         )
