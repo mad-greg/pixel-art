@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '5.1';
+  const ASSET_VER = '5.2';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -2848,7 +2848,9 @@
 
   // Crisp 90s pixel-grid miniature villager/visitor/commuter sprite (used at Lindt Plaza, Bahnhof, Bendlikon Pier & Seebad)
   function drawMiniPerson(sx, sy, s, coatCol, pantsCol, hairCol, isNight, stridePhase, bagCol = null) {
-    const p = Math.max(1.0, s);
+    const p = Math.max(0.75, s);
+    const pad = 16 * p;
+    if (sx < -pad || sx > canvas.width + pad || sy < -pad || sy > canvas.height + pad) return;
     const rx = Math.round(sx);
     const ry = Math.round(sy);
     const step = Math.round(Math.sin(stridePhase) * 0.85 * p);
@@ -2878,7 +2880,18 @@
     const s = scale * wScale;
     const toX = (u) => u * worldW * scale + offsetX;
     const toY = (v) => v * worldH * scale + offsetY;
-    const inView = (x, y, pad = 90) => x >= -pad && x <= canvas.width + pad && y >= -pad && y <= canvas.height + pad;
+    // Zoom-invariant world-space UV viewport bounds (NEVER culls pier/landmark pedestrians at ANY zoom level!)
+    const padU = Math.max(0.004, 48 / Math.max(1, worldW * scale));
+    const padV = Math.max(0.008, 48 / Math.max(1, worldH * scale));
+    const visU0 = (-offsetX / Math.max(1, worldW * scale)) - padU;
+    const visU1 = ((canvas.width - offsetX) / Math.max(1, worldW * scale)) + padU;
+    const visV0 = (-offsetY / Math.max(1, worldH * scale)) - padV;
+    const visV1 = ((canvas.height - offsetY) / Math.max(1, worldH * scale)) + padV;
+    const boxInView = (u0, v0, u1, v1) => u1 >= visU0 && u0 <= visU1 && v1 >= visV0 && v0 <= visV1;
+    const inView = (x, y, padWorld = 60) => {
+      const pad = Math.max(60, padWorld * s);
+      return x >= -pad && x <= canvas.width + pad && y >= -pad && y <= canvas.height + pad;
+    };
     const coats = ['#d9382e', '#2563eb', '#0d9488', '#d97706', '#7c3aed', '#e11d48', '#334155', '#16a34a'];
     const hairs = ['#2d241c', '#5c4028', '#8a6842', '#3a3430', '#b89458'];
 
@@ -2887,68 +2900,63 @@
     // =========================================================================
     // 1. REFORMIERTE KIRCHE KILCHBERG — Live Real-Time Swiss Tower Clock + Circling Swifts!
     // =========================================================================
-    {
+    if (boxInView(0.285, 0.298, 0.296, 0.324)) {
       const cx = toX(0.29035);
       const cy = toY(0.31775);
-      if (inView(cx, cy, 80)) {
-        // Real Zurich local time (falls back smoothly when ?t= fixed time is used for deterministic captures)
-        let hr, min, sec;
-        if (fixedAnimTime !== null) {
-          hr = 14; min = 20 + Math.floor(fixedAnimTime / 60); sec = fixedAnimTime % 60;
-        } else {
-          const now = new Date();
-          const zh = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Zurich' }));
-          hr = zh.getHours(); min = zh.getMinutes(); sec = zh.getSeconds();
-        }
-        const rDial = 6.2 * s;
-        if (rDial >= 2.2) {
-          // Dark navy dial inside the real gold bezel (subtle warm lantern glow at night!)
-          ctx.fillStyle = isNight ? '#1c2a42' : '#162030';
-          ctx.beginPath();
-          ctx.arc(cx, cy, rDial, 0, Math.PI * 2);
-          ctx.fill();
-          if (isNight) {
-            ctx.strokeStyle = 'rgba(255,220,120,0.45)';
-            ctx.lineWidth = Math.max(1.0, 1.1 * s);
-            ctx.stroke();
-          }
-          // Golden hour & minute hands
-          const minAng = ((min + sec / 60) / 60) * Math.PI * 2 - Math.PI * 0.5;
-          const hrAng = (((hr % 12) + min / 60) / 12) * Math.PI * 2 - Math.PI * 0.5;
-          ctx.strokeStyle = isNight ? '#ffe38a' : '#f4cf58';
-          ctx.lineCap = 'round';
-          // Hour hand
-          ctx.lineWidth = Math.max(1.2, 1.5 * s);
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.lineTo(cx + Math.cos(hrAng) * rDial * 0.56, cy + Math.sin(hrAng) * rDial * 0.56);
+      // Real Zurich local time (falls back smoothly when ?t= fixed time is used for deterministic captures)
+      let hr, min, sec;
+      if (fixedAnimTime !== null) {
+        hr = 14; min = 20 + Math.floor(fixedAnimTime / 60); sec = fixedAnimTime % 60;
+      } else {
+        const now = new Date();
+        const zh = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Zurich' }));
+        hr = zh.getHours(); min = zh.getMinutes(); sec = zh.getSeconds();
+      }
+      const rDial = 6.2 * s;
+      if (rDial >= 2.2) {
+        // Dark navy dial inside the real gold bezel (subtle warm lantern glow at night!)
+        ctx.fillStyle = isNight ? '#1c2a42' : '#162030';
+        ctx.beginPath();
+        ctx.arc(cx, cy, rDial, 0, Math.PI * 2);
+        ctx.fill();
+        if (isNight) {
+          ctx.strokeStyle = 'rgba(255,220,120,0.45)';
+          ctx.lineWidth = Math.max(1.0, 1.1 * s);
           ctx.stroke();
-          // Minute hand
-          ctx.lineWidth = Math.max(1.0, 1.15 * s);
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.lineTo(cx + Math.cos(minAng) * rDial * 0.84, cy + Math.sin(minAng) * rDial * 0.84);
-          ctx.stroke();
-          // Brass center pin
-          ctx.fillStyle = '#fff5cc';
-          ctx.fillRect(Math.round(cx - 0.7 * s), Math.round(cy - 0.7 * s), Math.max(1.5, Math.round(1.4 * s)), Math.max(1.5, Math.round(1.4 * s)));
         }
+        // Golden hour & minute hands
+        const minAng = ((min + sec / 60) / 60) * Math.PI * 2 - Math.PI * 0.5;
+        const hrAng = (((hr % 12) + min / 60) / 12) * Math.PI * 2 - Math.PI * 0.5;
+        ctx.strokeStyle = isNight ? '#ffe38a' : '#f4cf58';
+        ctx.lineCap = 'round';
+        ctx.lineWidth = Math.max(1.2, 1.5 * s);
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(hrAng) * rDial * 0.56, cy + Math.sin(hrAng) * rDial * 0.56);
+        ctx.stroke();
+        ctx.lineWidth = Math.max(1.0, 1.15 * s);
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(minAng) * rDial * 0.84, cy + Math.sin(minAng) * rDial * 0.84);
+        ctx.stroke();
+        ctx.fillStyle = '#fff5cc';
+        ctx.fillRect(Math.round(cx - 0.7 * s), Math.round(cy - 0.7 * s), Math.max(1.5, Math.round(1.4 * s)), Math.max(1.5, Math.round(1.4 * s)));
+      }
 
-        // 4 graceful dark swifts orbiting the Reformierte Kirche steeple (Midday & Alpenglow!)
-        if (!isNight) {
-          const spX = toX(0.2904);
-          const spY = toY(0.3055);
-          ctx.fillStyle = isSunset ? '#2e2230' : '#26303d';
-          for (let b = 0; b < 4; b++) {
-            const ang = tSec * (0.95 + b * 0.13) + b * 1.62;
-            const bx = spX + Math.cos(ang) * (16 + b * 5) * s;
-            const by = spY + Math.sin(ang) * (7 + b * 2.2) * s;
-            const fl = Math.sin(tSec * 12.0 + b * 2.3) > 0 ? -1 : 1;
-            const px = Math.max(1, Math.round(1.1 * s));
-            ctx.fillRect(Math.round(bx - px * 2), Math.round(by + fl * px * 0.6), px * 2, px);
-            ctx.fillRect(Math.round(bx), Math.round(by), px, px);
-            ctx.fillRect(Math.round(bx + px), Math.round(by + fl * px * 0.6), px * 2, px);
-          }
+      // 4 graceful dark swifts orbiting the Reformierte Kirche steeple (Midday & Alpenglow!)
+      if (!isNight) {
+        const spX = toX(0.2904);
+        const spY = toY(0.3055);
+        ctx.fillStyle = isSunset ? '#2e2230' : '#26303d';
+        for (let b = 0; b < 4; b++) {
+          const ang = tSec * (0.95 + b * 0.13) + b * 1.62;
+          const bx = spX + Math.cos(ang) * (16 + b * 5) * s;
+          const by = spY + Math.sin(ang) * (7 + b * 2.2) * s;
+          const fl = Math.sin(tSec * 12.0 + b * 2.3) > 0 ? -1 : 1;
+          const px = Math.max(1, Math.round(1.1 * s));
+          ctx.fillRect(Math.round(bx - px * 2), Math.round(by + fl * px * 0.6), px * 2, px);
+          ctx.fillRect(Math.round(bx), Math.round(by), px, px);
+          ctx.fillRect(Math.round(bx + px), Math.round(by + fl * px * 0.6), px * 2, px);
         }
       }
     }
@@ -2956,78 +2964,66 @@
     // =========================================================================
     // 2. LINDT HOME OF CHOCOLATE — Shimmering Golden Fountain Atrium + Visitors on Schokoladenplatz!
     // =========================================================================
-    {
-      const lx = toX(0.3775);
-      const ly = toY(0.6485);
-      if (inView(lx, ly, 160)) {
-        // Warm shimmering Golden Chocolate Fountain light strictly inside the dark curved glass entrance doors!
-        const shimmer = 0.76 + 0.24 * Math.sin(tSec * 3.4);
-        const arcPts = [
-          [0.3764, 0.6468], [0.3775, 0.6463], [0.3786, 0.6462], [0.3798, 0.6464],
-        ];
-        for (let i = 0; i < arcPts.length; i++) {
-          const ax = toX(arcPts[i][0]);
-          const ay = toY(arcPts[i][1]);
-          const pGlow = 0.75 + 0.25 * Math.sin(tSec * 4.2 + i * 1.3);
-          const rw = Math.max(3, 5.2 * s);
-          const rh = Math.max(2, 3.6 * s);
-          ctx.fillStyle = isNight
-            ? `rgba(255, 206, 94, ${(0.76 * pGlow).toFixed(2)})`
-            : (isSunset ? `rgba(255, 204, 102, ${(0.54 * pGlow).toFixed(2)})` : `rgba(255, 214, 118, ${(0.38 * pGlow).toFixed(2)})`);
-          ctx.fillRect(Math.round(ax - rw * 0.5), Math.round(ay - rh * 0.5), Math.round(rw), Math.round(rh));
-        }
-        // Soft warm plaza glow spilling onto Schokoladenplatz at Alpenglow & Night
-        if (isNight || isSunset) {
-          const gRad = 26 * s;
-          const grad = ctx.createRadialGradient(toX(0.3782), toY(0.6472), 2 * s, toX(0.3782), toY(0.6498), gRad);
-          grad.addColorStop(0, isNight ? `rgba(255, 202, 92, ${(0.34 * shimmer).toFixed(2)})` : `rgba(255, 198, 104, ${(0.20 * shimmer).toFixed(2)})`);
-          grad.addColorStop(1, 'rgba(255, 198, 104, 0)');
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.ellipse(toX(0.3782), toY(0.6498), gRad * 1.25, gRad * 0.72, -0.15, 0, Math.PI * 2);
-          ctx.fill();
-        }
+    if (boxInView(0.372, 0.643, 0.384, 0.658)) {
+      const shimmer = 0.76 + 0.24 * Math.sin(tSec * 3.4);
+      const arcPts = [
+        [0.3764, 0.6468], [0.3775, 0.6463], [0.3786, 0.6462], [0.3798, 0.6464],
+      ];
+      for (let i = 0; i < arcPts.length; i++) {
+        const ax = toX(arcPts[i][0]);
+        const ay = toY(arcPts[i][1]);
+        const pGlow = 0.75 + 0.25 * Math.sin(tSec * 4.2 + i * 1.3);
+        const rw = Math.max(3, 5.2 * s);
+        const rh = Math.max(2, 3.6 * s);
+        ctx.fillStyle = isNight
+          ? `rgba(255, 206, 94, ${(0.76 * pGlow).toFixed(2)})`
+          : (isSunset ? `rgba(255, 204, 102, ${(0.54 * pGlow).toFixed(2)})` : `rgba(255, 214, 118, ${(0.38 * pGlow).toFixed(2)})`);
+        ctx.fillRect(Math.round(ax - rw * 0.5), Math.round(ay - rh * 0.5), Math.round(rw), Math.round(rh));
+      }
+      if (isNight || isSunset) {
+        const gRad = 26 * s;
+        const grad = ctx.createRadialGradient(toX(0.3782), toY(0.6472), 2 * s, toX(0.3782), toY(0.6498), gRad);
+        grad.addColorStop(0, isNight ? `rgba(255, 202, 92, ${(0.34 * shimmer).toFixed(2)})` : `rgba(255, 198, 104, ${(0.20 * shimmer).toFixed(2)})`);
+        grad.addColorStop(1, 'rgba(255, 198, 104, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(toX(0.3782), toY(0.6498), gRad * 1.25, gRad * 0.72, -0.15, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
-        // 7 strolling visitors & families cleanly centered on Schokoladenplatz cobblestones (with Lindt bags!)
-        const plazaWalkers = [
-          { u0: 0.3758, v0: 0.6510, u1: 0.3800, v1: 0.6496, spd: 0.08, ph: 0.1, bag: '#e5b93c' },
-          { u0: 0.3802, v0: 0.6524, u1: 0.3764, v1: 0.6504, spd: 0.07, ph: 0.45, bag: '#d62c28' },
-          { u0: 0.3770, v0: 0.6534, u1: 0.3794, v1: 0.6486, spd: 0.06, ph: 0.72, bag: '#e5b93c' },
-          { u0: 0.3762, v0: 0.6494, u1: 0.3790, v1: 0.6528, spd: 0.055, ph: 0.25, bag: null },
-          { u0: 0.3792, v0: 0.6488, u1: 0.3772, v1: 0.6520, spd: 0.065, ph: 0.88, bag: '#e5b93c' },
-          { u0: 0.3776, v0: 0.6495, u1: 0.3780, v1: 0.6500, spd: 0.03, ph: 0.3, bag: '#d62c28' },
-          { u0: 0.3783, v0: 0.6498, u1: 0.3787, v1: 0.6503, spd: 0.03, ph: 0.6, bag: null },
-        ];
-        const nVis = isNight ? 3 : plazaWalkers.length;
-        for (let i = 0; i < nVis; i++) {
-          const w = plazaWalkers[i];
-          const p = 0.5 + 0.5 * Math.sin(tSec * w.spd * Math.PI * 2 + w.ph * Math.PI * 2);
-          const vx = toX(w.u0 + (w.u1 - w.u0) * p);
-          const vy = toY(w.v0 + (w.v1 - w.v0) * p);
-          const coat = shadeHex(coats[i % coats.length], 1.0, currentMode);
-          const pants = shadeHex('#263040', 1.0, currentMode);
-          drawMiniPerson(vx, vy, s, coat, pants, hairs[i % hairs.length], isNight, tSec * 7.5 + i * 1.9, w.bag);
-        }
+      const plazaWalkers = [
+        { u0: 0.3758, v0: 0.6510, u1: 0.3800, v1: 0.6496, spd: 0.08, ph: 0.1, bag: '#e5b93c' },
+        { u0: 0.3802, v0: 0.6524, u1: 0.3764, v1: 0.6504, spd: 0.07, ph: 0.45, bag: '#d62c28' },
+        { u0: 0.3770, v0: 0.6534, u1: 0.3794, v1: 0.6486, spd: 0.06, ph: 0.72, bag: '#e5b93c' },
+        { u0: 0.3762, v0: 0.6494, u1: 0.3790, v1: 0.6528, spd: 0.055, ph: 0.25, bag: null },
+        { u0: 0.3792, v0: 0.6488, u1: 0.3772, v1: 0.6520, spd: 0.065, ph: 0.88, bag: '#e5b93c' },
+        { u0: 0.3776, v0: 0.6495, u1: 0.3780, v1: 0.6500, spd: 0.03, ph: 0.3, bag: '#d62c28' },
+        { u0: 0.3783, v0: 0.6498, u1: 0.3787, v1: 0.6503, spd: 0.03, ph: 0.6, bag: null },
+      ];
+      const nVis = isNight ? 3 : plazaWalkers.length;
+      for (let i = 0; i < nVis; i++) {
+        const w = plazaWalkers[i];
+        const p = 0.5 + 0.5 * Math.sin(tSec * w.spd * Math.PI * 2 + w.ph * Math.PI * 2);
+        const vx = toX(w.u0 + (w.u1 - w.u0) * p);
+        const vy = toY(w.v0 + (w.v1 - w.v0) * p);
+        const coat = shadeHex(coats[i % coats.length], 1.0, currentMode);
+        const pants = shadeHex('#263040', 1.0, currentMode);
+        drawMiniPerson(vx, vy, s, coat, pants, hairs[i % hairs.length], isNight, tSec * 7.5 + i * 1.9, w.bag);
       }
     }
 
     // =========================================================================
     // 3. TC KILCHBERG CLAY TENNIS COURTS — 2 Live Animated Pixel-Art Tennis Matches!
     // =========================================================================
-    if (!isNight) {
+    if (!isNight && boxInView(0.158, 0.338, 0.184, 0.360)) {
       const courts = [
-        // Upper-right clay court (TC Kilchberg Court 1)
         { swU: 0.1736, swV: 0.3484, neU: 0.1794, neV: 0.3418, latU: 0.0012, latV: 0.0020, ph: 0.0, freq: 1.55 },
-        // Center-left clay court behind clubhouse (TC Kilchberg Court 3)
         { swU: 0.1616, swV: 0.3544, neU: 0.1670, neV: 0.3484, latU: 0.0011, latV: 0.0019, ph: 2.1, freq: 1.38 },
       ];
       for (let ci = 0; ci < courts.length; ci++) {
         const c = courts[ci];
-        const midX = toX((c.swU + c.neU) * 0.5);
-        const midY = toY((c.swV + c.neV) * 0.5);
-        if (!inView(midX, midY, 120)) continue;
+        if (!boxInView(c.swU - 0.003, c.neV - 0.004, c.neU + 0.003, c.swV + 0.004)) continue;
 
-        // Crisp white tennis net + dark net posts fitted strictly inside the clay court!
         const netU0 = (c.swU + c.neU) * 0.5 - c.latU * 0.92;
         const netV0 = (c.swV + c.neV) * 0.5 - c.latV * 0.92;
         const netU1 = (c.swU + c.neU) * 0.5 + c.latU * 0.92;
@@ -3040,13 +3036,11 @@
         ctx.moveTo(nx0, ny0);
         ctx.lineTo(nx1, ny1);
         ctx.stroke();
-        // Tiny dark green net posts
         const postSz = Math.max(1.5, Math.round(1.4 * s));
         ctx.fillStyle = '#1f2937';
         ctx.fillRect(Math.round(nx0 - postSz * 0.5), Math.round(ny0 - postSz * 0.5), postSz, postSz);
         ctx.fillRect(Math.round(nx1 - postSz * 0.5), Math.round(ny1 - postSz * 0.5), postSz, postSz);
 
-        // Volley cycle: 0..1 goes SW -> NE, 1..2 goes NE -> SW!
         const cyc = (tSec * c.freq + c.ph) % 2.0;
         const ballF = cyc < 1.0 ? cyc : (2.0 - cyc);
         const latA = Math.sin(tSec * 0.78 + ci * 2.4) * 0.62;
@@ -3062,7 +3056,6 @@
         drawMiniPerson(pBx, pBy, s * 0.92, whiteKit, shortCol, hairs[ci], false, tSec * 10.0 + 1.0);
         drawMiniPerson(pAx, pAy, s * 0.92, whiteKit, '#1e3a5f', hairs[ci + 2], false, tSec * 10.0);
 
-        // 3D parabolic neon-yellow tennis ball + grounded court shadow!
         const bu = c.swU + (c.neU - c.swU) * ballF + c.latU * ballLat;
         const bv = c.swV + (c.neV - c.swV) * ballF + c.latV * ballLat;
         const arcH = Math.sin(ballF * Math.PI) * 9.0 * s;
@@ -3079,11 +3072,11 @@
     // =========================================================================
     // 4. SEEBAD KILCHBERG — Pool Swimmers, Pixel-Art Beach Umbrellas, Jetty Bathers & Lake Swimmers!
     // =========================================================================
-    {
+    if (boxInView(0.400, 0.698, 0.429, 0.732)) {
       const poolX = toX(0.4090);
       const poolY = toY(0.7092);
-      if (inView(poolX, poolY, 180)) {
-        if (isNight) {
+      if (isNight) {
+        if (boxInView(0.404, 0.703, 0.415, 0.716)) {
           const grad = ctx.createRadialGradient(poolX, poolY, 2 * s, poolX, poolY, 22 * s);
           grad.addColorStop(0, 'rgba(64, 228, 240, 0.34)');
           grad.addColorStop(1, 'rgba(32, 160, 200, 0)');
@@ -3091,8 +3084,10 @@
           ctx.beginPath();
           ctx.ellipse(poolX, poolY, 22 * s, 14 * s, -0.35, 0, Math.PI * 2);
           ctx.fill();
-        } else {
-          // 3 animated swimmers gliding back & forth inside Seebad Kilchberg's turquoise pool!
+        }
+      } else {
+        // 3 animated swimmers inside Seebad Kilchberg's turquoise pool
+        if (boxInView(0.405, 0.704, 0.414, 0.715)) {
           const swimCaps = ['#f43f5e', '#facc15', '#ffffff'];
           for (let sw = 0; sw < 3; sw++) {
             const prog = 0.5 + 0.5 * Math.sin(tSec * (0.28 + sw * 0.05) + sw * 2.1);
@@ -3106,8 +3101,10 @@
             ctx.fillStyle = swimCaps[sw];
             ctx.fillRect(Math.round(sx - px * 0.5), Math.round(sy - px * 0.7), Math.max(2, Math.round(px * 1.2)), Math.max(2, Math.round(px * 1.1)));
           }
+        }
 
-          // 3 crisp pixel-grid-snapped 90s pixel-art beach umbrellas on the Seebad sunlit lawn!
+        // 3 crisp pixel-grid-snapped 90s pixel-art beach umbrellas on the Seebad sunlit lawn
+        if (boxInView(0.401, 0.699, 0.409, 0.706)) {
           const umbrellas = [
             { u: 0.4036, v: 0.7018, c1: '#d9382e', c2: '#f4f6f8', dk: '#8f1d18' },
             { u: 0.4052, v: 0.7010, c1: '#2563eb', c2: '#f4f6f8', dk: '#1a3f94' },
@@ -3118,34 +3115,35 @@
             const uy = Math.round(toY(um.v));
             const p = Math.max(1.0, s);
             const w = (n) => Math.max(1, Math.round(n * p));
-            // Grounded pixel shadow + wooden pole
             ctx.fillStyle = 'rgba(16, 28, 22, 0.34)';
             ctx.fillRect(ux - w(2), uy + w(1), w(7), w(2));
             ctx.fillStyle = '#5c4028';
             ctx.fillRect(ux, uy - w(2), w(1), w(3));
-            // Dark pixel outline silhouette
             ctx.fillStyle = 'rgba(22, 26, 32, 0.82)';
             ctx.fillRect(ux - w(4), uy - w(4), w(9), w(3));
             ctx.fillRect(ux - w(3), uy - w(5), w(7), w(5));
-            // Striped canopy body (shaded lower rim + vibrant upper panels + white center stripe)
             ctx.fillStyle = shadeHex(um.dk, 1.0, currentMode);
             ctx.fillRect(ux - w(3), uy - w(2), w(7), w(1.2));
             ctx.fillStyle = shadeHex(um.c1, 1.04, currentMode);
             ctx.fillRect(ux - w(3), uy - w(4), w(7), w(2.2));
             ctx.fillStyle = shadeHex(um.c2, 1.04, currentMode);
             ctx.fillRect(ux - w(1), uy - w(4.5), w(3), w(3.2));
-            // Bright crown peak pixel
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(ux, uy - w(4.5), w(1), w(1));
           }
+        }
 
-          // 4 bathers strolling along the long wooden Seebad Kilchberg jetty + 2 open-lake swimmers off the tip!
+        // 4 bathers strolling along the long wooden Seebad Kilchberg jetty (zoom-invariant UV bounds!)
+        if (boxInView(0.410, 0.711, 0.425, 0.727)) {
           for (let jb = 0; jb < 4; jb++) {
             const f = 0.14 + 0.76 * (0.5 + 0.5 * Math.sin(tSec * (0.11 + jb * 0.03) + jb * 1.7));
             const ju = 0.4126 + (0.4216 - 0.4126) * f;
             const jv = 0.7136 + (0.7232 - 0.7136) * f;
             drawMiniPerson(toX(ju), toY(jv), s * 0.92, shadeHex(coats[(jb + 2) % coats.length], 1.0, currentMode), '#2b4c7e', hairs[jb], false, tSec * 6.5 + jb);
           }
+        }
+        // 2 open-lake swimmers off the Seebad pier tip
+        if (boxInView(0.419, 0.721, 0.428, 0.731)) {
           for (let ls = 0; ls < 2; ls++) {
             const ang = tSec * (0.32 + ls * 0.08) + ls * 3.1;
             const lsu = 0.4235 + Math.cos(ang) * 0.0022;
@@ -3166,9 +3164,7 @@
     // 5. BENDLIKON ZSG STEAMER PIER — Waiting Passengers, Lake Zurich Swans & SUP Paddlers!
     // =========================================================================
     {
-      const pierX = toX(0.5835);
-      const pierY = toY(0.5782);
-      if (inView(pierX, pierY, 200)) {
+      if (boxInView(0.578, 0.573, 0.589, 0.584)) {
         let shipNear = false;
         for (const sh of (animData.ships || [])) {
           if (sh.kind === 'zsg_steamer') {
@@ -3178,9 +3174,9 @@
         }
         const pCount = isNight ? 2 : 5;
         for (let i = 0; i < pCount; i++) {
-          const shift = shipNear ? 0.0005 : 0;
-          const pu = 0.5812 + i * 0.00095 + Math.sin(tSec * 0.4 + i * 1.7) * 0.00025 + shift;
-          const pv = 0.5786 - i * 0.00035 + Math.cos(tSec * 0.35 + i * 2.1) * 0.00018 + shift;
+          const shift = shipNear ? 0.0004 : 0;
+          const pu = 0.5818 + i * 0.00088 + Math.sin(tSec * 0.4 + i * 1.7) * 0.00022 + shift;
+          const pv = 0.5792 - i * 0.00042 + Math.cos(tSec * 0.35 + i * 2.1) * 0.00016 + shift;
           drawMiniPerson(
             toX(pu), toY(pv), s * 0.96,
             shadeHex(coats[(i + 1) % coats.length], 1.0, currentMode),
@@ -3253,51 +3249,48 @@
     // =========================================================================
     // 6. BAHNHOF KILCHBERG — Platform Commuters, Footbridge Walkers & Warm Platform Lamps!
     // =========================================================================
-    {
-      const bhfX = toX(0.558);
-      const bhfY = toY(0.498);
-      if (inView(bhfX, bhfY, 220)) {
-        if (isNight || isSunset) {
-          for (let l = 0; l < 5; l++) {
-            const f = l / 4;
-            const lu = 0.5505 + f * (0.5645 - 0.5505);
-            const lv = 0.5030 + f * (0.4956 - 0.5030);
-            const lx = toX(lu);
-            const ly = toY(lv);
-            const gr = 14 * s;
-            const grad = ctx.createRadialGradient(lx, ly, 1 * s, lx, ly, gr);
-            grad.addColorStop(0, isNight ? 'rgba(255, 224, 146, 0.36)' : 'rgba(255, 214, 140, 0.18)');
-            grad.addColorStop(1, 'rgba(255, 214, 140, 0)');
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(lx, ly, gr, 0, Math.PI * 2);
-            ctx.fill();
-          }
+    if (boxInView(0.547, 0.489, 0.570, 0.508)) {
+      if (isNight || isSunset) {
+        for (let l = 0; l < 5; l++) {
+          const f = l / 4;
+          const lu = 0.5505 + f * (0.5645 - 0.5505);
+          const lv = 0.5030 + f * (0.4956 - 0.5030);
+          const lx = toX(lu);
+          const ly = toY(lv);
+          if (!inView(lx, ly, 36)) continue;
+          const gr = 14 * s;
+          const grad = ctx.createRadialGradient(lx, ly, 1 * s, lx, ly, gr);
+          grad.addColorStop(0, isNight ? 'rgba(255, 224, 146, 0.36)' : 'rgba(255, 214, 140, 0.18)');
+          grad.addColorStop(1, 'rgba(255, 214, 140, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(lx, ly, gr, 0, Math.PI * 2);
+          ctx.fill();
         }
-        // 8 commuters standing cleanly on the concrete NW & SE Bahnhof Kilchberg platforms
-        const nComm = isNight ? 4 : 8;
-        for (let c = 0; c < nComm; c++) {
-          const isSE = c % 2 === 1;
-          const baseF = 0.12 + (c / nComm) * 0.78 + Math.sin(tSec * 0.25 + c * 1.9) * 0.04;
-          const cu = (isSE ? 0.5518 : 0.5502) + baseF * 0.0145;
-          const cv = (isSE ? 0.5050 : 0.5032) - baseF * 0.0074;
-          drawMiniPerson(
-            toX(cu), toY(cv), s * 0.92,
-            shadeHex(coats[(c + 3) % coats.length], 1.0, currentMode),
-            shadeHex('#1e293b', 1.0, currentMode),
-            hairs[c % hairs.length],
-            isNight,
-            tSec * 3.0 + c * 1.5,
-            c % 3 === 0 ? '#334155' : null,
-          );
-        }
-        // 2 pedestrians crossing the Bahnhof Kilchberg pedestrian footbridge!
-        for (let fb = 0; fb < 2; fb++) {
-          const pf = 0.5 + 0.5 * Math.sin(tSec * (0.14 + fb * 0.04) + fb * 2.5);
-          const fu = 0.5628 + (0.5668 - 0.5628) * pf;
-          const fv = 0.4912 + (0.4972 - 0.4912) * pf;
-          drawMiniPerson(toX(fu), toY(fv), s * 0.9, shadeHex(coats[fb + 4], 1.0, currentMode), '#27303f', hairs[fb + 1], isNight, tSec * 7.5 + fb);
-        }
+      }
+      // 8 commuters standing cleanly on the concrete NW & SE Bahnhof Kilchberg platforms
+      const nComm = isNight ? 4 : 8;
+      for (let c = 0; c < nComm; c++) {
+        const isSE = c % 2 === 1;
+        const baseF = 0.12 + (c / nComm) * 0.78 + Math.sin(tSec * 0.25 + c * 1.9) * 0.04;
+        const cu = (isSE ? 0.5518 : 0.5502) + baseF * 0.0145;
+        const cv = (isSE ? 0.5050 : 0.5032) - baseF * 0.0074;
+        drawMiniPerson(
+          toX(cu), toY(cv), s * 0.92,
+          shadeHex(coats[(c + 3) % coats.length], 1.0, currentMode),
+          shadeHex('#1e293b', 1.0, currentMode),
+          hairs[c % hairs.length],
+          isNight,
+          tSec * 3.0 + c * 1.5,
+          c % 3 === 0 ? '#334155' : null,
+        );
+      }
+      // 2 pedestrians crossing the Bahnhof Kilchberg pedestrian footbridge!
+      for (let fb = 0; fb < 2; fb++) {
+        const pf = 0.5 + 0.5 * Math.sin(tSec * (0.14 + fb * 0.04) + fb * 2.5);
+        const fu = 0.5628 + (0.5668 - 0.5628) * pf;
+        const fv = 0.4912 + (0.4972 - 0.4912) * pf;
+        drawMiniPerson(toX(fu), toY(fv), s * 0.9, shadeHex(coats[fb + 4], 1.0, currentMode), '#27303f', hairs[fb + 1], isNight, tSec * 7.5 + fb);
       }
     }
 
@@ -3310,14 +3303,12 @@
       const bv = 0.27 + Math.sin(tSec * 0.11) * 0.025 + bProg * 0.14;
       const bx = toX(bu);
       const by = toY(bv);
-      if (inView(bx, by, 120)) {
+      if (inView(bx, by, 70)) {
         const r = Math.max(4.5, 11.5 * s);
-        // Soft ground shadow far below
         ctx.fillStyle = 'rgba(18, 28, 44, 0.14)';
         ctx.beginPath();
         ctx.ellipse(bx + r * 1.8, by + r * 3.8, r * 0.9, r * 0.48, 0, 0, Math.PI * 2);
         ctx.fill();
-        // Woven wicker basket + rigging cables
         const basketY = by + r * 1.45;
         ctx.strokeStyle = 'rgba(60, 48, 38, 0.65)';
         ctx.lineWidth = Math.max(0.8, 0.8 * s);
@@ -3329,12 +3320,10 @@
         ctx.stroke();
         ctx.fillStyle = shadeHex('#8c5a32', 1.0, currentMode);
         ctx.fillRect(Math.round(bx - r * 0.28), Math.round(basketY), Math.max(2, Math.round(r * 0.56)), Math.max(2, Math.round(r * 0.42)));
-        // Occasional warm propane burner glow just above basket!
         if (Math.sin(tSec * 0.9) > 0.72) {
           ctx.fillStyle = '#ffcf48';
           ctx.fillRect(Math.round(bx - r * 0.12), Math.round(by + r * 0.95), Math.max(2, Math.round(r * 0.24)), Math.max(2, Math.round(r * 0.28)));
         }
-        // Iconic Swiss red, gold & white vertical-striped pixel envelope
         ctx.fillStyle = shadeHex('#d62828', 1.02, currentMode);
         ctx.beginPath();
         ctx.ellipse(bx, by, r, r * 1.12, 0, 0, Math.PI * 2);
@@ -3347,7 +3336,6 @@
         ctx.beginPath();
         ctx.ellipse(bx + r * 0.28, by, r * 0.26, r * 1.0, 0, 0, Math.PI * 2);
         ctx.fill();
-        // Crisp 90s dark outline & NW sunlit highlight crescent
         ctx.strokeStyle = 'rgba(30, 22, 26, 0.72)';
         ctx.lineWidth = Math.max(0.9, 1.0 * s);
         ctx.beginPath();
@@ -3367,7 +3355,7 @@
         for (let i = 10; i < pts.length - 10; i += step) {
           const sx = toX(pts[i][0]);
           const sy = toY(pts[i][1]);
-          if (!inView(sx, sy, 32)) continue;
+          if (!inView(sx, sy, 24)) continue;
           const lr = Math.max(6, 12.5 * s);
           const grad = ctx.createRadialGradient(sx, sy, 0.5, sx, sy, lr);
           grad.addColorStop(0, 'rgba(255, 214, 128, 0.30)');
