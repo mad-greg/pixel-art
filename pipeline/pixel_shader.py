@@ -362,38 +362,52 @@ class SceneData:
         else:
             self.pv_clean_05m = np.zeros((GRID_H, GRID_W), dtype=np.bool_)
 
-        # Clean 0.5m mask of REAL moored boats, piers & Seebad rafts (strictly nearshore so open lake stays spotless!)
-        bg_lum05 = ndimage.uniform_filter(lum05, size=29)
+        # Clean 0.5m mask of REAL moored boats, piers & Seebad jetties (strictly excludes tall tan winter reed beds
+        # and shallow shoreline gravel/sandbars — keeping Lake Zurich crystal-clean!)
         near_shore = ndimage.binary_dilation(~self.lake_mask, iterations=190)  # within 95 m of shore
         open_water = ndimage.binary_erosion(self.lake_mask, iterations=1, border_value=0)
+        deep_harbor = ndimage.binary_erosion(self.lake_mask, iterations=4, border_value=0) & (self.bathy_z <= (LAKE_SURFACE_Z - 1.5))
         is_pier = (self.sem == G_PLATFORM_PIER) & self.lake_mask
-        is_lidar_obj = (
+        rb_diff05 = o_f[:, :, 0] - o_f[:, :, 2]
+        # Real timber/stone jetties & floating docks: flat low deck (0.45..1.38m) + bright neutral silver-grey wood/stone!
+        is_lidar_pier = (
             open_water
             & near_shore
             & (~self.bldg_roof_mask)
+            & (self.bathy_z <= (LAKE_SURFACE_Z - 0.50))
             & (self.chm >= 0.45)
-            & (self.chm <= 4.2)
-            & (lum05 > 82.0)
-            & ((o_f[:, :, 1] - o_f[:, :, 0]) < 8.0)
+            & (self.chm <= 1.38)
+            & (lum05 > 112.0)
+            & (chroma05 < 16.0)
+            & (rb_diff05 <= 10.0)
+            & ((o_f[:, :, 1] - o_f[:, :, 0]) < 6.0)
         )
-        is_bright_float = (
-            ndimage.binary_erosion(self.lake_mask, iterations=2, border_value=0)
+        # Real moored white sailboats & motorboats in deeper harbor water (> 1.5m deep, compact bright white hulls!)
+        is_moored_boat = (
+            deep_harbor
             & near_shore
             & (~self.bldg_roof_mask)
-            & (self.chm <= 4.2)
-            & (lum05 > 114.0)
-            & ((lum05 - bg_lum05) > 26.0)
-            & ((o_f[:, :, 1] - o_f[:, :, 0]) < 10.0)
+            & (self.chm >= 0.45)
+            & (self.chm <= 3.6)
+            & (lum05 > 152.0)
+            & (chroma05 < 18.0)
+            & (rb_diff05 <= 10.0)
         )
-        cand_float = (is_lidar_obj | is_bright_float) & (~is_pier)
-        lbl_f, n_f = ndimage.label(cand_float)
-        clean_float = np.zeros_like(cand_float)
-        if n_f > 0:
-            counts = np.bincount(lbl_f.ravel())
-            valid_lbl = (counts >= 3) & (counts <= 1800)
-            valid_lbl[0] = False
-            clean_float = valid_lbl[lbl_f]
-        self.harbor_obj_mask = is_pier | clean_float
+        clean_pier = np.zeros_like(is_lidar_pier)
+        lbl_p, n_p = ndimage.label(is_lidar_pier & (~is_pier))
+        if n_p > 0:
+            cnt_p = np.bincount(lbl_p.ravel())
+            keep_p = (cnt_p >= 6) & (cnt_p <= 1200)
+            keep_p[0] = False
+            clean_pier = keep_p[lbl_p]
+        clean_boat = np.zeros_like(is_moored_boat)
+        lbl_b, n_b = ndimage.label(is_moored_boat & (~is_pier) & (~clean_pier))
+        if n_b > 0:
+            cnt_b = np.bincount(lbl_b.ravel())
+            keep_b = (cnt_b >= 4) & (cnt_b <= 180)
+            keep_b[0] = False
+            clean_boat = keep_b[lbl_b]
+        self.harbor_obj_mask = is_pier | clean_pier | clean_boat
 
         # Precompute per-building 3D pitched-roof geometry, eave height, and clean de-shadowed roof RGB
         nb = len(self.buildings)
@@ -1017,19 +1031,26 @@ def _shade_drawn_ground_90s(
         fcol = np.where((p_hash[fi] < 95)[:, None], [174.0, 166.0, 150.0], [158.0, 150.0, 136.0]).astype(np.float32)
         gcol[fi] = fcol
 
-    # 6. Parking Lots (G_PARKING): clean slate asphalt + neat bay lines aligned to adjacent street angle!
+    # 6. Parking Lots (G_PARKING): smooth Swiss slate asphalt + crisp double-row white parking bays & driving aisles!
     is_pk = gsem == G_PARKING
     if is_pk.any():
         ki = np.nonzero(is_pk)[0]
-        kcol = np.where((p_hash[ki] < 70)[:, None], [94.0, 98.0, 106.0], [86.0, 90.0, 98.0]).astype(np.float32)
-        ka = rd_ang[ki]
-        ck, sk = np.cos(ka), np.sin(ka)
+        kcol = np.where((p_hash[ki] < 55)[:, None], [86.0, 90.0, 97.0], [80.0, 84.0, 91.0]).astype(np.float32)
+        pk_ang = math.radians(28.5)
+        ck, sk = math.cos(pk_ang), math.sin(pk_ang)
         ku = (ge[ki] - E_MIN) * ck + (gn[ki] - N_MIN) * sk
         kv = -(ge[ki] - E_MIN) * sk + (gn[ki] - N_MIN) * ck
-        # Clean aligned parking bays with central driving aisle
-        in_bay_band = (kv % 11.5) < 4.6
-        bay_line = in_bay_band & (((ku % 2.65) < 0.20) | ((kv % 11.5) < 0.20))
-        kcol[bay_line] = [196.0, 198.0, 202.0]
+        # Structured 15.4m parking module: 4.8m bay A + 0.2m head stripe + 4.8m bay B + 5.6m clean driving aisle
+        kv_m = kv % 15.4
+        in_bay = kv_m < 9.8
+        head_line = np.abs(kv_m - 4.9) < 0.18
+        stall_div = in_bay & ((ku % 2.65) < 0.20)
+        end_tick = (np.abs(kv_m) < 0.18) | (np.abs(kv_m - 9.8) < 0.18)
+        kcol[stall_div | head_line] = [212.0, 214.0, 218.0]
+        kcol[end_tick & ((ku % 2.65) < 0.55)] = [194.0, 196.0, 200.0]
+        # Subtle worn tire sheen along the center of open driving aisles
+        aisle_mid = (kv_m >= 11.4) & (kv_m <= 13.8)
+        kcol[aisle_mid] *= 0.94
         gcol[ki] = kcol
 
     # 7. Minor Village Streets (G_STREET_MINOR): clean 90s pixel-art slate asphalt + crisp 1px granite curb!
@@ -1776,41 +1797,125 @@ def _render_3d_sports_details(
             _draw_3d_seg(ce - 0.2 * ca_c, cn - 0.2 * sa_c, cz + 0.82, ce + 0.35 * ca_c, cn + 0.35 * sa_c, cz + 0.84, spot_c, oid=234000 + ci)
             _draw_3d_seg(ce + 0.85 * ca_c, cn + 0.85 * sa_c, cz + 0.55, ce + 1.15 * ca_c, cn + 1.15 * sa_c, cz + 0.48, spot_c, oid=234000 + ci)
 
-    # 6. Crisp Static 90s Pixel-Art Parked Cars neatly aligned inside Parking Lots (Lindt, Bahnhof, Village)!
+    # 6. True 3D Oriented Isometric Pixel-Art Parked Cars neatly centered inside painted parking stalls!
     pk_rows, pk_cols = np.nonzero(scene.sem == G_PARKING)
     if len(pk_rows) > 0:
-        # Subsample onto a clean 4.5m x 6.5m deterministic grid strictly inside G_PARKING
-        sel_pk = ((pk_rows % 9) == 4) & ((pk_cols % 11) == 5)
-        pr_s, pc_s = pk_rows[sel_pk], pk_cols[sel_pk]
+        pk_ang = math.radians(28.5)
+        ck, sk = math.cos(pk_ang), math.sin(pk_ang)
+        # Forward vector of car is perpendicular to ku (along kv, facing into or out of the driving aisle!)
+        fe_dir, fn_dir = -sk, ck   # along kv
+        se_dir, sn_dir = ck, sk    # along ku (across car width)
+
+        def _fill_3d_quad_car(e_c, n_c, hl, hw, z_val, col_rgb, oid, norm=(0.0, 0.0, 1.0)):
+            """Rasterize a crisp filled horizontal 3D oriented rectangle (car roof, hood, shadow, or cabin layer)."""
+            nu = max(3, int(round(2.0 * hl / 0.22)))
+            nv = max(2, int(round(2.0 * hw / 0.22)))
+            us_q = np.linspace(-hl, hl, nu, dtype=np.float32)
+            vs_q = np.linspace(-hw, hw, nv, dtype=np.float32)
+            uu, vv = np.meshgrid(us_q, vs_q, indexing="ij")
+            uf, vf = uu.ravel(), vv.ravel()
+            eq = e_c + uf * fe_dir + vf * se_dir
+            nq = n_c + uf * fn_dir + vf * sn_dir
+            zq = np.full_like(eq, z_val)
+            px, py, dd = camera.project(eq, nq, zq)
+            ix = np.round(px + shift_x).astype(np.int32)
+            iy = np.round(py + shift_y).astype(np.int32)
+            valid = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
+            if not valid.any():
+                return
+            ix, iy, dd = ix[valid], iy[valid], dd[valid]
+            win = dd < zbuf[iy, ix]
+            if win.any():
+                wx, wy, wd = ix[win], iy[win], dd[win]
+                zbuf[wy, wx] = wd
+                rgb_buf[wy, wx] = col_rgb
+                mat_buf[wy, wx] = M_BRIDGE
+                obj_buf[wy, wx] = oid
+                norm_buf[wy, wx] = norm
+                shadow_buf[wy, wx] = False
+
+        # Compute exact bounding range of (ku, kv) across all G_PARKING pixels
+        p_e_all = E_MIN + (pk_cols.astype(np.float32) + 0.5) * GRID_RES
+        p_n_all = N_MAX - (pk_rows.astype(np.float32) + 0.5) * GRID_RES
+        ku_all = (p_e_all - E_MIN) * ck + (p_n_all - N_MIN) * sk
+        kv_all = -(p_e_all - E_MIN) * sk + (p_n_all - N_MIN) * ck
+        iu_min, iu_max = int(math.floor(float(ku_all.min()) / 2.65)), int(math.ceil(float(ku_all.max()) / 2.65))
+        iv_min, iv_max = int(math.floor(float(kv_all.min()) / 15.4)), int(math.ceil(float(kv_all.max()) / 15.4))
+
         car_pal = [
-            [218.0, 220.0, 224.0],  # Swiss silver/white
-            [52.0, 64.0, 86.0],     # Dark navy
-            [176.0, 44.0, 44.0],    # Swiss red
-            [74.0, 78.0, 84.0],     # Anthracite metallic
-            [184.0, 174.0, 152.0],  # Warm champagne
-            [44.0, 88.0, 68.0],     # Alpine dark green
+            ([224.0, 226.0, 230.0], [168.0, 172.0, 178.0]),  # Pearl white
+            ([182.0, 188.0, 196.0], [128.0, 134.0, 144.0]),  # Metallic silver
+            ([68.0, 74.0, 82.0],    [44.0, 48.0, 56.0]),     # Anthracite metallic
+            ([48.0, 68.0, 108.0],   [32.0, 46.0, 78.0]),     # Midnight blue
+            ([176.0, 46.0, 46.0],   [126.0, 30.0, 32.0]),    # Swiss red
+            ([166.0, 156.0, 138.0], [118.0, 110.0, 96.0]),   # Warm titanium/champagne
+            ([44.0, 88.0, 66.0],    [28.0, 60.0, 44.0]),     # Alpine dark green
         ]
-        for pi_k in range(len(pr_s)):
-            rr_k, cc_k = int(pr_s[pi_k]), int(pc_s[pi_k])
-            kh = ((rr_k * 73856093) ^ (cc_k * 19349663)) & 0xFF
-            if (kh % 3) == 0:  # ~66% parking lot occupancy looks super authentic!
-                continue
-            pe_k = E_MIN + (cc_k + 0.5) * GRID_RES
-            pn_k = N_MAX - (rr_k + 0.5) * GRID_RES
-            if crop_box_lv95 is not None and not (crop_box_lv95[0] <= pe_k <= crop_box_lv95[2] and crop_box_lv95[1] <= pn_k <= crop_box_lv95[3]):
-                continue
-            # Quick screen cull
-            px_k, py_k, _ = camera.project(np.array([pe_k]), np.array([pn_k]), np.array([float(scene.dem[rr_k, cc_k])]))
-            if px_k[0] + shift_x < -12 or px_k[0] + shift_x > W + 12 or py_k[0] + shift_y < -12 or py_k[0] + shift_y > H + 12:
-                continue
-            pz_k = float(scene.dem[rr_k, cc_k])
-            ang_k = float(scene.road_ang[rr_k, cc_k]) + (math.pi * 0.5)
-            ck, sk = math.cos(ang_k), math.sin(ang_k)
-            ccol = car_pal[kh % len(car_pal)]
-            # Lower car body + upper cabin/windshield!
-            _draw_3d_seg(pe_k - 1.65 * ck, pn_k - 1.65 * sk, pz_k + 0.55, pe_k + 1.65 * ck, pn_k + 1.65 * sk, pz_k + 0.55, ccol, oid=235000 + pi_k, thick=True)
-            _draw_3d_seg(pe_k - 1.65 * ck, pn_k - 1.65 * sk, pz_k + 0.92, pe_k + 1.65 * ck, pn_k + 1.65 * sk, pz_k + 0.92, ccol, oid=235000 + pi_k, thick=True)
-            _draw_3d_seg(pe_k - 0.85 * ck, pn_k - 0.85 * sk, pz_k + 1.32, pe_k + 0.85 * ck, pn_k + 0.85 * sk, pz_k + 1.32, [68.0, 92.0, 118.0], oid=235000 + pi_k, thick=True)
+
+        car_seq = 0
+        for iv in range(iv_min, iv_max + 1):
+            for bay_sub, bay_v_off in ((0, 2.45), (1, 7.35)):
+                kv_c = iv * 15.4 + bay_v_off
+                for iu in range(iu_min, iu_max + 1):
+                    ku_c = (iu + 0.5) * 2.65
+                    # Convert stall center back to LV95 (E, N)
+                    pe_k = E_MIN + ku_c * ck - kv_c * sk
+                    pn_k = N_MIN + ku_c * sk + kv_c * ck
+                    if crop_box_lv95 is not None and not (
+                        crop_box_lv95[0] - 4.0 <= pe_k <= crop_box_lv95[2] + 4.0
+                        and crop_box_lv95[1] - 4.0 <= pn_k <= crop_box_lv95[3] + 4.0
+                    ):
+                        continue
+                    # Deterministic ~56% realistic Swiss parking occupancy
+                    kh = ((iu * 73856093) ^ (iv * 19349663) ^ (bay_sub * 83492791)) & 0xFF
+                    if (kh % 9) >= 5:
+                        continue
+                    # Strictly verify center + all 4 car corners are inside G_PARKING & clear of buildings/hedges!
+                    ok_bay = True
+                    for d_l, d_w in ((0.0, 0.0), (-1.95, -0.82), (-1.95, 0.82), (1.95, -0.82), (1.95, 0.82)):
+                        ce_t = pe_k + d_l * fe_dir + d_w * se_dir
+                        cn_t = pn_k + d_l * fn_dir + d_w * sn_dir
+                        rc_t = int(round((N_MAX - cn_t) * 2.0))
+                        cc_t = int(round((ce_t - E_MIN) * 2.0))
+                        if not (0 <= rc_t < GRID_H and 0 <= cc_t < GRID_W):
+                            ok_bay = False
+                            break
+                        if scene.sem[rc_t, cc_t] != G_PARKING or scene.bldg_roof_mask[rc_t, cc_t] or scene.hedge_mask[rc_t, cc_t]:
+                            ok_bay = False
+                            break
+                    if not ok_bay:
+                        continue
+
+                    rc_c = int(round((N_MAX - pn_k) * 2.0))
+                    cc_c = int(round((pe_k - E_MIN) * 2.0))
+                    pz_k = float(scene.dem[rc_c, cc_c])
+                    px_k, py_k, _ = camera.project(np.array([pe_k]), np.array([pn_k]), np.array([pz_k]))
+                    if px_k[0] + shift_x < -16 or px_k[0] + shift_x > W + 16 or py_k[0] + shift_y < -16 or py_k[0] + shift_y > H + 16:
+                        continue
+
+                    top_c, side_c = car_pal[kh % len(car_pal)]
+                    oid_c = 235000 + car_seq
+                    car_seq += 1
+                    # Subtle jitter (+-0.18m) so parked cars look naturally parked by humans!
+                    j_l = (((kh >> 3) & 7) - 3.5) * 0.05
+                    pe_k += j_l * fe_dir
+                    pn_k += j_l * fn_dir
+                    # 1. Grounded dark undercarriage contact shadow
+                    _fill_3d_quad_car(pe_k, pn_k, 2.05, 0.90, pz_k + 0.06, [36.0, 40.0, 46.0], oid_c)
+                    # 2. Solid 3D lower car body (side skirts + sunlit hood & trunk deck!)
+                    _fill_3d_quad_car(pe_k, pn_k, 1.98, 0.84, pz_k + 0.36, side_c, oid_c, norm=(0.55, -0.45, 0.70))
+                    _fill_3d_quad_car(pe_k, pn_k, 1.98, 0.84, pz_k + 0.62, side_c, oid_c, norm=(0.55, -0.45, 0.70))
+                    _fill_3d_quad_car(pe_k, pn_k, 1.94, 0.82, pz_k + 0.84, top_c, oid_c, norm=(0.0, 0.0, 1.0))
+                    # 3. Inset 3D glass greenhouse & windshields (dark blue-slate glass + sunlit roof panel!)
+                    glass_c = [48.0, 68.0, 92.0]
+                    _fill_3d_quad_car(pe_k - 0.12 * fe_dir, pn_k - 0.12 * fn_dir, 1.12, 0.72, pz_k + 1.06, glass_c, oid_c, norm=(0.3, -0.3, 0.9))
+                    _fill_3d_quad_car(pe_k - 0.12 * fe_dir, pn_k - 0.12 * fn_dir, 1.04, 0.70, pz_k + 1.24, glass_c, oid_c, norm=(0.3, -0.3, 0.9))
+                    roof_hi = [min(244.0, c * 1.06) for c in top_c]
+                    _fill_3d_quad_car(pe_k - 0.16 * fe_dir, pn_k - 0.16 * fn_dir, 0.82, 0.66, pz_k + 1.38, roof_hi, oid_c, norm=(0.0, 0.0, 1.0))
+                    # 4. Crisp front headlights & rear red taillights
+                    facing = 1.0 if (bay_sub == 1) else -1.0
+                    _fill_3d_quad_car(pe_k + facing * 1.88 * fe_dir, pn_k + facing * 1.88 * fn_dir, 0.12, 0.68, pz_k + 0.78, [232.0, 236.0, 224.0], oid_c)
+                    _fill_3d_quad_car(pe_k - facing * 1.88 * fe_dir, pn_k - facing * 1.88 * fn_dir, 0.12, 0.68, pz_k + 0.78, [188.0, 42.0, 42.0], oid_c)
 
 
 def _render_sculpted_pixel_art_trees_and_hedges(
@@ -2725,7 +2830,7 @@ def render_diorama(
             f_mat = np.where(st_f == 1, M_ROOF, M_WALL).astype(np.uint8)
 
             # -----------------------------------------------------------------
-            # A. ROOF PIXELS (V6.0): Jewel-Like 90s Pixel-Art Roofs, Zero Blue Shadow Static!
+            # A. ROOF PIXELS (V6.1): Authentic 25cm SWISSIMAGE Satellite Roof Textures + Crisp 90s Pixel-Art Relief!
             # -----------------------------------------------------------------
             rm = st_f == 1
             if rm.any():
@@ -2734,11 +2839,32 @@ def render_diorama(
                 r_norms = norms_v[r_ft]
                 re_r, rn_r, rz_r, ru_r = fe[rm], fn[rm], fz[rm], fu[rm]
 
-                r_alb = scene.bldg_clean_roof_rgb[r_bi].copy()
+                r_clean = scene.bldg_clean_roof_rgb[r_bi].copy()
                 r_kind = scene.bldg_roof_kind[r_bi]
                 pitched = r_norms[:, 2] < 0.93
 
-                # 1. Pitched Roofs: Crisp overlapping Swiss clay/slate tile courses with sunlit top lip & dark overlap!
+                # Verified rooftop Solar PV mask (morphologically verified >= 3.5 m^2 arrays only)
+                pv_c05 = np.clip(((re_r - E_MIN) * 2.0).astype(np.int32), 0, GRID_W - 1)
+                pv_r05 = np.clip(((N_MAX - rn_r) * 2.0).astype(np.int32), 0, GRID_H - 1)
+                is_pv = scene.pv_clean_05m[pv_r05, pv_c05]
+
+                # Sample TRUE 25 cm SWISSIMAGE DOP10 satellite roof texture!
+                raw_r25 = sample_ortho_25cm(scene, re_r, rn_r)
+                sat_r = condition_90s_albedo(raw_r25, shadow_knee=66.0, vibrancy=1.18)
+                sat_lum = 0.299 * sat_r[:, 0] + 0.587 * sat_r[:, 1] + 0.114 * sat_r[:, 2]
+                ref_rgb = scene.bldg_sunlit_roof_rgb[r_bi]
+                ref_lum = np.maximum(58.0, 0.299 * ref_rgb[:, 0] + 0.587 * ref_rgb[:, 1] + 0.114 * ref_rgb[:, 2])
+
+                # Guard ONLY against overhanging green tree canopies on non-green roofs & pitch-black aerial cast shadows
+                is_overhang_leaf = (r_kind != 3) & (r_bi != 1443) & ((sat_r[:, 1] - sat_r[:, 0]) > 10.0) & ((sat_r[:, 1] - sat_r[:, 2]) > 8.0)
+                is_deep_aerial_sh = (sat_lum < (0.48 * ref_lum)) & (~is_pv) & (r_bi != 1443)
+
+                # Blend authentic satellite texture (highest on flat roofs & Lindt HoC, rich natural balance on pitched roofs)
+                base_w = np.where(r_bi == 1443, 0.95, np.where(pitched, 0.72, 0.88)).astype(np.float32)
+                sat_w = np.where(is_overhang_leaf, 0.0, np.where(is_deep_aerial_sh, 0.25, base_w))[:, None]
+                r_alb = sat_w * sat_r + (1.0 - sat_w) * r_clean
+
+                # 1. Pitched Roofs: Subtle crisp 90s pixel-art clay/slate tile course overlap relief & dark eave line!
                 if pitched.any():
                     pi_r = np.nonzero(pitched)[0]
                     rz_p = rz_r[pi_r]
@@ -2748,100 +2874,35 @@ def render_diorama(
                     course_idx = np.floor(course_f).astype(np.int32)
                     in_course = course_f - course_idx
                     u_f = ru_p * 2.05 + (course_idx & 1) * 0.5
-                    u_idx = np.floor(u_f).astype(np.int32)
-                    u_tile = u_f - u_idx
+                    u_tile = u_f - np.floor(u_f)
 
-                    # Organic per-tile warm/cool tonal variation (real kiln-fired Swiss clay tiles!)
-                    t_hash = ((course_idx * 73856093) ^ (u_idx * 19349663) ^ (rb_p * 40503)) & 15
-                    t_var = ((t_hash.astype(np.float32) / 15.0) - 0.5) * 16.0
-                    is_clay = r_kind[pi_r] == 0
-                    r_alb[pi_r] = np.clip(
-                        r_alb[pi_r] + np.where(is_clay[:, None], t_var[:, None] * np.array([1.15, 0.85, 0.65]), t_var[:, None] * 0.65),
-                        28.0, 238.0,
+                    # Subtle tile overlap modulation preserving real satellite dormers, Velux windows & weathering
+                    r_alb[pi_r[in_course < 0.24]] *= 0.87
+                    r_alb[pi_r[(in_course >= 0.76) & (in_course < 0.94)]] = np.minimum(
+                        244.0, r_alb[pi_r[(in_course >= 0.76) & (in_course < 0.94)]] * 1.045
                     )
-                    # Crisp 1px dark under-lap shadow + sunlit top ridge lip on each overlapping tile row!
-                    r_alb[pi_r[in_course < 0.25]] *= 0.80
-                    r_alb[pi_r[(in_course >= 0.76) & (in_course < 0.94)]] = np.minimum(242.0, r_alb[pi_r[(in_course >= 0.76) & (in_course < 0.94)]] * 1.07)
-                    # Subtle vertical tile side seam
-                    r_alb[pi_r[u_tile < 0.14]] *= 0.92
-                    # Crisp dark eave shadow band along bottom edge of pitched roof
+                    r_alb[pi_r[u_tile < 0.12]] *= 0.95
                     eave_d = rz_p - scene.bldg_eave_z[rb_p]
-                    r_alb[pi_r[(eave_d >= -0.25) & (eave_d < 0.38)]] *= 0.80
+                    r_alb[pi_r[(eave_d >= -0.25) & (eave_d < 0.36)]] *= 0.82
 
-                    # Crisp Velux roof skylights cleanly placed (1-2 per roof) on ~35% of medium pitched Swiss houses (NOT barns!)
-                    bldg_fw_arr = np.array([b["footprint_w"] for b in scene.buildings], dtype=np.float32)
-                    bldg_fl_arr = np.array([b["footprint_l"] for b in scene.buildings], dtype=np.float32)
-                    r_mid_z = 0.52 * scene.bldg_eave_z[rb_p] + 0.48 * bldg_z1[rb_p]
-                    has_sky = (
-                        ((rb_p % 3) == 1)
-                        & ((bldg_z1[rb_p] - scene.bldg_eave_z[rb_p]) >= 2.2)
-                        & (bldg_fw_arr[rb_p] <= 22.0)
-                        & (bldg_fl_arr[rb_p] <= 22.0)
-                        & (rb_p != 1715)
-                    )
-                    # Place 1-2 skylights neatly near roof center (|ru_p| <= 3.6m)
-                    sky_u = np.where((rb_p & 1) == 0, ru_p, np.abs(ru_p) - 2.15)
-                    sky_dz = rz_p - r_mid_z
-                    in_sky_frame = has_sky & (np.abs(sky_u) <= 0.68) & (np.abs(sky_dz) <= 0.56) & (eave_d >= 0.9)
-                    in_sky_glass = has_sky & (np.abs(sky_u) <= 0.50) & (np.abs(sky_dz) <= 0.40) & (eave_d >= 0.9)
-                    if in_sky_frame.any():
-                        r_alb[pi_r[in_sky_frame]] = [176.0, 180.0, 184.0]
-                        r_alb[pi_r[in_sky_glass]] = [58.0, 84.0, 118.0] if not preset.is_night else [242.0, 196.0, 108.0]
-
-                # 2. Flat Roofs: Clean limestone parapet coping + inner shadow + gravel ballast / lush sedum eco-roof!
+                # 2. Flat Roofs (including Lindt Home of Chocolate's EXACT real satellite roof!):
+                # Keep authentic 25cm satellite texture + crisp outer aluminum/limestone parapet coping & inner shadow!
                 flat = ~pitched
                 if flat.any():
                     fi_r = np.nonzero(flat)[0]
                     est = sample_roof_edge_25cm(scene, re_r[fi_r], rn_r[fi_r])
-                    rx25 = np.floor((re_r[fi_r] - E_MIN) * 4.0).astype(np.int32)
-                    ry25 = np.floor((rn_r[fi_r] - N_MIN) * 4.0).astype(np.int32)
-                    rhash = ((rx25 * 73856093) ^ (ry25 * 19349663)) & 0xFF
-                    is_eco = r_kind[fi_r] == 3
-                    # Gravel ballast interior: subtle crisp pebble stipple + clean architectural expansion seams
-                    r_alb[fi_r[(~is_eco) & (rhash < 64)]] *= 0.94
-                    r_alb[fi_r[(~is_eco) & (rhash >= 192)]] *= 1.04
-                    f_seam = (~is_eco) & (est >= 3) & ((((re_r[fi_r] * 0.85 - rn_r[fi_r] * 0.52) % 8.5) < 0.28))
-                    r_alb[fi_r[f_seam]] *= 0.90
-                    # Sedum extensive green roof: lush multi-tone moss/sedum + neat gravel drainage rim near parapet!
-                    eco_drain = is_eco & (est == 3)
-                    r_alb[fi_r[is_eco & (rhash < 85)]] *= 0.87
-                    r_alb[fi_r[is_eco & (rhash >= 175)]] *= 1.10
-                    r_alb[fi_r[eco_drain]] = [148.0, 146.0, 140.0]
-
-                    # Lindt Home of Chocolate (bi == 1443): Iconic 4 oval/rectangular glass atrium skylights!
-                    is_hoc_roof = r_bi[fi_r] == 1443
-                    if is_hoc_roof.any():
-                        hi_rf = np.nonzero(is_hoc_roof)[0]
-                        he_r, hn_r = re_r[fi_r[hi_rf]], rn_r[fi_r[hi_rf]]
-                        # Local roof axis along Lindt HoC building (angled ~-22 deg from North)
-                        ang_h = math.radians(-22.0)
-                        uh = (he_r - 2684094.0) * math.cos(ang_h) + (hn_r - 1241434.0) * math.sin(ang_h)
-                        vh = -(he_r - 2684094.0) * math.sin(ang_h) + (hn_r - 1241434.0) * math.cos(ang_h)
-                        on_sky_f = np.zeros(len(hi_rf), dtype=np.bool_)
-                        on_sky_g = np.zeros(len(hi_rf), dtype=np.bool_)
-                        for v_c in (-18.0, -6.0, 6.0, 18.0):
-                            on_sky_f |= (np.abs(uh) <= 4.4) & (np.abs(vh - v_c) <= 3.6)
-                            on_sky_g |= (np.abs(uh) <= 3.7) & (np.abs(vh - v_c) <= 2.9)
-                        if on_sky_f.any():
-                            r_alb[fi_r[hi_rf[on_sky_f]]] = [212.0, 214.0, 216.0]
-                            r_alb[fi_r[hi_rf[on_sky_g]]] = [64.0, 96.0, 134.0] if not preset.is_night else [248.0, 208.0, 118.0]
-
-                    # Outer 0.50m crisp light-limestone/aluminum parapet coping rim & inner drop shadow!
                     is_coping = est == 1
                     is_p_sh = est == 2
-                    r_alb[fi_r[is_coping]] = np.clip(r_alb[fi_r[is_coping]] * 0.35 + np.array([144.0, 142.0, 138.0]), 146.0, 228.0)
-                    r_alb[fi_r[is_p_sh]] *= 0.76
+                    r_alb[fi_r[is_coping]] = np.clip(
+                        r_alb[fi_r[is_coping]] * 0.45 + np.array([124.0, 122.0, 118.0]), 140.0, 232.0
+                    )
+                    r_alb[fi_r[is_p_sh]] *= 0.80
 
-                # 3. Glitch-Free Architectural Rooftop Solar PV Arrays (strictly from morphologically verified pv_clean_05m!
-                # ZERO blue shadow static noise anywhere on roofs!)
-                pv_c05 = np.clip(((re_r - E_MIN) * 2.0).astype(np.int32), 0, GRID_W - 1)
-                pv_r05 = np.clip(((N_MAX - rn_r) * 2.0).astype(np.int32), 0, GRID_H - 1)
-                is_pv = scene.pv_clean_05m[pv_r05, pv_c05]
+                # 3. Crisp Rooftop Solar PV Grid Overlay strictly on morphologically verified PV arrays (zero blue glitches!)
                 if is_pv.any():
                     pvi = np.nonzero(is_pv)[0]
-                    # Crisp deep-navy solar panels with clean 1px silver aluminum module grid!
                     pv_grid = (((re_r[pvi] * 0.90) % 1.0) < 0.10) | (((rn_r[pvi] * 0.90) % 1.0) < 0.10)
-                    r_alb[pvi] = [32.0, 54.0, 96.0]
+                    r_alb[pvi] = 0.35 * r_alb[pvi] + 0.65 * np.array([32.0, 54.0, 96.0], dtype=np.float32)
                     r_alb[pvi[pv_grid]] = [166.0, 176.0, 190.0]
 
                 f_col[rm] = r_alb

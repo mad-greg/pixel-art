@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '6.0';
+  const ASSET_VER = '6.1';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -2628,7 +2628,7 @@
           const gm = Math.hypot(gx, gy) || 1;
           const rx = -gy / gm;
           const ry = (gx / gm) * isoY;
-          const latPx = (isMain ? 7.5 : 4.2) * wScale;
+          const latPx = (isMain ? 3.0 : 2.0) * wScale;
           roadDrawList.push({
             type: 'cyclist',
             pos: { ...base, wx: base.wx + rx * latPx, wy: base.wy + ry * latPx },
@@ -2648,7 +2648,7 @@
           const gm = Math.hypot(gx, gy) || 1;
           const rx = -gy / gm;
           const ry = (gx / gm) * isoY;
-          const latPx = (isMain ? 13.5 : 7.8) * wScale;
+          const latPx = (isMain ? 6.0 : 4.6) * wScale;
           roadDrawList.push({
             type: 'ped',
             pos: {
