@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '5.3';
+  const ASSET_VER = '5.4';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -2602,23 +2602,23 @@
         const isBus = vIdx < busCount;
         const jitter = Math.sin(tSec * 0.28 + vIdx * 2.17 + rIdx * 1.3) * maxJitter;
         const frac = ((((tSec / cyc) + (rd.phase || 0) + vIdx / totalVehicles + jitter) % 1) + 1) % 1;
-        if (frac < 0.012 || frac > 0.988) continue;
+        if (frac < 0.001 || frac > 0.999) continue;
         const pos = samplePathAt(rd.pts, frac, worldW, worldH, 3);
         if (!pos || (!depthPixels && pos.occ)) continue;
         roadDrawList.push({ type: isBus ? 'bus' : 'car', pos, colorIdx: vIdx + rIdx * 3 });
       }
 
-      // Cyclists & Sidewalk Pedestrians on Seestrasse, Dorfstrasse & Village Streets (never on A3 motorway!)
+      // Cyclists & Sidewalk Pedestrians on Seestrasse, Dorfstrasse & Alte Landstrasse (never on A3 motorway!)
       if (rd.kind !== 'motorway') {
         const isMain = rd.kind === 'seestrasse';
-        const nCyclists = isMain ? 10 : 4;
-        const nPeds = isMain ? 18 : 8;
+        const nCyclists = isMain ? 10 : 7;
+        const nPeds = isMain ? 18 : 14;
         const bikeCyc = rd.length_m / 4.8;
         const pedCyc = rd.length_m / 1.35;
 
         for (let bIdx = 0; bIdx < nCyclists; bIdx++) {
           const frac = ((((tSec / bikeCyc) + (rd.phase || 0) * 0.7 + (bIdx + 0.35) / nCyclists) % 1) + 1) % 1;
-          if (frac < 0.015 || frac > 0.985) continue;
+          if (frac < 0.001 || frac > 0.999) continue;
           const base = samplePathAt(rd.pts, frac, worldW, worldH, 3);
           if (!base || (!depthPixels && base.occ)) continue;
           // Shift slightly toward right curb / bike lane
@@ -2639,7 +2639,7 @@
         for (let pIdx = 0; pIdx < nPeds; pIdx++) {
           const dir = (pIdx % 2 === 0) ? 1 : -1;
           const rawF = ((dir * (tSec / pedCyc) + (rd.phase || 0) * 1.3 + (pIdx + 0.17) / nPeds) % 1 + 1) % 1;
-          if (rawF < 0.015 || rawF > 0.985) continue;
+          if (rawF < 0.001 || rawF > 0.999) continue;
           const base = samplePathAt(rd.pts, rawF, worldW, worldH, 3);
           if (!base || (!depthPixels && base.occ)) continue;
           const isoY = 0.55;
@@ -3495,15 +3495,15 @@
   const soundChannels = {};
 
   const SOUND_TRACKS = {
-    lake_waves:   { file: 'lake_waves.mp3',   baseGain: 0.22, maxHz: 3400 },
-    birds:        { file: 'birds.mp3',        baseGain: 0.11, maxHz: 4600 },
-    crickets:     { file: 'crickets.mp3',     baseGain: 0.10, maxHz: 4800 },
-    train:        { file: 'train.mp3',        baseGain: 0.26, maxHz: 4200 },
-    traffic:      { file: 'traffic.mp3',      baseGain: 0.12, maxHz: 3200 }, // A3 motorway passing-by traffic
-    town_traffic: { file: 'town_traffic.mp3', baseGain: 0.12, maxHz: 1100 }, // Calm European town car buzz/hum
-    bus:          { file: 'bus.mp3',          baseGain: 0.14, maxHz: 2400 },
-    boat:         { file: 'boat.mp3',         baseGain: 0.18, maxHz: 3000 },
-    bells:        { file: 'bells.mp3',        baseGain: 0.22, maxHz: 3400 },
+    lake_waves:   { file: 'lake_waves.mp3',   baseGain: 0.085, maxHz: 3200 },
+    birds:        { file: 'birds.mp3',        baseGain: 0.11,  maxHz: 4600 },
+    crickets:     { file: 'crickets.mp3',     baseGain: 0.10,  maxHz: 4800 },
+    train:        { file: 'train.mp3',        baseGain: 0.26,  maxHz: 4200 },
+    traffic:      { file: 'traffic.mp3',      baseGain: 0.12,  maxHz: 3200 }, // A3 motorway passing-by traffic
+    town_traffic: { file: 'town_traffic.mp3', baseGain: 0.30,  maxHz: 2000 }, // Warm European town car buzz/hum
+    bus:          { file: 'bus.mp3',          baseGain: 0.14,  maxHz: 2400 },
+    boat:         { file: 'boat.mp3',         baseGain: 0.18,  maxHz: 3000 },
+    bells:        { file: 'bells.mp3',        baseGain: 0.22,  maxHz: 3400 },
   };
   const SOUND_MASTER_LEVEL = 0.48;
 
@@ -3684,12 +3684,12 @@
         const isBus = vIdx < busCount;
         const jitter = Math.sin(tSec * 0.28 + vIdx * 2.17 + rIdx * 1.3) * maxJitter;
         const frac = ((((tSec / cyc) + (rd.phase || 0) + vIdx / totalV + jitter) % 1) + 1) % 1;
-        if (frac < 0.015 || frac > 0.985) continue;
+        if (frac < 0.001 || frac > 0.999) continue;
         const pos = samplePathAt(rd.pts, frac, worldW, worldH, 2);
         if (!pos) continue;
         const sp = computeSpatialFactor(
           pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm,
-          isBus ? 0.075 : (isMotorway ? 0.062 : 0.050),
+          isBus ? 0.075 : (isMotorway ? 0.062 : 0.085),
         );
         if (sp.level <= 0.002) continue;
         if (isBus) {
@@ -3700,7 +3700,7 @@
           mwPanSum += sp.pan * cl;
           if (cl > bestMwCar.level) bestMwCar = { level: cl, brightness: sp.brightness, pan: sp.pan };
         } else {
-          const cl = sp.level * 0.68;
+          const cl = sp.level * 0.95;
           townSumLvl += cl * cl;
           townPanSum += sp.pan * cl;
           if (cl > bestTownCar.level) bestTownCar = { level: cl, brightness: sp.brightness, pan: sp.pan };
