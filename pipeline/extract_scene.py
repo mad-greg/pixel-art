@@ -810,34 +810,45 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                 z1 = float(nb1.max()) if nb1.max() > 100.0 else float(max(dem_c[-1], min(dsm_c[-1], dem_c[-1] + 6.5)))
                 z_prof = np.linspace(z0, z1, n_samp)
             else:
-                z0 = float(dem_c[0])
-                z1 = float(dem_c[-1])
-                # If bridge terminates at diorama edge mid-span, use DSM height
-                if not diorama_poly.buffer(-3.0).contains(Point(c_arr[0])):
-                    z0 = float(min(dsm_c[0], dem_c[0] + 8.0))
-                if not diorama_poly.buffer(-3.0).contains(Point(c_arr[-1])):
-                    z1 = float(min(dsm_c[-1], dem_c[-1] + 8.0))
+                at_interior_start = diorama_poly.buffer(-3.0).contains(Point(c_arr[0]))
+                at_interior_end = diorama_poly.buffer(-3.0).contains(Point(c_arr[-1]))
+                z0 = float(dem_c[0]) if at_interior_start else float(min(dsm_c[0], dem_c[0] + 8.0))
+                z1 = float(dem_c[-1]) if at_interior_end else float(min(dsm_c[-1], dem_c[-1] + 8.0))
 
                 z_lin = np.linspace(z0, z1, n_samp)
                 if b_code == BR_RAIL_BRIDGE:
                     # Railway bridges are strictly flat/linear between abutments; the road dips underneath!
                     z_prof = z_lin
                 else:
-                    # Use real swissSURFACE3D bridge deck height, clamped against overhanging tree crowns!
-                    z_raw = np.clip(dsm_c, np.minimum(dem_c, z_lin), np.maximum(z_lin + 4.8, dem_c + 9.2))
-                    z_smooth = ndimage.gaussian_filter1d(ndimage.median_filter(z_raw, size=9), sigma=16.0, mode="nearest")
+                    # Use real swissSURFACE3D bridge deck height, clamped tightly against overhanging trees/buildings!
+                    end_dist = np.minimum(s_arr, total_l - s_arr)
+                    max_above_lin = np.where(end_dist < 10.0, 0.35 + 0.38 * end_dist, 4.2)
+                    z_raw = np.clip(dsm_c, np.minimum(dem_c, z_lin), np.minimum(z_lin + max_above_lin, dem_c + 8.5))
+                    z_smooth = ndimage.gaussian_filter1d(ndimage.median_filter(z_raw, size=11), sigma=22.0, mode="nearest")
 
-                    # Guarantee minimum vertical clearance (>= 5.1m) directly over railways, motorways & underpass roads
+                    # Guarantee minimum vertical clearance (>= 5.1m) ONLY over railways, motorways, or genuine
+                    # PERPENDICULAR crossing underpass streets strictly inside the bridge span — NEVER over the
+                    # viaduct's own parallel surface approach road (eliminates the Bendlikon viaduct ski-jump bump!)
                     under_sem = sem[srows, scols]
-                    over_corridor = np.isin(under_sem, [G_RAILWAY, G_MOTORWAY, G_STREET_MAIN, G_STREET_MINOR])
+                    under_ang = road_ang[srows, scols].astype(np.float64)
+                    cross_sin = np.abs(np.sin(ang_b.astype(np.float64) - under_ang))
+                    is_rail_or_mw = np.isin(under_sem, [G_RAILWAY, G_MOTORWAY])
+                    is_perp_street = np.isin(under_sem, [G_STREET_MAIN, G_STREET_MINOR]) & (cross_sin > 0.58)
+                    over_corridor = (end_dist > 10.0) & (is_rail_or_mw | is_perp_street)
                     if over_corridor.any():
                         min_clear = dem_c + np.where(over_corridor, 5.1, 0.0)
-                        min_clear = ndimage.gaussian_filter1d(np.maximum(z_smooth, min_clear), sigma=14.0, mode="nearest")
+                        min_clear = ndimage.gaussian_filter1d(np.maximum(z_smooth, min_clear), sigma=18.0, mode="nearest")
                         z_smooth = np.maximum(z_smooth, min_clear)
 
-                    # Smoothly pin exact abutment ends over outer 3.5m so road/rail transitions seamlessly
-                    taper = np.minimum(1.0, np.minimum(s_arr, total_l - s_arr) / 3.5)
-                    z_prof = (1.0 - taper) * z_lin + taper * np.maximum(z_smooth, dem_c)
+                    # Silky-smooth cubic smoothstep abutment taper over outer 9.0m so viaduct meets ground road flush!
+                    t_raw = np.clip(end_dist / 9.0, 0.0, 1.0)
+                    taper = t_raw * t_raw * (3.0 - 2.0 * t_raw)
+                    z_end_ref = dem_c.copy()
+                    if not at_interior_start:
+                        z_end_ref = np.where(s_arr < 9.0, z_lin, z_end_ref)
+                    if not at_interior_end:
+                        z_end_ref = np.where((total_l - s_arr) < 9.0, z_lin, z_end_ref)
+                    z_prof = (1.0 - taper) * z_end_ref + taper * np.maximum(z_smooth, dem_c)
 
             # Rasterize bridge strip inside tight bounding box
             min_e, min_n, max_e, max_n = ls.bounds
