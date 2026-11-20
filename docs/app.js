@@ -380,6 +380,7 @@
   }
 
   function flyToLandmark(lm, targetZoom = null) {
+    if (followTarget) setFollowMode(null);
     const { width, height, tiled } = getWorldSize();
     if (!width || !height) return;
     // Zoom closely so individual windows, roof tiles, trees & boats are crisp!
@@ -574,6 +575,7 @@
   // Interactive Minimap click & drag to pan anywhere immediately!
   let minimapDragging = false;
   function panFromMinimap(clientX, clientY) {
+    if (followTarget) setFollowMode(null);
     const rect = minimapCanvas.getBoundingClientRect();
     const u = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const v = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
@@ -796,14 +798,6 @@
   // 90s Isometric Pixel-Art Moving Elements Engine (Trains, Cars, Ships, Steam & Flags)
   // ---------------------------------------------------------------------------
   const spriteCache = {};
-  const CAR_PALETTES = [
-    { roof: [208, 62, 54], side: [164, 42, 38], front: [186, 52, 46] },   // Swiss crimson
-    { roof: [76, 114, 168], side: [52, 82, 128], front: [64, 98, 148] },  // Zürichsee cobalt
-    { roof: [204, 206, 210], side: [154, 158, 166], front: [178, 182, 188] }, // Silver metallic
-    { roof: [68, 122, 84], side: [46, 88, 58], front: [58, 104, 72] },    // Alpine forest green
-    { roof: [212, 178, 92], side: [168, 136, 64], front: [190, 158, 78] }, // Warm ochre-gold
-    { roof: [82, 86, 96], side: [54, 58, 66], front: [68, 72, 82] },      // Anthracite charcoal
-  ];
 
   function createPixelBuffer(w, h) {
     const c = document.createElement('canvas');
@@ -886,21 +880,6 @@
     buf.cctx.putImageData(buf.img, 0, 0);
   }
 
-  function drawLinePx(buf, x0, y0, x1, y1, rgb, alpha = 255) {
-    let ix0 = Math.round(x0), iy0 = Math.round(y0);
-    const ix1 = Math.round(x1), iy1 = Math.round(y1);
-    const dx = Math.abs(ix1 - ix0), dy = Math.abs(iy1 - iy0);
-    const sx = ix0 < ix1 ? 1 : -1, sy = iy0 < iy1 ? 1 : -1;
-    let err = dx - dy;
-    for (let guard = 0; guard < 256; guard++) {
-      setPx(buf, ix0, iy0, rgb, alpha);
-      if (ix0 === ix1 && iy0 === iy1) break;
-      const e2 = err * 2;
-      if (e2 > -dy) { err -= dy; ix0 += sx; }
-      if (e2 < dx) { err += dx; iy0 += sy; }
-    }
-  }
-
   // Exact 2:1 orthographic isometric ground basis matching IsometricCamera (pitch=30°).
   // Given a screen-space direction (tx, ty), recovers the true un-foreshortened ground unit vector,
   // its 90° perpendicular, and projects both back to screen space so vehicles never shear or gap.
@@ -976,265 +955,9 @@
     const ty = Math.sin(ang);
     const isNight = mode === 'night';
     const winCol = isNight ? [255, 220, 126] : [42, 58, 82];
-    const cabGlass = isNight ? [120, 148, 184] : [30, 44, 66];
     const winAlpha = isNight ? 254 : 255;
 
     let buf;
-    if (type === 'car') {
-      buf = createPixelBuffer(38, 34);
-      const cx = 19, cy = 19;
-      const pal = CAR_PALETTES[variant % CAR_PALETTES.length];
-      const B = makeIsoBasis(cx, cy, tx, ty);
-      // Ground shadow + lower chassis
-      drawIsoBox(buf, cx, cy, tx, ty, 9.2, 4.2, 3.6, 0.8, pal, true, B);
-      // Dark wheel arches along visible side
-      const vs = B.visSide * 4.25;
-      for (const ws of [-5.5, 5.5]) {
-        const wp = B.pt(ws, vs, 1.0);
-        setPx(buf, wp[0], wp[1], [28, 32, 38], 255);
-        setPx(buf, wp[0] + 1, wp[1], [28, 32, 38], 255);
-      }
-      // Slightly set-back cabin with dark windshield & rear glass
-      const cab = makeIsoBasis(cx - B.fx * 1.0, cy - B.fy * 1.0, tx, ty);
-      drawIsoBox(buf, cx, cy, tx, ty, 4.8, 3.5, 3.2, 4.4, {
-        roof: pal.roof,
-        side: winCol,
-        front: cabGlass,
-        emissive: isNight,
-      }, false, cab);
-      // Crisp twin headlights & red taillights
-      for (const wy of [-2.4, 2.4]) {
-        const hl = B.pt(9.4, wy, 2.4);
-        setPx(buf, hl[0], hl[1], [255, 248, 198], 254);
-        const tl = B.pt(-9.4, wy, 2.4);
-        setPx(buf, tl[0], tl[1], [236, 46, 40], 254);
-      }
-      applySelOutAndShade(buf, mode);
-      spriteCache[key] = { canvas: buf.c, cx, cy };
-      return spriteCache[key];
-    }
-
-    if (type === 'bus') {
-      buf = createPixelBuffer(72, 58);
-      const cx = 36, cy = 33;
-      const B = makeIsoBasis(cx, cy, tx, ty);
-      // ZVV Zurich white & cobalt-blue bus
-      drawIsoBox(buf, cx, cy, tx, ty, 22.5, 5.2, 4.2, 1.0, {
-        roof: [46, 98, 182], side: [36, 82, 162], front: [44, 92, 174],
-      }, true, B);
-      drawIsoBox(buf, cx, cy, tx, ty, 22.5, 5.2, 7.0, 5.2, {
-        roof: [236, 238, 240], side: [218, 222, 226], front: [228, 230, 234],
-      }, false, B);
-      // Roof AC pod
-      drawIsoBox(buf, cx, cy, tx, ty, 8.5, 3.2, 1.8, 12.2, {
-        roof: [208, 212, 218], side: [182, 188, 196], front: [194, 198, 206],
-      }, false, B);
-      // Dark wheel wells
-      const vs = B.visSide * 5.25;
-      for (const ws of [-13.5, 13.5]) {
-        fillPolyPx(buf, [
-          B.pt(ws - 2.2, vs, 0.5), B.pt(ws + 2.2, vs, 0.5),
-          B.pt(ws + 2.2, vs, 3.0), B.pt(ws - 2.2, vs, 3.0),
-        ], [26, 30, 36], 255);
-      }
-      // Panoramic passenger windows along visible side
-      for (let s = -17.5; s <= 17.5; s += 5.4) {
-        fillPolyPx(buf, [
-          B.pt(s - 2.0, vs, 6.2), B.pt(s + 2.0, vs, 6.2),
-          B.pt(s + 2.0, vs, 10.6), B.pt(s - 2.0, vs, 10.6),
-        ], winCol, winAlpha);
-      }
-      // Front panoramic windshield if front end is visible
-      if (B.visEnd > 0) {
-        fillPolyPx(buf, [
-          B.pt(22.6, -4.2, 5.8), B.pt(22.6, 4.2, 5.8),
-          B.pt(22.6, 4.2, 10.8), B.pt(22.6, -4.2, 10.8),
-        ], cabGlass, 255);
-      }
-      for (const wy of [-3.2, 3.2]) {
-        const hl = B.pt(22.8, wy, 3.0);
-        setPx(buf, hl[0], hl[1], [255, 248, 198], 254);
-        const tl = B.pt(-22.8, wy, 3.0);
-        setPx(buf, tl[0], tl[1], [236, 46, 40], 254);
-      }
-      applySelOutAndShade(buf, mode);
-      spriteCache[key] = { canvas: buf.c, cx, cy };
-      return spriteCache[key];
-    }
-
-    if (type === 'sbb_dpz' || type === 'sbb_ic') {
-      // Master-crafted SBB RABe 511 KISS (sbb_dpz) & SBB IC 2000 (sbb_ic) double-deck trains
-      // variant: 0 = Lead Cab Car, 1 = Middle Coach, 2 = Tail Cab Car
-      buf = createPixelBuffer(128, 96);
-      const cx = 64, cy = 58;
-      const B = makeIsoBasis(cx, cy, tx, ty);
-      const isLead = variant === 0;
-      const isTail = variant === 2;
-      const isDpz = type === 'sbb_dpz';
-      const HLEN = 38.0; // 19.0 m at 0.25 m/px -> zero gaps at 19.5 m step with gangways!
-      const HWID = 5.6;
-      const vs = B.visSide * (HWID + 0.08);
-
-      // 1. Dark rail shadow & underframe skirt + two bogies with steel wheel dots
-      drawIsoBox(buf, cx, cy, tx, ty, HLEN - 1.5, HWID - 0.5, 2.4, 0.2, {
-        roof: [40, 44, 52], side: [34, 38, 46], front: [36, 40, 48],
-      }, true, B);
-      for (const bs of [-25.0, 25.0]) {
-        // Steel bogie frame & 2 axle wheels
-        for (const ws of [-4.2, 4.2]) {
-          const wp = B.pt(bs + ws, vs, 1.2);
-          setPx(buf, wp[0], wp[1], [118, 126, 138], 255);
-          setPx(buf, wp[0], wp[1] + 1, [74, 80, 90], 255);
-        }
-      }
-
-      // 2. Articulated dark rubber gangway bellows at coupled ends (bridges coaches seamlessly!)
-      const drawGangway = (endSign) => {
-        const g0 = endSign * (HLEN - 1.0);
-        const g1 = endSign * (HLEN + 3.2);
-        const sMin = Math.min(g0, g1), sMax = Math.max(g0, g1);
-        const gMid = (sMin + sMax) * 0.5;
-        const gB = makeIsoBasis(cx + B.fx * gMid, cy + B.fy * gMid, tx, ty);
-        drawIsoBox(buf, cx, cy, tx, ty, (sMax - sMin) * 0.5, HWID - 1.3, 12.6, 2.6, {
-          roof: [46, 50, 58], side: [38, 42, 50], front: [42, 46, 54],
-        }, false, gB);
-      };
-      if (!isLead) drawGangway(1);
-      if (!isTail) drawGangway(-1);
-
-      // 3. Main double-deck carbody shell (sleek SBB white/light-silver with dark roof)
-      const bodyLen = (isLead || isTail) ? HLEN - 3.0 : HLEN;
-      const bodyShift = isLead ? -3.0 : (isTail ? 3.0 : 0.0);
-      const bodyB = makeIsoBasis(cx + B.fx * bodyShift, cy + B.fy * bodyShift, tx, ty);
-      const shellPal = isDpz
-        ? { roof: [112, 118, 128], side: [232, 234, 236], front: [212, 214, 218] }
-        : { roof: [104, 110, 120], side: [236, 236, 232], front: [214, 214, 210] };
-      drawIsoBox(buf, cx, cy, tx, ty, bodyLen, HWID, 14.2, 2.4, shellPal, false, bodyB);
-
-      // 4. SBB Livery Bands, Anthracite Window Stripes, Bold SBB Red Doors & Dual-Deck Windows!
-      const sStart = isTail ? -HLEN + 7.5 : -HLEN + 1.5;
-      const sEnd = isLead ? HLEN - 7.5 : HLEN - 1.5;
-
-      // Upper & lower dark anthracite window ribbon (iconic SBB KISS / IC 2000 look!)
-      const bandColor = isDpz ? [44, 52, 66] : [36, 40, 48];
-      fillPolyPx(buf, [
-        B.pt(sStart, vs, 3.8), B.pt(sEnd, vs, 3.8),
-        B.pt(sEnd, vs, 7.4), B.pt(sStart, vs, 7.4),
-      ], bandColor, 255);
-      fillPolyPx(buf, [
-        B.pt(sStart, vs, 10.0), B.pt(sEnd, vs, 10.0),
-        B.pt(sEnd, vs, 14.0), B.pt(sStart, vs, 14.0),
-      ], bandColor, 255);
-
-      // ZVV cobalt-blue lower accent stripe on S-Bahn DPZ / KISS, or yellow 1st-class band on IC 2000
-      if (isDpz) {
-        fillPolyPx(buf, [
-          B.pt(sStart, vs, 2.5), B.pt(sEnd, vs, 2.5),
-          B.pt(sEnd, vs, 3.8), B.pt(sStart, vs, 3.8),
-        ], [36, 86, 168], 255);
-      } else {
-        // Yellow 1st-class band above upper windows on lead/IC coach
-        fillPolyPx(buf, [
-          B.pt(sStart, vs, 14.1), B.pt(sEnd, vs, 14.1),
-          B.pt(sEnd, vs, 15.1), B.pt(sStart, vs, 15.1),
-        ], [234, 194, 42], 255);
-      }
-
-      // Bold SBB red double-leaf entry doors near coach thirds
-      const doorPositions = isLead ? [-24.5, 16.5] : (isTail ? [-16.5, 24.5] : [-25.5, 25.5]);
-      for (const ds of doorPositions) {
-        fillPolyPx(buf, [
-          B.pt(ds - 3.2, vs, 2.6), B.pt(ds + 3.2, vs, 2.6),
-          B.pt(ds + 3.2, vs, 13.8), B.pt(ds - 3.2, vs, 13.8),
-        ], [206, 40, 38], 255);
-        // Narrow door window
-        fillPolyPx(buf, [
-          B.pt(ds - 1.3, vs, 6.2), B.pt(ds + 1.3, vs, 6.2),
-          B.pt(ds + 1.3, vs, 11.4), B.pt(ds - 1.3, vs, 11.4),
-        ], winCol, winAlpha);
-      }
-
-      // Individual glowing dual-deck passenger windows between doors
-      for (let s = sStart + 3.0; s <= sEnd - 3.0; s += 5.4) {
-        if (doorPositions.some(ds => Math.abs(s - ds) < 4.8)) continue;
-        // Lower deck window
-        fillPolyPx(buf, [
-          B.pt(s - 1.8, vs, 4.3), B.pt(s + 1.8, vs, 4.3),
-          B.pt(s + 1.8, vs, 7.0), B.pt(s - 1.8, vs, 7.0),
-        ], winCol, winAlpha);
-        // Upper deck window
-        fillPolyPx(buf, [
-          B.pt(s - 1.8, vs, 10.5), B.pt(s + 1.8, vs, 10.5),
-          B.pt(s + 1.8, vs, 13.5), B.pt(s - 1.8, vs, 13.5),
-        ], winCol, winAlpha);
-      }
-
-      // 5. Aerodynamic Sloped SBB Red Cab Nose (Lead +1 or Tail -1)
-      if (isLead || isTail) {
-        const dir = isLead ? 1 : -1;
-        const nBase = dir * (HLEN - 6.0);
-        const nTip = dir * (HLEN + 4.0);
-        const nTop = dir * (HLEN - 1.0);
-        // Red aerodynamic nose side wedge
-        fillPolyPx(buf, [
-          B.pt(nBase, vs, 2.4), B.pt(nTip, vs * 0.72, 3.0),
-          B.pt(nTip, vs * 0.72, 7.6), B.pt(nTop, vs * 0.88, 15.8),
-          B.pt(nBase, vs, 16.6),
-        ], [196, 38, 36], 255);
-        // Sloped nose front face & panoramic dark cab windshield
-        fillPolyPx(buf, [
-          B.pt(nTip, -HWID * 0.72, 3.0), B.pt(nTip, HWID * 0.72, 3.0),
-          B.pt(nTip, HWID * 0.72, 7.6), B.pt(nTip, -HWID * 0.72, 7.6),
-        ], [216, 44, 40], 255);
-        fillPolyPx(buf, [
-          B.pt(nTip, -HWID * 0.72, 7.6), B.pt(nTip, HWID * 0.72, 7.6),
-          B.pt(nTop, HWID * 0.88, 15.4), B.pt(nTop, -HWID * 0.88, 15.4),
-        ], cabGlass, 255);
-        // Red nose crown merging into roof
-        fillPolyPx(buf, [
-          B.pt(nTop, -HWID * 0.88, 15.4), B.pt(nTop, HWID * 0.88, 15.4),
-          B.pt(nBase, HWID, 16.6), B.pt(nBase, -HWID, 16.6),
-        ], [186, 38, 36], 255);
-
-        // Iconic Swiss 3-point LED headlights (lead) or twin red taillights (tail)
-        const lampCol = isLead ? [255, 250, 206] : [242, 46, 42];
-        for (const wy of [-2.8, 2.8]) {
-          const lp = B.pt(nTip + dir * 0.5, wy, 4.6);
-          setPx(buf, lp[0], lp[1], lampCol, 254);
-          setPx(buf, lp[0] + (isLead ? 0 : 0), lp[1] + 1, lampCol, 254);
-        }
-        if (isLead) {
-          const topLamp = B.pt(nTop + dir * 0.4, 0, 14.6);
-          setPx(buf, topLamp[0], topLamp[1], [255, 250, 210], 254);
-        }
-      }
-
-      // 6. Roof HVAC pods & Detailed Silver Scissor Pantograph on Lead/Tail Cab Cars
-      drawIsoBox(buf, cx, cy, tx, ty, 11.0, 3.2, 1.4, 16.6, {
-        roof: [148, 154, 164], side: [122, 128, 138], front: [134, 140, 150],
-      }, false, bodyB);
-      if (isLead || isTail) {
-        const pCenter = isLead ? -14.0 : 14.0;
-        const pBaseA = B.pt(pCenter - 5.0, 0, 17.6);
-        const pBaseB = B.pt(pCenter + 5.0, 0, 17.6);
-        const pKnee = B.pt(pCenter + (isLead ? -7.5 : 7.5), 0, 20.6);
-        const pHeadL = B.pt(pCenter, -3.6, 23.2);
-        const pHeadR = B.pt(pCenter, 3.6, 23.2);
-        const pHeadM = B.pt(pCenter, 0, 23.2);
-        // Red ceramic roof insulators
-        setPx(buf, pBaseA[0], pBaseA[1], [198, 54, 48], 255);
-        setPx(buf, pBaseB[0], pBaseB[1], [198, 54, 48], 255);
-        // Silver articulated Z-arm pantograph & carbon collector bar
-        drawLinePx(buf, pBaseB[0], pBaseB[1], pKnee[0], pKnee[1], [204, 212, 222], 255);
-        drawLinePx(buf, pKnee[0], pKnee[1], pHeadM[0], pHeadM[1], [224, 230, 238], 255);
-        drawLinePx(buf, pHeadL[0], pHeadL[1], pHeadR[0], pHeadR[1], [164, 172, 184], 255);
-      }
-
-      applySelOutAndShade(buf, mode);
-      spriteCache[key] = { canvas: buf.c, cx, cy };
-      return spriteCache[key];
-    }
-
     if (type === 'zsg_steamer') {
       buf = createPixelBuffer(210, 160);
       const cx = 105, cy = 88;
@@ -1249,10 +972,37 @@
         pt(-66, -11.5, 4.5), pt(44, -12.5, 4.5), pt(73, 0, 5.5), pt(44, 12.5, 4.5), pt(-66, 11.5, 4.5),
       ], [186, 150, 104], 255);
 
+      const salon1Basis = makeIsoBasis(cx - tx * 6, cy - ty * 6, tx, ty);
+      const drawSponson = (sideDir) => {
+        const spCx = cx + tx * 2 + salon1Basis.rx * sideDir * 10.6;
+        const spCy = cy + ty * 2 + salon1Basis.ry * sideDir * 10.6;
+        const spB = drawIsoBox(buf, spCx, spCy, tx, ty, 7.6, 2.2, 6.7, 4.5, {
+          roof: [238, 234, 226], side: [224, 220, 212], front: [230, 226, 218],
+        }, false);
+        // Classic arched paddlewheel housing cutout + gold trim on visible flank
+        if (sideDir === salon1Basis.visSide) {
+          const sv = spB.visSide * 2.28;
+          fillPolyPx(buf, [
+            spB.pt(-5.8, sv, 4.7), spB.pt(5.8, sv, 4.7),
+            spB.pt(4.0, sv, 8.9), spB.pt(0.0, sv, 9.8), spB.pt(-4.0, sv, 8.9),
+          ], [42, 56, 66], 255);
+          fillPolyPx(buf, [
+            spB.pt(-6.8, sv, 9.8), spB.pt(6.8, sv, 9.8),
+            spB.pt(6.8, sv, 10.9), spB.pt(-6.8, sv, 10.9),
+          ], [226, 198, 134], 255);
+        }
+      };
+
+      // Far-side paddlewheel sponson first for accurate painter order
+      drawSponson(-salon1Basis.visSide);
+
       // Main & upper white passenger salon decks
       const salon1 = drawIsoBox(buf, cx - tx * 6, cy - ty * 6, tx, ty, 46.0, 10.2, 8.0, 4.5, {
         roof: [232, 230, 224], side: [216, 214, 208], front: [224, 222, 216],
-      }, false);
+      }, false, salon1Basis);
+      // Near-side paddlewheel sponson over main salon flank
+      drawSponson(salon1Basis.visSide);
+
       const salon2 = drawIsoBox(buf, cx - tx * 4, cy - ty * 4, tx, ty, 32.0, 8.4, 7.0, 12.5, {
         roof: [240, 238, 232], side: [222, 220, 214], front: [228, 226, 220],
       }, false);
@@ -1335,40 +1085,154 @@
     return spriteCache[key];
   }
 
-  function evalWithStationStop(tSec, lengthM, speedMps, stopFrac, dwellSec, phase) {
-    const travelSec = lengthM / Math.max(0.5, speedMps);
-    const pause = dwellSec || 0;
-    const cycleSec = travelSec + pause + 6.0; // 6s offscreen buffer between runs
-    const localT = ((tSec + phase * cycleSec) % cycleSec + cycleSec) % cycleSec;
-    if (localT > travelSec + pause) return -1;
+  // Exact C1-continuous piecewise multi-stop schedule (supports trains, ZSG steamer & VBZ/ZVV buses)
+  const stopScheduleCache = new Map();
 
-    if (!stopFrac || pause <= 0) {
-      return localT / travelSec;
-    }
-    const tStop = stopFrac * travelSec;
-    const decelWin = Math.min(5.0, tStop * 0.35);
-    const accelWin = Math.min(5.0, (travelSec - tStop) * 0.35);
+  function buildStopSchedule(lengthM, speedMps, stops, dwellSec, rampSec = 5.0, offscreenSec = 6.0) {
+    const v = Math.max(0.5, speedMps) / Math.max(1.0, lengthM);
+    const pause = Math.max(0, dwellSec || 0);
+    const ramp = Math.max(0.1, rampSec || 5.0);
+    const offSec = Math.max(0, offscreenSec || 0);
+    const validStops = (Array.isArray(stops) ? stops : (stops != null ? [stops] : []))
+      .filter((s) => typeof s === 'number' && !Number.isNaN(s) && s > 0.001 && s < 0.999)
+      .sort((a, b) => a - b);
 
-    if (localT < tStop - decelWin) {
-      return localT / travelSec;
+    const segs = [];
+    let tCur = 0;
+    let sCur = 0;
+
+    if (validStops.length === 0 || pause <= 0) {
+      const dur = 1.0 / v;
+      segs.push({ t0: 0, t1: dur, type: 'cruise', s0: 0, s1: 1, stopIdx: -1 });
+      tCur = dur;
+    } else {
+      const K = validStops.length;
+      for (let k = 0; k < K; k++) {
+        const sk = validStops[k];
+        const gapBefore = k === 0 ? sk : 0.5 * (sk - validStops[k - 1]);
+        const gapAfter = k === K - 1 ? (1.0 - sk) : 0.5 * (validStops[k + 1] - sk);
+        const dsDecel = Math.min(0.5 * v * ramp, 0.9 * gapBefore);
+        const tauDecel = dsDecel > 1e-9 ? (2.0 * dsDecel) / v : 0;
+        const dsAccel = Math.min(0.5 * v * ramp, 0.9 * gapAfter);
+        const tauAccel = dsAccel > 1e-9 ? (2.0 * dsAccel) / v : 0;
+
+        const sDecelStart = Math.max(sCur, sk - dsDecel);
+        if (sDecelStart > sCur + 1e-9) {
+          const dur = (sDecelStart - sCur) / v;
+          segs.push({ t0: tCur, t1: tCur + dur, type: 'cruise', s0: sCur, s1: sDecelStart, stopIdx: -1 });
+          tCur += dur;
+          sCur = sDecelStart;
+        }
+        if (tauDecel > 1e-9 && sk > sCur + 1e-9) {
+          segs.push({ t0: tCur, t1: tCur + tauDecel, type: 'decel', s0: sCur, s1: sk, stopIdx: k });
+          tCur += tauDecel;
+          sCur = sk;
+        }
+        segs.push({ t0: tCur, t1: tCur + pause, type: 'dwell', s0: sk, s1: sk, stopIdx: k });
+        tCur += pause;
+        if (tauAccel > 1e-9) {
+          const sAccelEnd = Math.min(1.0, sk + dsAccel);
+          segs.push({ t0: tCur, t1: tCur + tauAccel, type: 'accel', s0: sk, s1: sAccelEnd, stopIdx: k });
+          tCur += tauAccel;
+          sCur = sAccelEnd;
+        }
+      }
+      if (1.0 > sCur + 1e-9) {
+        const dur = (1.0 - sCur) / v;
+        segs.push({ t0: tCur, t1: tCur + dur, type: 'cruise', s0: sCur, s1: 1.0, stopIdx: -1 });
+        tCur += dur;
+      }
     }
-    if (localT < tStop) {
-      // Smooth deceleration into station/pier
-      const u = (localT - (tStop - decelWin)) / decelWin;
-      const eased = u - 0.5 * u * u; // derivative goes 1 -> 0, integral = 0.5
-      return (tStop - decelWin + eased * decelWin * 2.0 * 0.5) / travelSec + ((1 - u) * 0) ;
+
+    return { segs, activeSec: tCur, cycleSec: tCur + offSec };
+  }
+
+  function evalStopSchedule(sched, tSec, phase = 0) {
+    const cycle = sched.cycleSec;
+    if (!(cycle > 0)) {
+      return { frac: -1, speedRatio: 0, isDwelling: false, stopIdx: -1, dwellProgress: 0 };
     }
-    if (localT <= tStop + pause) {
-      return stopFrac - (0.5 * decelWin) / travelSec;
+    const localT = (((tSec + phase * cycle) % cycle) + cycle) % cycle;
+    if (localT > sched.activeSec) {
+      return { frac: -1, speedRatio: 0, isDwelling: false, stopIdx: -1, dwellProgress: 0 };
     }
-    const afterT = localT - pause;
-    if (afterT < tStop + accelWin) {
-      const u = (afterT - tStop) / accelWin;
-      const s0 = stopFrac - (0.5 * decelWin) / travelSec;
-      const s1 = (tStop + accelWin) / travelSec;
-      return s0 + (s1 - s0) * (u * u * (3 - 2 * u));
+    const segs = sched.segs;
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      if (localT <= seg.t1 || i === segs.length - 1) {
+        const dur = Math.max(1e-9, seg.t1 - seg.t0);
+        const u = Math.max(0, Math.min(1, (localT - seg.t0) / dur));
+        if (seg.type === 'cruise') {
+          return { frac: seg.s0 + (seg.s1 - seg.s0) * u, speedRatio: 1.0, isDwelling: false, stopIdx: -1, dwellProgress: 0 };
+        }
+        if (seg.type === 'decel') {
+          return { frac: seg.s0 + (seg.s1 - seg.s0) * (2.0 * u - u * u), speedRatio: 1.0 - u, isDwelling: false, stopIdx: seg.stopIdx, dwellProgress: 0 };
+        }
+        if (seg.type === 'dwell') {
+          return { frac: seg.s0, speedRatio: 0.0, isDwelling: true, stopIdx: seg.stopIdx, dwellProgress: u };
+        }
+        return { frac: seg.s0 + (seg.s1 - seg.s0) * (u * u), speedRatio: u, isDwelling: false, stopIdx: seg.stopIdx, dwellProgress: 0 };
+      }
     }
-    return afterT / travelSec;
+    return { frac: 1.0, speedRatio: 1.0, isDwelling: false, stopIdx: -1, dwellProgress: 0 };
+  }
+
+  function evalWithStationStop(tSec, lengthM, speedMps, stopFracOrStops, dwellSec, phase = 0, rampSec = 5.0, offscreenSec = 6.0) {
+    const stopsKey = Array.isArray(stopFracOrStops)
+      ? stopFracOrStops.join(',')
+      : (stopFracOrStops != null ? String(stopFracOrStops) : '');
+    const key = `${lengthM}|${speedMps}|${stopsKey}|${dwellSec || 0}|${rampSec}|${offscreenSec}`;
+    let sched = stopScheduleCache.get(key);
+    if (!sched) {
+      sched = buildStopSchedule(lengthM, speedMps, stopFracOrStops, dwellSec, rampSec, offscreenSec);
+      if (stopScheduleCache.size > 256) stopScheduleCache.clear();
+      stopScheduleCache.set(key, sched);
+    }
+    return evalStopSchedule(sched, tSec, phase || 0);
+  }
+
+  function evalTrainState(tr, tSec) {
+    const nCars = tr.carriages || 4;
+    const trainLenM = (nCars - 1) * 19.5 + 18.1; // 76.6 m for 4-car consist
+    const halfTrainM = trainLenM * 0.5;          // 38.3 m half-consist
+    const effLenM = tr.length_m + trainLenM;
+    if (!tr._stopSched) {
+      const rawStopFrac = tr.stop_frac != null
+        ? (tr.stop_frac * tr.length_m + halfTrainM) / effLenM
+        : null;
+      tr._stopSched = buildStopSchedule(
+        effLenM,
+        tr.speed_mps,
+        rawStopFrac != null ? [rawStopFrac] : [],
+        tr.dwell_sec || 0,
+        5.0,
+        6.0,
+      );
+    }
+    const st = evalStopSchedule(tr._stopSched, tSec, tr.phase || 0);
+    if (st.frac < 0) {
+      return { headFrac: -1, midFrac: -1, speedRatio: 0, isDwelling: false, stopIdx: -1, dwellProgress: 0 };
+    }
+    const headFrac = st.frac * (effLenM / tr.length_m);
+    const midFrac = headFrac - halfTrainM / tr.length_m;
+    return {
+      headFrac,
+      midFrac,
+      speedRatio: st.speedRatio,
+      isDwelling: st.isDwelling,
+      stopIdx: st.stopIdx,
+      dwellProgress: st.dwellProgress,
+    };
+  }
+
+  function evalBusState(rd, bIdx, tSec) {
+    const busCount = Math.max(1, rd.bus_count != null ? rd.bus_count : (rd.has_bus ? 1 : 0));
+    const laneSpeed = Math.max(1.0, rd.speed_mps * 0.88);
+    if (!rd._busSched) {
+      rd._busSched = buildStopSchedule(rd.length_m, laneSpeed, rd.stops || [], 2.8, 3.0, 0.0);
+    }
+    const phase = (rd.phase || 0) + bIdx / busCount;
+    return evalStopSchedule(rd._busSched, tSec, phase);
   }
 
   function samplePathAt(pts, frac, worldW, worldH, tanWin = 3) {
@@ -1404,8 +1268,8 @@
     const sw = Math.max(2, Math.round(sp.canvas.width * drawScale));
     const sh = Math.max(2, Math.round(sp.canvas.height * drawScale));
     if (sx + sw < -20 || sx > canvas.width + 20 || sy + sh < -20 || sy > canvas.height + 20) return;
-    ctx.imageSmoothingEnabled = drawScale < 0.65;
-    ctx.drawImage(sp.canvas, sx, sy, sw, sh);
+    vCtx.imageSmoothingEnabled = drawScale < 0.65;
+    vCtx.drawImage(sp.canvas, sx, sy, sw, sh);
   }
 
   function drawPixelRectWorld(wx, wy, pw, ph, fillStyle, wScale) {
@@ -1414,86 +1278,188 @@
     if (sx < -20 || sx > canvas.width + 20 || sy < -20 || sy > canvas.height + 20) return;
     const sw = Math.max(1, Math.round(pw * wScale * scale));
     const sh = Math.max(1, Math.round(ph * wScale * scale));
-    ctx.fillStyle = fillStyle;
-    ctx.fillRect(sx, sy, sw, sh);
+    vCtx.fillStyle = fillStyle;
+    vCtx.fillRect(sx, sy, sw, sh);
   }
 
   // ---- CONTINUOUS 3D NW-SUN SHADED VEHICLE RENDERER + PER-PIXEL 3D Z-BUFFER OCCLUSION ----
   // Renders crisp, grounded, smoothly curving 3D isometric vehicles and masks EVERY pixel
-  // against the exact 16-bit 3D depth map (kilchberg_depth.png) so vehicles smoothly slide
-  // behind tree canopies, buildings, and bridges instead of floating on top or popping out!
+  // against the exact 16-bit 3D depth map (kilchberg_depth.png) with row-wise 3-way fast-path!
   let vCtx = ctx;
   const vehScratch = document.createElement('canvas');
   vehScratch.width = 320;
   vehScratch.height = 240;
   const vehScratchCtx = vehScratch.getContext('2d', { willReadFrequently: true });
 
-  function drawDepthMasked(wx, wy, padWorld, vehD16, worldW, worldH, drawFn) {
+  const depthFrameStats = { direct: 0, fullCull: 0, partial: 0 };
+  const livingFrameCounts = {
+    ships: 0, cars: 0, buses: 0, cyclists: 0, roadPeds: 0,
+    busStopCommuters: 0, trains: 0, gulls: 0, swans: 0, sups: 0, ducks: 0, redKites: 0,
+  };
+
+  function getDepthConstants() {
+    const depthMin = (animData && typeof animData.depth_min === 'number') ? animData.depth_min : -2400.0;
+    const depthMax = (animData && typeof animData.depth_max === 'number') ? animData.depth_max : 2400.0;
+    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+    const u16PerM = 65535.0 / Math.max(1.0, depthMax - depthMin);
+    const depthSlopeGround = mppMaster * Math.sqrt(3) * u16PerM;
+    const shiftY = 2927.412592;
+    const c0 = (0 - depthMin) * u16PerM + depthSlopeGround * shiftY;
+    const slopeZ = 2.0 * 1.16 * u16PerM;
+    return { depthMin, depthMax, mppMaster, u16PerM, depthSlopeGround, c0, slopeZ };
+  }
+
+  function evalWalkerD16(wx, wy, zGnd, worldW, worldH, onElevatedDeck = false) {
+    const dc = getDepthConstants();
+    const masterH = (animData && animData.canvas_height) ? animData.canvas_height : 5444;
+    const wyMaster = wy * (masterH / Math.max(1, worldH));
+    let d16 = Math.round(dc.c0 - dc.depthSlopeGround * wyMaster - dc.slopeZ * (zGnd - 348.0) - 10);
+    if (onElevatedDeck && depthPixels && depthW > 0 && depthH > 0) {
+      const dx = Math.min(depthW - 1, Math.max(0, Math.floor((wx / Math.max(1, worldW)) * depthW)));
+      const dy = Math.min(depthH - 1, Math.max(0, Math.floor((wy / Math.max(1, worldH)) * depthH)));
+      const di = (dy * depthW + dx) * 4;
+      if (depthPixels[di + 2] > 128) {
+        const deckD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
+        d16 = Math.min(d16, deckD16 - 12);
+      }
+    }
+    return d16;
+  }
+
+  function drawDepthMasked(wx, wy, boundsOrPadW, vehD16, worldW, worldH, drawFn, clampUpWorld = 4.0) {
+    let ex, eyUp, eyDn;
+    if (typeof boundsOrPadW === 'object' && boundsOrPadW !== null) {
+      ex = boundsOrPadW.ex;
+      eyUp = boundsOrPadW.eyUp;
+      eyDn = boundsOrPadW.eyDn;
+    } else {
+      ex = eyUp = eyDn = boundsOrPadW;
+    }
+
     const cx = offsetX + wx * scale;
     const cy = offsetY + wy * scale;
-    const padPx = Math.ceil(padWorld * scale) + 6;
-    if (cx + padPx < 0 || cx - padPx > canvas.width || cy + padPx < 0 || cy - padPx > canvas.height) return;
+    const padX = Math.ceil(ex * scale) + 4;
+    const padUp = Math.ceil(eyUp * scale) + 4;
+    const padDn = Math.ceil(eyDn * scale) + 4;
+    if (cx + padX < 0 || cx - padX > canvas.width || cy + padDn < 0 || cy - padUp > canvas.height) return;
 
-    if (!depthPixels || !vehD16) {
+    if (!depthPixels || !vehD16 || depthW <= 0 || depthH <= 0) {
+      depthFrameStats.direct++;
       vCtx = ctx;
       drawFn();
       return;
     }
 
-    const x0 = Math.max(0, Math.floor(cx - padPx));
-    const y0 = Math.max(0, Math.floor(cy - padPx));
-    const x1 = Math.min(canvas.width, Math.ceil(cx + padPx));
-    const y1 = Math.min(canvas.height, Math.ceil(cy + padPx));
+    const x0 = Math.max(0, Math.floor(cx - padX));
+    const y0 = Math.max(0, Math.floor(cy - padUp));
+    const x1 = Math.min(canvas.width, Math.ceil(cx + padX));
+    const y1 = Math.min(canvas.height, Math.ceil(cy + padDn));
     const bw = x1 - x0;
     const bh = y1 - y0;
     if (bw <= 0 || bh <= 0) return;
-    if (bw > vehScratch.width) vehScratch.width = Math.min(1024, bw + 32);
-    if (bh > vehScratch.height) vehScratch.height = Math.min(1024, bh + 32);
-    if (bw > vehScratch.width || bh > vehScratch.height) {
-      vCtx = ctx;
-      drawFn();
-      return;
+
+    const dc = getDepthConstants();
+    const depthSlopeGround = dc.depthSlopeGround;
+    const masterW = (animData && animData.canvas_width) ? animData.canvas_width : 12331;
+    const wScaleInv = masterW / Math.max(1, worldW);
+    const invWorldScaleX = depthW / (worldW * scale);
+    const invWorldScaleY = depthH / (worldH * scale);
+
+    // Row-wise conservative 3-way pre-check over depthPixels before touching vehScratch or getImageData()
+    const dx0 = Math.max(0, Math.floor((x0 - offsetX) * invWorldScaleX));
+    const dx1 = Math.min(depthW - 1, Math.floor((x1 - 1 - offsetX) * invWorldScaleX));
+    const dy0 = Math.max(0, Math.floor((y0 - offsetY) * invWorldScaleY));
+    const dy1 = Math.min(depthH - 1, Math.floor((y1 - 1 - offsetY) * invWorldScaleY));
+
+    if (dx0 <= dx1 && dy0 <= dy1) {
+      let anyFrontOcc = false;
+      let anyClear = false;
+      const invDepthHWorld = worldH / depthH;
+      for (let dy = dy0; dy <= dy1; dy++) {
+        const wyTop = dy * invDepthHWorld;
+        const wyBot = (dy + 1) * invDepthHWorld;
+        const rawTop = (wyTop - wy) * wScaleInv;
+        const rawBot = (wyBot - wy) * wScaleInv;
+        const effTop = rawTop < -clampUpWorld ? -clampUpWorld : rawTop;
+        const effBot = rawBot < -clampUpWorld ? -clampUpWorld : rawBot;
+        const rowMaxD16 = vehD16 - effTop * depthSlopeGround;
+        const rowMinD16 = vehD16 - effBot * depthSlopeGround;
+        const rowOff = dy * depthW;
+        for (let dx = dx0; dx <= dx1; dx++) {
+          const di = (rowOff + dx) * 4;
+          if (depthPixels[di + 2] > 128) {
+            const sd = (depthPixels[di] << 8) | depthPixels[di + 1];
+            if (sd < rowMaxD16) anyFrontOcc = true;
+            if (sd >= rowMinD16) anyClear = true;
+          } else {
+            anyClear = true;
+          }
+          if (anyFrontOcc && anyClear) break;
+        }
+        if (anyFrontOcc && anyClear) break;
+      }
+      if (!anyFrontOcc) {
+        // Fast Path A (Direct): Zero foreground occluders anywhere in bbox!
+        depthFrameStats.direct++;
+        vCtx = ctx;
+        drawFn();
+        return;
+      }
+      if (!anyClear) {
+        // Fast Path B (Full Cull): 100% of bbox strictly behind solid foreground occluders!
+        depthFrameStats.fullCull++;
+        return;
+      }
     }
 
-    vehScratchCtx.clearRect(0, 0, bw, bh);
+    // Genuine partial occlusion: render to vehScratch (never silently drops at 5x-8x zoom!)
+    depthFrameStats.partial++;
+    const MAX_SCRATCH = 2048;
+    const scratchScale = Math.min(1.0, MAX_SCRATCH / Math.max(bw, bh));
+    const sw = Math.max(1, Math.ceil(bw * scratchScale));
+    const sh = Math.max(1, Math.ceil(bh * scratchScale));
+    if (sw > vehScratch.width) vehScratch.width = Math.min(MAX_SCRATCH, sw + 32);
+    if (sh > vehScratch.height) vehScratch.height = Math.min(MAX_SCRATCH, sh + 32);
+
+    vehScratchCtx.clearRect(0, 0, sw, sh);
     vehScratchCtx.save();
+    if (scratchScale < 1.0) vehScratchCtx.scale(scratchScale, scratchScale);
     vehScratchCtx.translate(-x0, -y0);
     vCtx = vehScratchCtx;
     drawFn();
     vehScratchCtx.restore();
     vCtx = ctx;
 
-    const imgData = vehScratchCtx.getImageData(0, 0, bw, bh);
+    const imgData = vehScratchCtx.getImageData(0, 0, sw, sh);
     const d = imgData.data;
-    const invWorldScaleX = depthW / (worldW * scale);
-    const invWorldScaleY = depthH / (worldH * scale);
-    const baseDx = (x0 - offsetX) * invWorldScaleX;
-    const baseDy = (y0 - offsetY) * invWorldScaleY;
-
-    let anyVisible = false;
     const invScale = 1 / scale;
-    const wScaleInv = 12331 / worldW;
-    for (let ly = 0; ly < bh; ly++) {
-      const dy = Math.floor(baseDy + ly * invWorldScaleY);
-      if (dy < 0 || dy >= depthH) continue;
-      // Exact orthographic isometric depth gradient: pixels higher on screen (smaller wy)
-      // are further from the camera (+4.2 depth units per 0.25m world pixel), so the front of
-      // a long bus/train heading NW is properly occluded behind foreground roofs & rails!
-      const wyPix = (y0 + ly - offsetY) * invScale;
-      const rowD16 = vehD16 - (wyPix - wy) * wScaleInv * 4.2;
+    const invScratch = 1 / scratchScale;
+    let anyVisible = false;
+
+    for (let ly = 0; ly < sh; ly++) {
+      const sy = y0 + (ly + 0.5) * invScratch;
+      const dy = Math.floor((sy - offsetY) * invWorldScaleY);
+      const wyPix = (sy - offsetY) * invScale;
+      const dyW = (wyPix - wy) * wScaleInv;
+      const effDyW = dyW < -clampUpWorld ? -clampUpWorld : dyW;
+      const rowD16 = vehD16 - effDyW * depthSlopeGround;
+      const validY = dy >= 0 && dy < depthH;
       const rowOff = dy * depthW;
-      const pRow = ly * bw * 4;
-      for (let lx = 0; lx < bw; lx++) {
+      const pRow = ly * sw * 4;
+      for (let lx = 0; lx < sw; lx++) {
         const p = pRow + lx * 4;
         if (d[p + 3] === 0) continue;
-        const dx = Math.floor(baseDx + lx * invWorldScaleX);
-        if (dx >= 0 && dx < depthW) {
-          const di = (rowOff + dx) * 4;
-          if (depthPixels[di + 2] > 128) {
-            const sceneD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
-            if (rowD16 > sceneD16) {
-              d[p + 3] = 0;
-              continue;
+        if (validY) {
+          const sx = x0 + (lx + 0.5) * invScratch;
+          const dx = Math.floor((sx - offsetX) * invWorldScaleX);
+          if (dx >= 0 && dx < depthW) {
+            const di = (rowOff + dx) * 4;
+            if (depthPixels[di + 2] > 128) {
+              const sceneD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
+              if (rowD16 > sceneD16) {
+                d[p + 3] = 0;
+                continue;
+              }
             }
           }
         }
@@ -1502,7 +1468,14 @@
     }
     if (anyVisible) {
       vehScratchCtx.putImageData(imgData, 0, 0);
-      ctx.drawImage(vehScratch, 0, 0, bw, bh, x0, y0, bw, bh);
+      if (scratchScale < 1.0) {
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(vehScratch, 0, 0, sw, sh, x0, y0, bw, bh);
+        ctx.restore();
+      } else {
+        ctx.drawImage(vehScratch, 0, 0, sw, sh, x0, y0, bw, bh);
+      }
     }
   }
 
@@ -1608,25 +1581,41 @@
     }
   }
 
-  function draw3DCar(pos, colorIdx, wScale, mode) {
+  function draw3DCar(pos, colorIdx, wScale, mode, tSec = 0) {
     const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
-    if (b.cx < -44 || b.cx > canvas.width + 44 || b.cy < -44 || b.cy > canvas.height + 44) return;
+    if (b.cx < -56 || b.cx > canvas.width + 56 || b.cy < -56 || b.cy > canvas.height + 56) return;
 
-    // Authentic Kilchberg & Swiss vehicle mix: Swiss Yellow Die Post vans + Lindt Gold Chocolate trucks + European cars!
-    const isPostVan = (colorIdx % 11 === 4);
-    const isLindtVan = !isPostVan && (colorIdx % 13 === 7);
-    const isVan = isPostVan || isLindtVan;
+    // Authentic Kilchberg & Swiss vehicle mix (100% deterministic from colorIdx):
+    // Rare Swiss Feuerwehr/Ambulance, Die Post yellow van, Lindt gold truck, Migros, Coop, Alpine camper, Estate/Hatchback/Sedan
+    const isEmergency = (colorIdx % 29 === 17);
+    const isAmbulance = isEmergency && (Math.floor(colorIdx / 29) % 2 === 1);
+    const isPostVan = !isEmergency && (colorIdx % 11 === 4);
+    const isLindtVan = !isEmergency && !isPostVan && (colorIdx % 13 === 7);
+    const isMigrosVan = !isEmergency && !isPostVan && !isLindtVan && (colorIdx % 17 === 9);
+    const isCoopVan = !isEmergency && !isPostVan && !isLindtVan && !isMigrosVan && (colorIdx % 19 === 11);
+    const isCamper = !isEmergency && !isPostVan && !isLindtVan && !isMigrosVan && !isCoopVan && (colorIdx % 15 === 3);
+    const isVan = isEmergency || isPostVan || isLindtVan || isMigrosVan || isCoopVan || isCamper;
+    const carSub = colorIdx % 3; // 0 = Swiss Estate (Kombi), 1 = Hatchback, 2 = Sedan
+    const isEstate = !isVan && carSub === 0;
+    const isHatch = !isVan && carSub === 1;
 
-    const palette = ['#d63830', '#f4f6f9', '#2b6cb0', '#e6a825', '#2f855a', '#c9d2dc', '#805ad5', '#dd6b20'];
-    const baseHex = isPostVan ? '#f6c216' : (isLindtVan ? '#f7f3e6' : palette[colorIdx % palette.length]);
+    const palette = ['#c92c28', '#f2f5f8', '#254d82', '#d4a548', '#2b6b4c', '#c6cfd9', '#3b4350', '#54708c'];
+    let baseHex = palette[colorIdx % palette.length];
+    if (isEmergency) baseHex = isAmbulance ? '#f6d026' : '#d91e18';
+    else if (isPostVan) baseHex = '#f6c216';
+    else if (isLindtVan) baseHex = '#f7f3e6';
+    else if (isMigrosVan || isCoopVan) baseHex = '#f4f6f9';
+    else if (isCamper) baseHex = (colorIdx % 2 === 0) ? '#2c7a7b' : '#2b6cb0';
+
     const isNight = mode === 'night';
+    const isSunset = mode === 'sunset';
 
-    // Crisp 1:1 miniature scale — vans are slightly taller & boxier than sedans
-    const hl = isVan ? 10.6 : 9.2;  // half-length
-    const hw = isVan ? 4.5 : 4.2;   // half-width
+    // Crisp 1:1 miniature proportions
+    const hl = isLindtVan ? 10.8 : (isEmergency ? 10.4 : (isCamper ? 10.2 : (isVan ? 10.6 : (isEstate ? 9.6 : (isHatch ? 8.2 : 9.2)))));
+    const hw = isLindtVan ? 4.6 : (isCamper ? 4.4 : (isVan ? 4.5 : (isHatch ? 4.0 : 4.2)));
     const zBot = 1.2;
-    const zBelt = isVan ? 5.0 : 4.4;
-    const zRoof = isVan ? 9.2 : 7.2;
+    const zBelt = isCamper ? 4.7 : (isEmergency ? 4.8 : (isVan ? 5.0 : (isEstate ? 4.3 : (isHatch ? 4.2 : 4.4))));
+    const zRoof = isLindtVan ? 9.4 : (isEmergency ? 8.8 : (isCamper ? 8.4 : (isVan ? 9.2 : (isHatch ? 7.1 : 7.2))));
 
     // Grounded soft SE drop shadow
     const shOff = [2.6 * b.s, 2.0 * b.s];
@@ -1649,66 +1638,7 @@
     const endShade = b.dirShade(endSign, 0);
 
     if (isVan) {
-      // Full-height cargo box van (Swiss Die Post or Lindt Chocolate Truck)
-      fillPoly([
-        b.proj(-hl, sideSign * hw, zBot),
-        b.proj(hl, sideSign * hw, zBot),
-        b.proj(hl, sideSign * hw, zBelt),
-        b.proj(-hl, sideSign * hw, zBelt),
-      ], shadeHex(baseHex, sideShade * 0.92, mode), outlineCol, lw);
-      fillPoly([
-        b.proj(-hl, sideSign * hw, zBelt),
-        b.proj(hl * 0.56, sideSign * hw, zBelt),
-        b.proj(hl * 0.50, sideSign * hw, zRoof),
-        b.proj(-hl, sideSign * hw, zRoof),
-      ], shadeHex(baseHex, sideShade * 0.98, mode), outlineCol, lw * 0.9);
-      // Signature side livery stripe (Swiss red/white Post badge or Lindt metallic gold ribbon!)
-      const stripeHex = isPostVan ? '#d62828' : '#d4a02c';
-      fillPoly([
-        b.proj(-hl * 0.88, sideSign * (hw + 0.08), zBelt + 0.6),
-        b.proj(hl * 0.36, sideSign * (hw + 0.08), zBelt + 0.6),
-        b.proj(hl * 0.36, sideSign * (hw + 0.08), zBelt + 2.0),
-        b.proj(-hl * 0.88, sideSign * (hw + 0.08), zBelt + 2.0),
-      ], shadeHex(stripeHex, sideShade * 1.05, mode));
-      // Cab side window
-      fillPoly([
-        b.proj(hl * 0.48, sideSign * (hw + 0.05), zBelt),
-        b.proj(hl * 0.86, sideSign * (hw + 0.05), zBelt),
-        b.proj(hl * 0.64, sideSign * (hw + 0.02), zRoof - 0.5),
-        b.proj(hl * 0.46, sideSign * (hw + 0.02), zRoof - 0.5),
-      ], isNight ? '#334d6e' : '#26384c', outlineCol, lw * 0.7);
-      // Visible front/rear face
-      const endTopZ = (endSign > 0) ? zBelt : zRoof;
-      fillPoly([
-        b.proj(endSign * hl, -hw, zBot),
-        b.proj(endSign * hl, hw, zBot),
-        b.proj(endSign * hl, hw, endTopZ),
-        b.proj(endSign * hl, -hw, endTopZ),
-      ], shadeHex(baseHex, endShade * 0.90, mode), outlineCol, lw);
-      // Sloped cab windshield
-      fillPoly([
-        b.proj(hl * 0.92, -hw * 0.88, zBelt + 0.1),
-        b.proj(hl * 0.92, hw * 0.88, zBelt + 0.1),
-        b.proj(hl * 0.56, hw * 0.84, zRoof),
-        b.proj(hl * 0.56, -hw * 0.84, zRoof),
-      ], isNight ? '#48688c' : '#35506b', outlineCol, lw * 0.7);
-      // Flat sunlit cargo roof + subtle Lindt gold crest / Post white band
-      fillPoly([
-        b.proj(-hl, -hw, zRoof),
-        b.proj(hl * 0.56, -hw, zRoof),
-        b.proj(hl * 0.56, hw, zRoof),
-        b.proj(-hl, hw, zRoof),
-      ], shadeHex(isPostVan ? '#f8d238' : '#fcf9f0', 1.08, mode), outlineCol, lw * 0.8);
-      if (isLindtVan) {
-        fillPoly([
-          b.proj(-hl * 0.55, -hw * 0.42, zRoof + 0.1),
-          b.proj(hl * 0.15, -hw * 0.42, zRoof + 0.1),
-          b.proj(hl * 0.15, hw * 0.42, zRoof + 0.1),
-          b.proj(-hl * 0.55, hw * 0.42, zRoof + 0.1),
-        ], shadeHex('#d4a02c', 1.1, mode));
-      }
-    } else {
-      // Side body wall + cabin greenhouse side
+      // Lower skirt wall
       fillPoly([
         b.proj(-hl, sideSign * hw, zBot),
         b.proj(hl, sideSign * hw, zBot),
@@ -1716,12 +1646,140 @@
         b.proj(-hl, sideSign * hw, zBelt),
       ], shadeHex(baseHex, sideShade * 0.92, mode), outlineCol, lw);
 
+      // Upper cargo / camper / emergency body wall
+      const upperHex = isCamper ? '#eef2f6' : (isAmbulance ? '#f4f6f9' : baseHex);
+      fillPoly([
+        b.proj(-hl, sideSign * hw, zBelt),
+        b.proj(hl * 0.56, sideSign * hw, zBelt),
+        b.proj(hl * 0.50, sideSign * hw, zRoof),
+        b.proj(-hl, sideSign * hw, zRoof),
+      ], shadeHex(upperHex, sideShade * 0.98, mode), outlineCol, lw * 0.9);
+
+      // Signature side livery stripes & camper windows
+      if (isCamper) {
+        // Side camping windows
+        fillPoly([
+          b.proj(-hl * 0.78, sideSign * (hw + 0.08), zBelt + 0.6),
+          b.proj(hl * 0.30, sideSign * (hw + 0.08), zBelt + 0.6),
+          b.proj(hl * 0.30, sideSign * (hw + 0.08), zRoof - 0.8),
+          b.proj(-hl * 0.78, sideSign * (hw + 0.08), zRoof - 0.8),
+        ], isNight ? '#ffd978' : '#26384c');
+      } else if (isCoopVan) {
+        // Coop warm orange lower band + red accent stripe
+        fillPoly([
+          b.proj(-hl * 0.92, sideSign * (hw + 0.08), zBot + 0.8),
+          b.proj(hl * 0.42, sideSign * (hw + 0.08), zBot + 0.8),
+          b.proj(hl * 0.42, sideSign * (hw + 0.08), zBelt + 0.4),
+          b.proj(-hl * 0.92, sideSign * (hw + 0.08), zBelt + 0.4),
+        ], shadeHex('#f07d00', sideShade * 1.04, mode));
+        fillPoly([
+          b.proj(-hl * 0.84, sideSign * (hw + 0.09), zBelt + 0.8),
+          b.proj(hl * 0.34, sideSign * (hw + 0.09), zBelt + 0.8),
+          b.proj(hl * 0.34, sideSign * (hw + 0.09), zBelt + 2.0),
+          b.proj(-hl * 0.84, sideSign * (hw + 0.09), zBelt + 2.0),
+        ], shadeHex('#e03124', sideShade * 1.05, mode));
+      } else {
+        const stripeHex = isEmergency
+          ? (isAmbulance ? '#e63928' : '#f8fafc')
+          : (isPostVan ? '#d62828' : (isMigrosVan ? '#ff6600' : '#d4a02c'));
+        fillPoly([
+          b.proj(-hl * 0.88, sideSign * (hw + 0.08), zBelt + 0.6),
+          b.proj(hl * 0.36, sideSign * (hw + 0.08), zBelt + 0.6),
+          b.proj(hl * 0.36, sideSign * (hw + 0.08), zBelt + 2.0),
+          b.proj(-hl * 0.88, sideSign * (hw + 0.08), zBelt + 2.0),
+        ], shadeHex(stripeHex, sideShade * 1.05, mode));
+      }
+
+      // Cab side window
+      fillPoly([
+        b.proj(hl * 0.48, sideSign * (hw + 0.05), zBelt),
+        b.proj(hl * 0.86, sideSign * (hw + 0.05), zBelt),
+        b.proj(hl * 0.64, sideSign * (hw + 0.02), zRoof - 0.5),
+        b.proj(hl * 0.46, sideSign * (hw + 0.02), zRoof - 0.5),
+      ], isNight ? '#334d6e' : '#26384c', outlineCol, lw * 0.7);
+
+      // Visible front/rear face
+      const endTopZ = (endSign > 0) ? zBelt : zRoof;
+      const endHex = (isMigrosVan && endSign > 0) ? '#ff6600' : baseHex;
+      fillPoly([
+        b.proj(endSign * hl, -hw, zBot),
+        b.proj(endSign * hl, hw, zBot),
+        b.proj(endSign * hl, hw, endTopZ),
+        b.proj(endSign * hl, -hw, endTopZ),
+      ], shadeHex(endHex, endShade * 0.90, mode), outlineCol, lw);
+
+      // Sloped cab windshield
+      fillPoly([
+        b.proj(hl * 0.92, -hw * 0.88, zBelt + 0.1),
+        b.proj(hl * 0.92, hw * 0.88, zBelt + 0.1),
+        b.proj(hl * 0.56, hw * 0.84, zRoof),
+        b.proj(hl * 0.56, -hw * 0.84, zRoof),
+      ], isNight ? '#48688c' : '#35506b', outlineCol, lw * 0.7);
+
+      // Flat sunlit cargo roof + signature crests / camper rack / emergency lightbar
+      const roofHex = isEmergency
+        ? (isAmbulance ? '#f8fafc' : '#e02620')
+        : (isPostVan ? '#f8d238' : (isCamper ? '#f1f5f9' : '#fcf9f0'));
+      fillPoly([
+        b.proj(-hl, -hw, zRoof),
+        b.proj(hl * 0.56, -hw, zRoof),
+        b.proj(hl * 0.56, hw, zRoof),
+        b.proj(-hl, hw, zRoof),
+      ], shadeHex(roofHex, 1.08, mode), outlineCol, lw * 0.8);
+
+      if (isLindtVan) {
+        fillPoly([
+          b.proj(-hl * 0.55, -hw * 0.42, zRoof + 0.1),
+          b.proj(hl * 0.15, -hw * 0.42, zRoof + 0.1),
+          b.proj(hl * 0.15, hw * 0.42, zRoof + 0.1),
+          b.proj(-hl * 0.55, hw * 0.42, zRoof + 0.1),
+        ], shadeHex('#d4a02c', 1.1, mode));
+      } else if (isCamper) {
+        // Pop-top roof rack
+        fillPoly([
+          b.proj(-hl * 0.72, -hw * 0.65, zRoof + 0.4),
+          b.proj(hl * 0.25, -hw * 0.65, zRoof + 0.4),
+          b.proj(hl * 0.25, hw * 0.65, zRoof + 0.4),
+          b.proj(-hl * 0.72, hw * 0.65, zRoof + 0.4),
+        ], shadeHex('#cbd5e1', 1.04, mode), outlineCol, lw * 0.6);
+      } else if (isEmergency) {
+        // Subtle Swiss Feuerwehr/Ambulance alternating blue roof lightbar
+        const flashSide = (Math.floor(tSec * 6.0 + colorIdx) % 2 === 0) ? -1 : 1;
+        const barPt = b.proj(hl * 0.38, flashSide * hw * 0.35, zRoof + 0.55);
+        const dimPt = b.proj(hl * 0.38, -flashSide * hw * 0.35, zRoof + 0.55);
+        const lSz = Math.max(1.4, 1.8 * b.s);
+        if (isNight || isSunset) {
+          vCtx.save();
+          vCtx.fillStyle = isNight ? 'rgba(56, 189, 248, 0.38)' : 'rgba(56, 189, 248, 0.22)';
+          vCtx.beginPath();
+          vCtx.arc(barPt[0], barPt[1], Math.max(2.2, 2.5 * b.s), 0, Math.PI * 2);
+          vCtx.fill();
+          vCtx.restore();
+        }
+        vCtx.fillStyle = '#1e3a8a';
+        vCtx.fillRect(Math.round(dimPt[0] - lSz * 0.4), Math.round(dimPt[1] - lSz * 0.4), Math.max(1, Math.round(lSz * 0.85)), Math.max(1, Math.round(lSz * 0.85)));
+        vCtx.fillStyle = '#38bdf8';
+        vCtx.fillRect(Math.round(barPt[0] - lSz * 0.5), Math.round(barPt[1] - lSz * 0.5), Math.max(1.5, Math.round(lSz)), Math.max(1.5, Math.round(lSz)));
+      }
+    } else {
+      // Side body wall + cabin greenhouse side (Estate Kombi / Hatchback / Sedan)
+      fillPoly([
+        b.proj(-hl, sideSign * hw, zBot),
+        b.proj(hl, sideSign * hw, zBot),
+        b.proj(hl, sideSign * hw, zBelt),
+        b.proj(-hl, sideSign * hw, zBelt),
+      ], shadeHex(baseHex, sideShade * 0.92, mode), outlineCol, lw);
+
+      const rearWinBot = isEstate ? -hl * 0.78 : (isHatch ? -hl * 0.68 : -hl * 0.56);
+      const rearRoofL = isEstate ? -hl * 0.70 : (isHatch ? -hl * 0.60 : -hl * 0.44);
+      const frontRoofL = isEstate ? hl * 0.26 : hl * 0.28;
+
       // Side dark tinted windows
       fillPoly([
-        b.proj(-hl * 0.56, sideSign * hw * 0.92, zBelt),
+        b.proj(rearWinBot, sideSign * hw * 0.92, zBelt),
         b.proj(hl * 0.46, sideSign * hw * 0.92, zBelt),
-        b.proj(hl * 0.26, sideSign * hw * 0.82, zRoof),
-        b.proj(-hl * 0.42, sideSign * hw * 0.82, zRoof),
+        b.proj(frontRoofL, sideSign * hw * 0.82, zRoof),
+        b.proj(rearRoofL, sideSign * hw * 0.82, zRoof),
       ], isNight ? '#334d6e' : '#26384c', outlineCol, lw * 0.8);
 
       // Visible front or rear bumper face
@@ -1744,40 +1802,71 @@
       fillPoly([
         b.proj(hl * 0.54, -hw * 0.84, zBelt + 0.1),
         b.proj(hl * 0.54, hw * 0.84, zBelt + 0.1),
-        b.proj(hl * 0.28, hw * 0.78, zRoof),
-        b.proj(hl * 0.28, -hw * 0.78, zRoof),
+        b.proj(frontRoofL, hw * 0.78, zRoof),
+        b.proj(frontRoofL, -hw * 0.78, zRoof),
       ], isNight ? '#446387' : '#354f68');
       if (!isNight) {
         fillPoly([
           b.proj(hl * 0.46, -hw * 0.64, zBelt + 0.7),
           b.proj(hl * 0.46, -hw * 0.12, zBelt + 0.7),
-          b.proj(hl * 0.34, -hw * 0.12, zRoof - 0.5),
-          b.proj(hl * 0.34, -hw * 0.60, zRoof - 0.5),
+          b.proj(frontRoofL + hl * 0.06, -hw * 0.12, zRoof - 0.5),
+          b.proj(frontRoofL + hl * 0.06, -hw * 0.60, zRoof - 0.5),
         ], 'rgba(216,238,255,0.34)');
       }
 
       // Sunlit top roof panel
       fillPoly([
-        b.proj(-hl * 0.44, -hw * 0.78, zRoof),
-        b.proj(hl * 0.28, -hw * 0.78, zRoof),
-        b.proj(hl * 0.28, hw * 0.78, zRoof),
-        b.proj(-hl * 0.44, hw * 0.78, zRoof),
+        b.proj(rearRoofL, -hw * 0.78, zRoof),
+        b.proj(frontRoofL, -hw * 0.78, zRoof),
+        b.proj(frontRoofL, hw * 0.78, zRoof),
+        b.proj(rearRoofL, hw * 0.78, zRoof),
       ], shadeHex(baseHex, 1.15, mode), outlineCol, lw * 0.8);
+
+      // Silver Kombi roof rails on Swiss Estates
+      if (isEstate) {
+        vCtx.strokeStyle = shadeHex('#d4dce6', 1.0, mode);
+        vCtx.lineWidth = Math.max(0.7, 0.75 * b.s);
+        for (const rSide of [-hw * 0.62, hw * 0.62]) {
+          const r0 = b.proj(rearRoofL + 0.8, rSide, zRoof + 0.35);
+          const r1 = b.proj(frontRoofL - 0.8, rSide, zRoof + 0.35);
+          vCtx.beginPath();
+          vCtx.moveTo(r0[0], r0[1]);
+          vCtx.lineTo(r1[0], r1[1]);
+          vCtx.stroke();
+        }
+      }
     }
 
-    // Headlights (warm beams at night!) & red taillights
+    // Dark wheel arches & silver hubs along visible side (all cars & vans!)
+    const wDot = Math.max(1.5, 2.2 * b.s);
+    const hDot = Math.max(0.8, 0.9 * b.s);
+    for (const wl of [-hl * 0.58, hl * 0.58]) {
+      const wp = b.proj(wl, sideSign * (hw + 0.06), zBot + 0.4);
+      vCtx.fillStyle = isNight ? '#11161f' : '#1c222b';
+      vCtx.fillRect(Math.round(wp[0] - wDot * 0.55), Math.round(wp[1] - wDot * 0.45), Math.max(2, Math.round(wDot * 1.1)), Math.max(1.5, Math.round(wDot * 0.95)));
+      vCtx.fillStyle = shadeHex('#9aa6b4', 0.95, mode);
+      vCtx.fillRect(Math.round(wp[0] - hDot * 0.5), Math.round(wp[1] - hDot * 0.4), Math.max(1, Math.round(hDot)), Math.max(1, Math.round(hDot)));
+    }
+
+    // Headlights (warm beams at night!) & red taillights + night/sunset taillight asphalt glow
     const hl1 = b.proj(hl + 0.3, -hw * 0.62, zBot + 1.6);
     const hl2 = b.proj(hl + 0.3, hw * 0.62, zBot + 1.6);
     const tl1 = b.proj(-hl - 0.3, -hw * 0.62, zBot + 1.8);
     const tl2 = b.proj(-hl - 0.3, hw * 0.62, zBot + 1.8);
     const rDot = Math.max(1.2, 1.6 * b.s);
     if (isNight) {
-      // Soft glowing headlight cone on road
       fillPoly([
         hl1, hl2,
         b.proj(hl + 22, hw * 2.2, 0.2),
         b.proj(hl + 22, -hw * 2.2, 0.2),
       ], 'rgba(255,244,186,0.22)');
+    }
+    if (isNight || isSunset) {
+      fillPoly([
+        tl1, tl2,
+        b.proj(-hl - 9.5, hw * 1.45, 0.2),
+        b.proj(-hl - 9.5, -hw * 1.45, 0.2),
+      ], isNight ? 'rgba(255, 42, 36, 0.16)' : 'rgba(255, 48, 40, 0.08)');
     }
     vCtx.fillStyle = isNight ? '#fff8c8' : '#fffbe0';
     vCtx.fillRect(hl1[0] - rDot * 0.5, hl1[1] - rDot * 0.5, rDot, rDot);
@@ -1787,14 +1876,14 @@
     vCtx.fillRect(tl2[0] - rDot * 0.5, tl2[1] - rDot * 0.5, rDot, rDot);
   }
 
-  function draw3DBus(pos, wScale, mode) {
-    // Iconic Zurich ZVV / VBZ blue-and-white bus (Lines 161 & 165 through Kilchberg!)
-    const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
-    if (b.cx < -60 || b.cx > canvas.width + 60 || b.cy < -60 || b.cy > canvas.height + 60) return;
-
+  function drawBusSection(b, hl, hw, mode, tSec, opts) {
     const isNight = mode === 'night';
-    const hl = 22.0; // ~12 m ZVV city bus
-    const hw = 6.0;
+    const isSunset = mode === 'sunset';
+    const isFront = opts.isFront;
+    const isRear = opts.isRear;
+    const isDwelling = !!opts.isDwelling;
+    const speedRatio = opts.speedRatio != null ? opts.speedRatio : 1.0;
+    const wheelPositions = opts.wheelPositions || [-hl * 0.56, hl * 0.56];
     const zBot = 1.4;
     const zBlue = 5.4;
     const zWinBot = 6.2;
@@ -1804,10 +1893,10 @@
     // Grounded SE shadow
     const shOff = [3.6 * b.s, 2.8 * b.s];
     fillPoly([
-      b.proj(hl + 1.5, -hw - 1.0, 0),
-      b.proj(hl + 1.5, hw + 1.0, 0),
-      b.proj(-hl - 1.5, hw + 1.0, 0),
-      b.proj(-hl - 1.5, -hw - 1.0, 0),
+      b.proj(hl + 1.2, -hw - 1.0, 0),
+      b.proj(hl + 1.2, hw + 1.0, 0),
+      b.proj(-hl - 1.2, hw + 1.0, 0),
+      b.proj(-hl - 1.2, -hw - 1.0, 0),
     ].map(([x, y]) => [x + shOff[0], y + shOff[1]]), isNight ? 'rgba(6,10,20,0.65)' : 'rgba(18,24,32,0.46)');
 
     const sideSign = b.ry >= 0 ? 1 : -1;
@@ -1816,7 +1905,7 @@
     const outlineCol = isNight ? 'rgba(10,16,28,0.88)' : 'rgba(24,30,40,0.78)';
     const lw = Math.max(0.8, Math.min(1.5, b.s * 0.5));
 
-    // Side wall: ZVV Cobalt Blue lower skirt + Crisp White upper body + Continuous dark/lit windows
+    // Side wall: ZVV Cobalt Blue lower skirt + Crisp White upper body
     const sideShade = b.dirShade(0, sideSign);
     fillPoly([
       b.proj(-hl, sideSign * hw, zBot),
@@ -1832,39 +1921,97 @@
       b.proj(-hl, sideSign * hw, zRoof),
     ], shadeHex('#f2f5f8', sideShade, mode), outlineCol, lw);
 
-    // Side window ribbon with crisp vertical pillars
+    // Side window ribbon
+    const winStart = -hl + 1.6;
+    const winEnd = hl - 1.4;
     fillPoly([
-      b.proj(-hl + 1.8, sideSign * (hw + 0.05), zWinBot),
-      b.proj(hl - 1.4, sideSign * (hw + 0.05), zWinBot),
-      b.proj(hl - 1.4, sideSign * (hw + 0.05), zWinTop),
-      b.proj(-hl + 1.8, sideSign * (hw + 0.05), zWinTop),
+      b.proj(winStart, sideSign * (hw + 0.05), zWinBot),
+      b.proj(winEnd, sideSign * (hw + 0.05), zWinBot),
+      b.proj(winEnd, sideSign * (hw + 0.05), zWinTop),
+      b.proj(winStart, sideSign * (hw + 0.05), zWinTop),
     ], isNight ? '#ffd978' : '#243a52');
+
+    // Crisp vertical window mullions every ~5.4 world px
+    vCtx.strokeStyle = isNight ? '#263345' : shadeHex('#dce3ec', sideShade * 0.92, mode);
+    vCtx.lineWidth = Math.max(0.75, lw * 0.85);
+    for (let ml = winStart + 5.2; ml < winEnd - 2.0; ml += 5.4) {
+      const m0 = b.proj(ml, sideSign * (hw + 0.08), zWinBot);
+      const m1 = b.proj(ml, sideSign * (hw + 0.08), zWinTop);
+      vCtx.beginPath();
+      vCtx.moveTo(m0[0], m0[1]);
+      vCtx.lineTo(m1[0], m1[1]);
+      vCtx.stroke();
+    }
+
+    // Side orange LED route strip behind front door
+    if (isFront) {
+      fillPoly([
+        b.proj(hl - 5.6, sideSign * (hw + 0.10), zWinTop - 1.3),
+        b.proj(hl - 1.9, sideSign * (hw + 0.10), zWinTop - 1.3),
+        b.proj(hl - 1.9, sideSign * (hw + 0.10), zWinTop - 0.1),
+        b.proj(hl - 5.6, sideSign * (hw + 0.10), zWinTop - 0.1),
+      ], '#161c24');
+      fillPoly([
+        b.proj(hl - 5.2, sideSign * (hw + 0.12), zWinTop - 1.05),
+        b.proj(hl - 2.3, sideSign * (hw + 0.12), zWinTop - 1.05),
+        b.proj(hl - 2.3, sideSign * (hw + 0.12), zWinTop - 0.35),
+        b.proj(hl - 5.2, sideSign * (hw + 0.12), zWinTop - 0.35),
+      ], '#ff9e1b');
+    }
+
+    // Dark wheel arches & silver wheel hubs along visible side
+    for (const wl of wheelPositions) {
+      fillPoly([
+        b.proj(wl - 2.4, sideSign * (hw + 0.09), zBot - 0.3),
+        b.proj(wl + 2.4, sideSign * (hw + 0.09), zBot - 0.3),
+        b.proj(wl + 2.0, sideSign * (hw + 0.09), zBot + 2.4),
+        b.proj(wl - 2.0, sideSign * (hw + 0.09), zBot + 2.4),
+      ], isNight ? '#11161f' : '#1c222b');
+      const hp = b.proj(wl, sideSign * (hw + 0.11), zBot + 0.9);
+      const hSz = Math.max(1.0, 1.3 * b.s);
+      vCtx.fillStyle = shadeHex('#9aa6b4', 0.96, mode);
+      vCtx.fillRect(Math.round(hp[0] - hSz * 0.5), Math.round(hp[1] - hSz * 0.5), Math.max(1, Math.round(hSz)), Math.max(1, Math.round(hSz)));
+    }
 
     // End face (front windshield or rear panel)
     const endShade = b.dirShade(endSign, 0);
+    const drawOuterEnd = (endSign > 0 && isFront) || (endSign < 0 && isRear);
     fillPoly([
       b.proj(endSign * hl, -hw, zBot),
       b.proj(endSign * hl, hw, zBot),
       b.proj(endSign * hl, hw, zBlue),
       b.proj(endSign * hl, -hw, zBlue),
-    ], shadeHex('#0d5ea6', endShade, mode), outlineCol, lw);
+    ], shadeHex(drawOuterEnd ? '#0d5ea6' : '#262c34', endShade, mode), outlineCol, lw);
     fillPoly([
       b.proj(endSign * hl, -hw, zBlue),
       b.proj(endSign * hl, hw, zBlue),
       b.proj(endSign * hl, hw, zRoof),
       b.proj(endSign * hl, -hw, zRoof),
-    ], shadeHex('#f2f5f8', endShade, mode), outlineCol, lw);
+    ], shadeHex(drawOuterEnd ? '#f2f5f8' : '#2e3540', endShade, mode), outlineCol, lw);
 
-    if (frontVis) {
+    if (frontVis && isFront) {
       fillPoly([
         b.proj(hl + 0.06, -hw * 0.85, zWinBot - 0.4),
         b.proj(hl + 0.06, hw * 0.85, zWinBot - 0.4),
-        b.proj(hl + 0.06, hw * 0.85, zWinTop + 0.4),
-        b.proj(hl + 0.06, -hw * 0.85, zWinTop + 0.4),
+        b.proj(hl + 0.06, hw * 0.85, zWinTop - 0.1),
+        b.proj(hl + 0.06, -hw * 0.85, zWinTop - 0.1),
       ], isNight ? '#58789c' : '#243a52');
+      // Glowing orange VBZ/ZVV LED route matrix display (161 / 165) above front windshield
+      fillPoly([
+        b.proj(hl + 0.10, -hw * 0.62, zWinTop + 0.1),
+        b.proj(hl + 0.10, hw * 0.62, zWinTop + 0.1),
+        b.proj(hl + 0.10, hw * 0.62, zRoof - 0.35),
+        b.proj(hl + 0.10, -hw * 0.62, zRoof - 0.35),
+      ], '#141920');
+      fillPoly([
+        b.proj(hl + 0.14, -hw * 0.48, zWinTop + 0.35),
+        b.proj(hl + 0.14, hw * 0.48, zWinTop + 0.35),
+        b.proj(hl + 0.14, hw * 0.48, zRoof - 0.6),
+        b.proj(hl + 0.14, -hw * 0.48, zRoof - 0.6),
+      ], '#ffb340');
     }
 
-    // Crisp sunlit white roof with rooftop HVAC pod + ZVV blue accent stripe
+    // Sunlit white roof + rooftop HVAC pod
     fillPoly([
       b.proj(-hl, -hw, zRoof),
       b.proj(hl, -hw, zRoof),
@@ -1872,27 +2019,154 @@
       b.proj(-hl, hw, zRoof),
     ], shadeHex('#ffffff', 1.05, mode), outlineCol, lw);
 
-    // Rooftop AC unit (adds unmistakable 3D miniature detail!)
-    fillPoly([
-      b.proj(-7.5, -hw * 0.58, zRoof + 1.4),
-      b.proj(6.5, -hw * 0.58, zRoof + 1.4),
-      b.proj(6.5, hw * 0.58, zRoof + 1.4),
-      b.proj(-7.5, hw * 0.58, zRoof + 1.4),
-    ], shadeHex('#cfd7e0', 1.0, mode), outlineCol, lw * 0.7);
-
-    // Headlight glow at night
-    if (isNight) {
+    if (opts.hasAcPod !== false) {
+      const acHalf = Math.min(7.0, hl * 0.36);
       fillPoly([
-        b.proj(hl, -hw * 0.7, zBot + 1.5),
-        b.proj(hl, hw * 0.7, zBot + 1.5),
-        b.proj(hl + 30, hw * 2.6, 0.2),
-        b.proj(hl + 30, -hw * 2.6, 0.2),
-      ], 'rgba(255,244,186,0.25)');
+        b.proj(-acHalf, -hw * 0.58, zRoof + 1.4),
+        b.proj(acHalf, -hw * 0.58, zRoof + 1.4),
+        b.proj(acHalf, hw * 0.58, zRoof + 1.4),
+        b.proj(-acHalf, hw * 0.58, zRoof + 1.4),
+      ], shadeHex('#cfd7e0', 1.0, mode), outlineCol, lw * 0.7);
+    }
+
+    const rDot = Math.max(1.4, 1.8 * b.s);
+
+    // Front headlights & night beam cone
+    if (isFront) {
+      const hl1 = b.proj(hl + 0.18, -hw * 0.68, zBot + 1.8);
+      const hl2 = b.proj(hl + 0.18, hw * 0.68, zBot + 1.8);
+      if (isNight) {
+        fillPoly([
+          hl1, hl2,
+          b.proj(hl + 30, hw * 2.6, 0.2),
+          b.proj(hl + 30, -hw * 2.6, 0.2),
+        ], 'rgba(255,244,186,0.25)');
+      }
+      vCtx.fillStyle = isNight ? '#fff8c8' : '#fffbe0';
+      vCtx.fillRect(hl1[0] - rDot * 0.5, hl1[1] - rDot * 0.5, rDot, rDot);
+      vCtx.fillRect(hl2[0] - rDot * 0.5, hl2[1] - rDot * 0.5, rDot, rDot);
+    }
+
+    // Rear brake/taillights (brightening during decel/dwell + night/sunset asphalt glow)
+    if (isRear) {
+      const isBraking = isDwelling || speedRatio < 0.45;
+      const tl1 = b.proj(-hl - 0.18, -hw * 0.68, zBot + 2.0);
+      const tl2 = b.proj(-hl - 0.18, hw * 0.68, zBot + 2.0);
+      if (isNight || isSunset || isBraking) {
+        const glowA = isNight ? (isBraking ? 0.28 : 0.16) : (isBraking ? 0.16 : 0.08);
+        fillPoly([
+          tl1, tl2,
+          b.proj(-hl - 12, hw * 1.55, 0.2),
+          b.proj(-hl - 12, -hw * 1.55, 0.2),
+        ], `rgba(255, 42, 36, ${glowA.toFixed(2)})`);
+      }
+      vCtx.fillStyle = (isBraking || isNight) ? '#ff3b30' : '#d62828';
+      const tSz = isBraking ? rDot * 1.25 : rDot;
+      vCtx.fillRect(tl1[0] - tSz * 0.5, tl1[1] - tSz * 0.5, tSz, tSz);
+      vCtx.fillRect(tl2[0] - tSz * 0.5, tl2[1] - tSz * 0.5, tSz, tSz);
+    }
+
+    // Blinking amber door/hazard lights during bus-stop dwell
+    if (isDwelling && (Math.floor(tSec * 2.8) % 2 === 0)) {
+      const aSz = Math.max(1.5, 1.9 * b.s);
+      vCtx.fillStyle = '#ffaa00';
+      if (isFront) {
+        const af = b.proj(hl - 0.6, sideSign * hw * 0.95, zBot + 2.0);
+        const ad = b.proj(hl - 4.0, sideSign * (hw + 0.12), zWinTop + 0.5);
+        vCtx.fillRect(af[0] - aSz * 0.5, af[1] - aSz * 0.5, aSz, aSz);
+        vCtx.fillRect(ad[0] - aSz * 0.5, ad[1] - aSz * 0.5, aSz, aSz);
+      }
+      if (isRear) {
+        const ar = b.proj(-hl + 0.6, sideSign * hw * 0.95, zBot + 2.0);
+        vCtx.fillRect(ar[0] - aSz * 0.5, ar[1] - aSz * 0.5, aSz, aSz);
+      }
     }
   }
 
-  function draw3DTrainUnit(pRear, pFront, kind, variant, wScale, mode, nextRear, nextFront, tSec = 0) {
-    // Museum-grade continuous 3D SBB RABe 511 KISS Double-Decker & SBB Re 460 IC
+  function draw3DBus(pos, wScale, mode, tSec = 0, speedRatio = 1.0, isDwelling = false, routeNum = '165') {
+    // Iconic Zurich ZVV / VBZ 12 m blue-and-white regional bus (Line 165 through Kilchberg!)
+    const b = makeScreenIsoBasis(pos.wx, pos.wy, pos.tx, pos.ty, wScale);
+    if (b.cx < -64 || b.cx > canvas.width + 64 || b.cy < -64 || b.cy > canvas.height + 64) return;
+    drawBusSection(b, 22.0, 6.0, mode, tSec, {
+      isFront: true,
+      isRear: true,
+      routeNum,
+      speedRatio,
+      isDwelling,
+      wheelPositions: [-12.5, 12.5],
+      hasAcPod: true,
+    });
+  }
+
+  function draw3DArticulatedBus(pRear, pMidRear, pMidFront, pFront, wScale, mode, tSec = 0, speedRatio = 1.0, isDwelling = false) {
+    // Authentic VBZ Line 161 18 m 2-section hinged articulated accordion bus on Seestrasse!
+    const hlFront = 20.4;
+    const hlRear = 14.4;
+    const hw = 5.8;
+    const bFront = makeTwoPointIsoBasis(pMidFront, pFront, hlFront, wScale);
+    const bRear = makeTwoPointIsoBasis(pRear, pMidRear, hlRear, wScale);
+    if (bFront.cx < -100 || bFront.cx > canvas.width + 100 || bFront.cy < -100 || bFront.cy > canvas.height + 100) return;
+
+    const isNight = mode === 'night';
+    const outlineCol = isNight ? 'rgba(10,16,28,0.88)' : 'rgba(24,30,40,0.78)';
+    const lw = Math.max(0.8, Math.min(1.4, bFront.s * 0.48));
+    const sideSign = bFront.ry >= 0 ? 1 : -1;
+
+    const drawBellows = () => {
+      const bw = hw * 0.86;
+      const zBot = 1.8;
+      const zRoof = 11.7;
+      // Dark pleated charcoal rubber bellows bridging tractor rear to trailer front
+      fillPoly([
+        bFront.proj(-hlFront, sideSign * bw, zBot),
+        bRear.proj(hlRear, sideSign * bw, zBot),
+        bRear.proj(hlRear, sideSign * bw, zRoof),
+        bFront.proj(-hlFront, sideSign * bw, zRoof),
+      ], shadeHex('#262c34', 0.90, mode), outlineCol, lw * 0.85);
+      fillPoly([
+        bFront.proj(-hlFront, -bw, zRoof),
+        bRear.proj(hlRear, -bw, zRoof),
+        bRear.proj(hlRear, bw, zRoof),
+        bFront.proj(-hlFront, bw, zRoof),
+      ], shadeHex('#363e48', 0.98, mode), outlineCol, lw * 0.8);
+      // Two crisp vertical accordion rib highlight lines
+      vCtx.strokeStyle = shadeHex('#525e6e', 1.0, mode);
+      vCtx.lineWidth = Math.max(0.7, lw * 0.75);
+      for (const f of [0.33, 0.67]) {
+        const a0 = bFront.proj(-hlFront, sideSign * (bw + 0.06), zBot + 0.4);
+        const a1 = bRear.proj(hlRear, sideSign * (bw + 0.06), zBot + 0.4);
+        const c0 = bFront.proj(-hlFront, sideSign * (bw + 0.06), zRoof - 0.3);
+        const c1 = bRear.proj(hlRear, sideSign * (bw + 0.06), zRoof - 0.3);
+        vCtx.beginPath();
+        vCtx.moveTo(a0[0] + (a1[0] - a0[0]) * f, a0[1] + (a1[1] - a0[1]) * f);
+        vCtx.lineTo(c0[0] + (c1[0] - c0[0]) * f, c0[1] + (c1[1] - c0[1]) * f);
+        vCtx.stroke();
+      }
+    };
+
+    const frontOpts = {
+      isFront: true, isRear: false, routeNum: '161', speedRatio, isDwelling,
+      wheelPositions: [-11.0, 11.5], hasAcPod: true,
+    };
+    const rearOpts = {
+      isFront: false, isRear: true, routeNum: '161', speedRatio, isDwelling,
+      wheelPositions: [-4.5], hasAcPod: true,
+    };
+
+    // Painter-sort rear vs front section around the hinged bellows so closer half draws cleanly on top
+    if (bRear.cy <= bFront.cy) {
+      drawBusSection(bRear, hlRear, hw, mode, tSec, rearOpts);
+      drawBellows();
+      drawBusSection(bFront, hlFront, hw, mode, tSec, frontOpts);
+    } else {
+      drawBusSection(bFront, hlFront, hw, mode, tSec, frontOpts);
+      drawBellows();
+      drawBusSection(bRear, hlRear, hw, mode, tSec, rearOpts);
+    }
+  }
+
+  function draw3DTrainUnit(pRear, pFront, kind, variant, wScale, mode, nextRear, nextFront, tSec = 0, isDwelling = false, dwellProgress = 0) {
+    // Museum-grade continuous 3D SBB RABe 511 KISS / DPZ Double-Decker & SBB Re 460 IC
     // True two-point rail-pinned kinematics (pFront & pRear on the track) so every wagon
     // tracks the rail like a real articulated train with locked dark rubber gangway bellows!
     const hl = 34.5; // local coordinate range [-hl, +hl] mapped directly to [pRear, pFront]
@@ -1900,7 +2174,8 @@
     if (b.cx < -140 || b.cx > canvas.width + 140 || b.cy < -140 || b.cy > canvas.height + 140) return;
 
     const isNight = mode === 'night';
-    const isKISS = kind === 'sbb_kiss';
+    const isSunset = mode === 'sunset';
+    const isKISS = (kind === 'sbb_dpz' || kind === 'sbb_kiss');
     const isLead = variant === 0;
     const isTail = variant === 2;
 
@@ -1966,7 +2241,18 @@
     // Iconic SBB black window band + double-deck / single-deck windows + bright red SBB doors!
     const winColor = isNight ? '#ffd670' : '#5880a4';
     const bandColor = isNight ? '#1b2432' : '#232a34';
+    let doorPositions = null;
+    let doorTopZ = zSkirt + 5.2;
+
     if (isKISS) {
+      // Iconic ZVV cobalt-blue lower accent stripe along lower sill of Zurich S-Bahn double-decker!
+      fillPoly([
+        b.proj(-hl + 1.5, sideSign * (hw + 0.07), zSkirt),
+        b.proj(hl - 1.5, sideSign * (hw + 0.07), zSkirt),
+        b.proj(hl - 1.5, sideSign * (hw + 0.07), zSkirt + 0.9),
+        b.proj(-hl + 1.5, sideSign * (hw + 0.07), zSkirt + 0.9),
+      ], shadeHex('#1e5cb3', sideShade * 1.05, mode));
+
       // Lower-deck dark window ribbon
       fillPoly([
         b.proj(-hl + 5.5, sideSign * (hw + 0.06), zSkirt + 1.0),
@@ -2000,12 +2286,14 @@
 
       // Signature SBB bright red boarding doors at 1/4 & 3/4 coach length!
       const redDoor = shadeHex('#d92121', sideShade * 1.05, mode);
-      for (const dPos of [-20.5, 16.5]) {
+      doorPositions = [-20.5, 16.5];
+      doorTopZ = zSkirt + 5.2;
+      for (const dPos of doorPositions) {
         fillPoly([
           b.proj(dPos, sideSign * (hw + 0.12), zSkirt),
           b.proj(dPos + 4.2, sideSign * (hw + 0.12), zSkirt),
-          b.proj(dPos + 4.2, sideSign * (hw + 0.12), zSkirt + 5.2),
-          b.proj(dPos, sideSign * (hw + 0.12), zSkirt + 5.2),
+          b.proj(dPos + 4.2, sideSign * (hw + 0.12), doorTopZ),
+          b.proj(dPos, sideSign * (hw + 0.12), doorTopZ),
         ], redDoor);
       }
       // Subtle red cant-rail stripe under the roof
@@ -2032,12 +2320,14 @@
         ], winColor);
       }
       const redDoor = shadeHex('#d92121', sideShade * 1.05, mode);
-      for (const dPos of [-30.0, 26.0]) {
+      doorPositions = [-30.0, 26.0];
+      doorTopZ = zEave - 1.8;
+      for (const dPos of doorPositions) {
         fillPoly([
           b.proj(dPos, sideSign * (hw + 0.12), zSkirt),
           b.proj(dPos + 4.0, sideSign * (hw + 0.12), zSkirt),
-          b.proj(dPos + 4.0, sideSign * (hw + 0.12), zEave - 1.8),
-          b.proj(dPos, sideSign * (hw + 0.12), zEave - 1.8),
+          b.proj(dPos + 4.0, sideSign * (hw + 0.12), doorTopZ),
+          b.proj(dPos, sideSign * (hw + 0.12), doorTopZ),
         ], redDoor);
       }
     } else {
@@ -2063,6 +2353,45 @@
         b.proj(16.0, sideSign * (hw + 0.07), zEave - 1.0),
         b.proj(-16.0, sideSign * (hw + 0.07), zEave - 1.0),
       ], shadeHex('#7d1818', sideShade, mode));
+    }
+
+    // Animated SBB yellow/amber door-closing warning flash & doorway warm interior spill during Bahnhof dwell!
+    if (isDwelling && doorPositions) {
+      const doorsOpen = dwellProgress >= 0.12 && dwellProgress <= 0.78;
+      const closingWarn = dwellProgress > 0.62;
+      const blinkOn = closingWarn ? (Math.floor(tSec * 8.0) % 2 === 0) : true;
+      const dDot = Math.max(1.4, 1.8 * b.s);
+      for (const dPos of doorPositions) {
+        if (doorsOpen) {
+          fillPoly([
+            b.proj(dPos + 0.7, sideSign * (hw + 0.15), zSkirt + 0.3),
+            b.proj(dPos + 3.4, sideSign * (hw + 0.15), zSkirt + 0.3),
+            b.proj(dPos + 3.4, sideSign * (hw + 0.15), doorTopZ - 0.5),
+            b.proj(dPos + 0.7, sideSign * (hw + 0.15), doorTopZ - 0.5),
+          ], (isNight || isSunset) ? '#ffe496' : '#fef3c7');
+          if (isNight || isSunset) {
+            fillPoly([
+              b.proj(dPos, sideSign * (hw + 0.2), 0.3),
+              b.proj(dPos + 4.0, sideSign * (hw + 0.2), 0.3),
+              b.proj(dPos + 4.8, sideSign * (hw + 5.0), 0.1),
+              b.proj(dPos - 0.8, sideSign * (hw + 5.0), 0.1),
+            ], isNight ? 'rgba(255, 224, 138, 0.28)' : 'rgba(255, 218, 128, 0.16)');
+          }
+        }
+        if (blinkOn) {
+          const lp = b.proj(dPos + 2.0, sideSign * (hw + 0.18), doorTopZ + 0.55);
+          if (isNight || isSunset) {
+            vCtx.save();
+            vCtx.fillStyle = 'rgba(255, 210, 48, 0.42)';
+            vCtx.beginPath();
+            vCtx.arc(lp[0], lp[1], dDot * 1.9, 0, Math.PI * 2);
+            vCtx.fill();
+            vCtx.restore();
+          }
+          vCtx.fillStyle = closingWarn ? '#ffd426' : '#ffbe2e';
+          vCtx.fillRect(Math.round(lp[0] - dDot * 0.5), Math.round(lp[1] - dDot * 0.5), Math.max(1.5, Math.round(dDot)), Math.max(1.5, Math.round(dDot)));
+        }
+      }
     }
 
     // 5. Visible front cab nose or rear end face
@@ -2093,21 +2422,18 @@
     const rw = hw * 0.62;
     const nwBevelShade = b.dirShade(0, -1) * 0.5 + 0.62;
     const seBevelShade = b.dirShade(0, 1) * 0.5 + 0.54;
-    // Left roof bevel
     fillPoly([
       b.proj(tailL, -hw, zEave),
       b.proj(noseL, -hw, zEave),
       b.proj(noseL - 0.8, -rw, zCrown),
       b.proj(tailL + 0.8, -rw, zCrown),
     ], shadeHex('#d4dce5', nwBevelShade, mode));
-    // Right roof bevel
     fillPoly([
       b.proj(tailL, hw, zEave),
       b.proj(noseL, hw, zEave),
       b.proj(noseL - 0.8, rw, zCrown),
       b.proj(tailL + 0.8, rw, zCrown),
     ], shadeHex('#c4ceda', seBevelShade, mode));
-    // Sunlit top roof crown (always the brightest surface on the train -> true 3D volume!)
     fillPoly([
       b.proj(tailL + 0.8, -rw, zCrown),
       b.proj(noseL - 0.8, -rw, zCrown),
@@ -2115,7 +2441,7 @@
       b.proj(tailL + 0.8, rw, zCrown),
     ], shadeHex('#e8eef5', 1.06, mode), outlineCol, lw * 0.75);
 
-    // Rooftop HVAC pods & pantograph on lead/mid coaches
+    // Rooftop HVAC pods
     for (const podL of [-14, 10]) {
       fillPoly([
         b.proj(podL - 4.5, -rw * 0.72, zCrown + 1.1),
@@ -2124,6 +2450,9 @@
         b.proj(podL - 4.5, rw * 0.72, zCrown + 1.1),
       ], shadeHex('#bcc6d2', 0.98, mode), outlineCol, lw * 0.6);
     }
+
+    const rDot = Math.max(1.4, 1.8 * b.s);
+
     if (isLead) {
       // Crisp overhead pantograph bar
       const p0 = b.proj(-22, -rw * 0.9, zCrown + 3.4);
@@ -2135,23 +2464,25 @@
       vCtx.lineTo(p1[0], p1[1]);
       vCtx.stroke();
 
-      // Authentic rare SBB pantograph-to-catenary electric arc flash (especially atmospheric at Alpenglow & Night!)
-      const sparkSlot = Math.floor(tSec * 14.0);
-      const sparkHash = Math.sin(sparkSlot * 127.1 + Math.round(b.cx * 0.05) * 31.7) * 43758.5453;
-      if ((sparkHash - Math.floor(sparkHash)) > (isNight ? 0.945 : 0.975)) {
-        const pm = b.proj(-22, 0, zCrown + 3.6);
-        const spR = Math.max(2.0, 3.2 * b.s);
-        vCtx.save();
-        vCtx.fillStyle = isNight ? 'rgba(110, 230, 255, 0.55)' : 'rgba(140, 235, 255, 0.35)';
-        vCtx.beginPath();
-        vCtx.arc(pm[0], pm[1], spR * 1.9, 0, Math.PI * 2);
-        vCtx.fill();
-        vCtx.fillStyle = '#f2feff';
-        vCtx.fillRect(Math.round(pm[0] - spR * 0.5), Math.round(pm[1] - spR * 0.5), Math.max(2, Math.round(spR)), Math.max(2, Math.round(spR)));
-        vCtx.restore();
+      // Authentic rare SBB pantograph-to-catenary electric arc flash (suppressed while stationary at Bahnhof!)
+      if (!isDwelling) {
+        const sparkSlot = Math.floor(tSec * 14.0);
+        const sparkHash = Math.sin(sparkSlot * 127.1 + Math.round(b.cx * 0.05) * 31.7) * 43758.5453;
+        if ((sparkHash - Math.floor(sparkHash)) > (isNight ? 0.945 : 0.975)) {
+          const pm = b.proj(-22, 0, zCrown + 3.6);
+          const spR = Math.max(2.0, 3.2 * b.s);
+          vCtx.save();
+          vCtx.fillStyle = isNight ? 'rgba(110, 230, 255, 0.55)' : 'rgba(140, 235, 255, 0.35)';
+          vCtx.beginPath();
+          vCtx.arc(pm[0], pm[1], spR * 1.9, 0, Math.PI * 2);
+          vCtx.fill();
+          vCtx.fillStyle = '#f2feff';
+          vCtx.fillRect(Math.round(pm[0] - spR * 0.5), Math.round(pm[1] - spR * 0.5), Math.max(2, Math.round(spR)), Math.max(2, Math.round(spR)));
+          vCtx.restore();
+        }
       }
 
-      // Swiss triple-headlight glow at night
+      // Iconic Swiss 3-point white LED headlights (+ night headlight cone)
       if (isNight) {
         fillPoly([
           b.proj(hl, -hw * 0.75, zSkirt + 2.0),
@@ -2160,6 +2491,40 @@
           b.proj(hl + 52, -hw * 3.4, 0.2),
         ], 'rgba(255,244,186,0.28)');
       }
+      const leadLamps = [
+        b.proj(hl + 0.15, -hw * 0.58, zSkirt + 1.8),
+        b.proj(hl + 0.15, hw * 0.58, zSkirt + 1.8),
+        b.proj(noseL + 0.5, 0, zEave - 1.4),
+      ];
+      vCtx.fillStyle = isNight ? '#fff8cc' : '#fffbe6';
+      for (const lp of leadLamps) {
+        vCtx.fillRect(Math.round(lp[0] - rDot * 0.5), Math.round(lp[1] - rDot * 0.5), Math.max(1.5, Math.round(rDot)), Math.max(1.5, Math.round(rDot)));
+      }
+    }
+
+    if (isTail) {
+      // Twin Swiss SBB red LED taillights + night/sunset glow & subtle red rear rail reflection
+      const tl1 = b.proj(-hl - 0.15, -hw * 0.58, zSkirt + 1.8);
+      const tl2 = b.proj(-hl - 0.15, hw * 0.58, zSkirt + 1.8);
+      if (isNight || isSunset) {
+        fillPoly([
+          b.proj(-hl, -hw * 0.8, zSkirt + 1.5),
+          b.proj(-hl, hw * 0.8, zSkirt + 1.5),
+          b.proj(-hl - 16, hw * 1.4, 0.2),
+          b.proj(-hl - 16, -hw * 1.4, 0.2),
+        ], isNight ? 'rgba(255, 40, 36, 0.18)' : 'rgba(255, 44, 38, 0.10)');
+        vCtx.save();
+        vCtx.fillStyle = isNight ? 'rgba(255, 42, 38, 0.36)' : 'rgba(255, 48, 42, 0.22)';
+        for (const tp of [tl1, tl2]) {
+          vCtx.beginPath();
+          vCtx.arc(tp[0], tp[1], rDot * 2.2, 0, Math.PI * 2);
+          vCtx.fill();
+        }
+        vCtx.restore();
+      }
+      vCtx.fillStyle = (isNight || isSunset) ? '#ff2e2e' : '#e02424';
+      vCtx.fillRect(Math.round(tl1[0] - rDot * 0.5), Math.round(tl1[1] - rDot * 0.5), Math.max(1.5, Math.round(rDot)), Math.max(1.5, Math.round(rDot)));
+      vCtx.fillRect(Math.round(tl2[0] - rDot * 0.5), Math.round(tl2[1] - rDot * 0.5), Math.max(1.5, Math.round(rDot)), Math.max(1.5, Math.round(rDot)));
     }
   }
 
@@ -2417,9 +2782,31 @@
     pix(1.0, 0.0, 6.9, 1.85, 1.0, helmCol);  // sleek helmet shell
     pix(1.45, 0.0, 6.5, 1.15, 0.5, tireCol); // sunglasses / helmet visor
 
-    // 7. Tiny warm bike headlight at night
-    if (isNight) {
-      pix(2.9, 0, 3.3, 1.1, 1.1, '#fff9c4');
+    // 7. Crisp white front headlight + light cone & blinking red rear bike light at night/sunset
+    if (isNight || mode === 'sunset') {
+      if (isNight) {
+        fillPoly([
+          b.proj(3.0, 0, 2.8),
+          b.proj(12.0, 2.4, 0.2),
+          b.proj(12.0, -2.4, 0.2),
+        ], 'rgba(255, 252, 224, 0.16)');
+      }
+      pix(2.9, 0, 3.3, 1.2, 1.2, isNight ? '#ffffff' : '#fff9c4');
+      const blink = Math.floor(tSec * 4.0 + colorIdx * 1.3) % 2 === 0;
+      if (blink) {
+        const rp = b.proj(-2.7, 0, 2.9);
+        if (isNight) {
+          vCtx.save();
+          vCtx.fillStyle = 'rgba(255, 46, 46, 0.34)';
+          vCtx.beginPath();
+          vCtx.arc(rp[0], rp[1], Math.max(2.0, 2.2 * pSz), 0, Math.PI * 2);
+          vCtx.fill();
+          vCtx.restore();
+        }
+        pix(-2.7, 0, 2.9, 1.2, 1.2, '#ff2e2e');
+      } else {
+        pix(-2.7, 0, 2.9, 0.9, 0.9, '#991b1b');
+      }
     }
   }
 
@@ -2469,42 +2856,130 @@
     pix(0, 0, 6.0, 1.4, 0.75, hairCol);
   }
 
+  function isWaterUV(u, v) {
+    if (!waterMask || waterW <= 0 || waterH <= 0) return true;
+    const mx = Math.floor(u * waterW);
+    const my = Math.floor(v * waterH);
+    if (mx < 0 || mx >= waterW || my < 0 || my >= waterH) return false;
+    return waterMask[my * waterW + mx] === 1;
+  }
+
+  function getUniqueBusStops(worldW, worldH) {
+    if (!animData || !animData.roads) return [];
+    if (animData._uniqueBusStops) return animData._uniqueBusStops;
+    const masterW = animData.canvas_width || 12331;
+    const masterH = animData.canvas_height || 5444;
+    const unique = [];
+    for (let rIdx = 0; rIdx < animData.roads.length; rIdx++) {
+      const rd = animData.roads[rIdx];
+      const stops = rd.stops;
+      if (!stops || !stops.length) continue;
+      const isMain = rd.kind === 'seestrasse';
+      for (let sIdx = 0; sIdx < stops.length; sIdx++) {
+        const sf = stops[sIdx];
+        const pos = samplePathAt(rd.pts, sf, masterW, masterH, 3);
+        if (!pos) continue;
+        const u = pos.wx / masterW;
+        const v = pos.wy / masterH;
+        const isoY = 0.55;
+        const gx = pos.tx;
+        const gy = pos.ty / isoY;
+        const gm = Math.hypot(gx, gy) || 1;
+        const rx = -gy / gm;
+        const ry = (gx / gm) * isoY;
+        // Deduplicate shared physical stop platforms within 18 master px
+        let matched = null;
+        for (let i = 0; i < unique.length; i++) {
+          const ex = unique[i];
+          if (Math.hypot((ex.u - u) * masterW, (ex.v - v) * masterH) < 18) {
+            matched = ex;
+            break;
+          }
+        }
+        if (matched) {
+          matched.refs.push({ rd, stopIdx: sIdx });
+        } else {
+          unique.push({
+            u,
+            v,
+            tx: pos.tx,
+            ty: pos.ty,
+            rx,
+            ry,
+            d16: pos.d16,
+            isMain,
+            refs: [{ rd, stopIdx: sIdx }],
+            name: (rd.stop_names && rd.stop_names[sIdx]) || '',
+          });
+        }
+      }
+    }
+    animData._uniqueBusStops = unique;
+    return unique;
+  }
+
   function drawAnimations(worldW, worldH, tSec) {
     const wScale = worldW / (animData.canvas_width || 12331);
     const isNight = currentMode === 'night';
     const isSunset = currentMode === 'sunset';
+
+    // Reset per-frame telemetry counters
+    depthFrameStats.direct = 0;
+    depthFrameStats.fullCull = 0;
+    depthFrameStats.partial = 0;
+    livingFrameCounts.ships = 0;
+    livingFrameCounts.cars = 0;
+    livingFrameCounts.buses = 0;
+    livingFrameCounts.cyclists = 0;
+    livingFrameCounts.roadPeds = 0;
+    livingFrameCounts.busStopCommuters = 0;
+    livingFrameCounts.trains = 0;
+    livingFrameCounts.gulls = 0;
+    livingFrameCounts.swans = 0;
+    livingFrameCounts.sups = 0;
+    livingFrameCounts.ducks = 0;
+    livingFrameCounts.redKites = 0;
 
     // 1. Gentle Series of Shoreline Waves Rolling Inward Toward the Kilchberg Shore
     if (animData.ambient && animData.ambient.shoreline) {
       drawShorelineWaves(animData.ambient.shoreline, worldW, worldH, wScale, tSec, currentMode);
     }
 
-    // 2. Lake Zurich ZSG Steamer, Sailboats & Boesch Runabout (layered pixel V-wakes, bow spray & night reflections!)
+    // 2. Lake Zurich ZSG Paddle Steamer, Sailboats & Boesch Runabout (depth-masked hulls, wakes, foam, steam & nav lights!)
     for (let sIdx = 0; sIdx < (animData.ships || []).length; sIdx++) {
       const ship = animData.ships[sIdx];
+      // Moor/hide recreational craft at night; keep warmly lit dinner-cruise ZSG steamer sailing!
+      if (isNight && ship.kind !== 'zsg_steamer') continue;
+
       let frac;
+      let speedRatio = 1.0;
+      let isDocked = false;
       if (ship.closed) {
         const cyc = ship.length_m / Math.max(0.5, ship.speed_mps);
         frac = (((tSec / cyc) + (ship.phase || 0)) % 1 + 1) % 1;
       } else {
-        frac = evalWithStationStop(tSec, ship.length_m, ship.speed_mps, ship.stop_frac, ship.dwell_sec, ship.phase || 0);
+        const st = evalWithStationStop(tSec, ship.length_m, ship.speed_mps, ship.stop_frac, ship.dwell_sec, ship.phase || 0, 5.0, 6.0);
+        frac = st.frac;
+        speedRatio = st.speedRatio;
+        isDocked = st.isDwelling;
       }
       if (frac < 0 || frac > 1) continue;
       const pos = samplePathAt(ship.pts, frac, worldW, worldH, 3);
       if (!pos) continue;
 
+      livingFrameCounts.ships++;
       const isSteamer = ship.kind === 'zsg_steamer';
       const isMotor = ship.kind === 'motorboat';
-      const isDocked = !ship.closed && ship.stop_frac != null && Math.abs(frac - ship.stop_frac) < 0.002;
       const wakeCount = isSteamer ? 14 : (isMotor ? 10 : 6);
       const wakeStep = ship.closed ? 0.0045 : 0.0026;
 
-      if (!isDocked) {
+      // Water surface V-wake, central prop-wash & bow foam scale smoothly by speedRatio (0 while docked!)
+      if (!isDocked && speedRatio >= 0.03) {
         const sPx = scale * wScale;
         const leftPts = [];
         const rightPts = [];
         const centerPts = [];
-        // Start right at the stern/waterline of the vessel
+        const effWakeCount = Math.max(2, Math.round(wakeCount * (0.35 + 0.65 * speedRatio)));
         const sternBack = (isSteamer ? 32 : (isMotor ? 10 : 7)) * wScale;
         const initSpread = (isSteamer ? 7.5 : (isMotor ? 3.2 : 2.6)) * wScale;
         const wx0 = pos.wx - pos.tx * sternBack;
@@ -2513,14 +2988,14 @@
         rightPts.push([wx0 * scale + offsetX + pos.ty * initSpread * scale, wy0 * scale + offsetY - pos.tx * initSpread * 0.55 * scale]);
         centerPts.push([wx0 * scale + offsetX, wy0 * scale + offsetY]);
 
-        for (let k = 1; k <= wakeCount; k++) {
+        for (let k = 1; k <= effWakeCount; k++) {
           const fWake = ship.closed
             ? ((frac - k * wakeStep) % 1 + 1) % 1
             : frac - k * wakeStep;
           if (fWake <= 0 || fWake >= 1) break;
           const pw = samplePathAt(ship.pts, fWake, worldW, worldH, 3);
           if (!pw) break;
-          const spread = (isSteamer ? 8.5 : (isMotor ? 3.8 : 3.0)) + k * (isSteamer ? 2.4 : 1.55);
+          const spread = (isSteamer ? 8.5 : (isMotor ? 3.8 : 3.0)) + k * (isSteamer ? 2.4 : 1.55) * (0.4 + 0.6 * speedRatio);
           const nx = -pw.ty * spread * wScale;
           const ny = pw.tx * spread * 0.55 * wScale;
           leftPts.push([(pw.wx + nx) * scale + offsetX, (pw.wy + ny) * scale + offsetY]);
@@ -2532,7 +3007,7 @@
         ctx.lineCap = 'round';
         for (let k = 1; k < leftPts.length; k++) {
           const fade = Math.pow(1 - (k - 1) / Math.max(1, leftPts.length - 1), 1.35);
-          const a = (isNight ? 0.34 : (isSunset ? 0.52 : 0.62)) * fade;
+          const a = (isNight ? 0.34 : (isSunset ? 0.52 : 0.62)) * fade * speedRatio;
           const wCol = isNight
             ? `rgba(148,188,232,${a.toFixed(2)})`
             : (isSunset ? `rgba(255,228,200,${a.toFixed(2)})` : `rgba(232,248,255,${a.toFixed(2)})`);
@@ -2545,7 +3020,6 @@
           ctx.lineTo(rightPts[k][0], rightPts[k][1]);
           ctx.stroke();
 
-          // Soft frothy central prop-wash stream behind steamer & Boesch runabout
           if ((isSteamer || isMotor) && k <= 7) {
             const pa = a * 0.58;
             ctx.strokeStyle = isNight
@@ -2560,9 +3034,12 @@
         }
         ctx.restore();
 
-        // Crisp bow foam flecks right at the waterline
+        // Crisp bow foam flecks right at the waterline (scales smoothly by speedRatio)
         const bowOff = (isSteamer ? 30 : (isMotor ? 10 : 7)) * wScale;
-        const foamCol = isNight ? 'rgba(176,208,242,0.55)' : 'rgba(248,254,255,0.78)';
+        const bowA = (isNight ? 0.55 : 0.78) * speedRatio;
+        const foamCol = isNight
+          ? `rgba(176,208,242,${bowA.toFixed(2)})`
+          : `rgba(248,254,255,${bowA.toFixed(2)})`;
         drawPixelRectWorld(pos.wx + pos.tx * bowOff, pos.wy + pos.ty * bowOff, 3.6, 1.8, foamCol, wScale);
       }
 
@@ -2579,37 +3056,178 @@
         }
       }
 
-      // Subtle buoyant water bobbing
+      // Subtle buoyant water bobbing + depth-masked vessel sprite, paddlewheel foam, funnel steam & maritime nav lights
       const bobY = Math.sin(tSec * (isSteamer ? 1.8 : 2.6) + sIdx * 1.9) * (isSteamer ? 0.55 : 0.85) * wScale;
       const angIdx = ((Math.round((Math.atan2(pos.ty, pos.tx) / (Math.PI * 2)) * 32) % 32) + 32) % 32;
       const sp = getVehicleSprite(ship.kind, 0, angIdx, currentMode);
-      blitWorldSprite(sp, pos.wx, pos.wy + bobY, wScale);
+      const shipBounds = isSteamer
+        ? { ex: 108 * wScale, eyUp: 92 * wScale, eyDn: 74 * wScale }
+        : (isMotor
+          ? { ex: 26 * wScale, eyUp: 28 * wScale, eyDn: 22 * wScale }
+          : { ex: 34 * wScale, eyUp: 56 * wScale, eyDn: 24 * wScale });
+
+      drawDepthMasked(pos.wx, pos.wy, shipBounds, pos.d16, worldW, worldH, () => {
+        const sPx = scale * wScale;
+        const nx = -pos.ty * 0.72;
+        const ny = pos.tx * 0.52;
+
+        // Animated white side-paddlewheel foam churn on both flanks (halts cleanly to 0 when docked!)
+        if (isSteamer && !isDocked && speedRatio > 0.03) {
+          for (const side of [-1, 1]) {
+            const baseWx = pos.wx + (pos.tx * 2 + nx * side * 11.5) * wScale;
+            const baseWy = pos.wy + bobY + (pos.ty * 2 + ny * side * 11.5) * wScale;
+            for (let p = 0; p < 5; p++) {
+              const prog = (((tSec * 4.5 * speedRatio + p / 5 + (side > 0 ? 0.3 : 0)) % 1) + 1) % 1;
+              const aft = prog * 16.0 * speedRatio * wScale;
+              const jLat = Math.sin(tSec * 9.0 + p * 2.1 + side) * 1.4 * wScale;
+              const fWx = baseWx - pos.tx * aft + nx * side * jLat;
+              const fWy = baseWy - pos.ty * aft + ny * side * jLat + 0.6 * wScale;
+              const fa = (1.0 - prog) * speedRatio * (isNight ? 0.52 : 0.84);
+              const fCol = isNight
+                ? `rgba(182, 214, 246, ${fa.toFixed(2)})`
+                : (isSunset ? `rgba(255, 236, 212, ${fa.toFixed(2)})` : `rgba(248, 254, 255, ${fa.toFixed(2)})`);
+              drawPixelRectWorld(fWx, fWy, 2.4 + (1 - prog) * 1.6, 1.5, fCol, wScale);
+            }
+          }
+        }
+
+        // Main isometric ship sprite
+        blitWorldSprite(sp, pos.wx, pos.wy + bobY, wScale);
+
+        if (isSteamer) {
+          // Gentle funnel steam wisp (idling softer when docked)
+          const funWx = pos.wx + pos.tx * 2 * wScale;
+          const funWy = pos.wy + bobY + pos.ty * 2 * wScale - 28.5 * wScale;
+          const steamMul = isDocked ? 0.52 : 0.82;
+          for (let p = 0; p < 5; p++) {
+            const age = (((tSec * 0.42 + p / 5) % 1) + 1) % 1;
+            const sWx = funWx - pos.tx * age * (4 + 14 * speedRatio) * wScale + Math.sin(age * 5.0 + p * 1.7) * 1.2 * wScale;
+            const sWy = funWy - age * 16 * wScale - pos.ty * age * (2 + 6 * speedRatio) * wScale;
+            const sa = (1 - age) * (age < 0.18 ? age / 0.18 : 1.0) * steamMul * (isNight ? 0.55 : 0.72);
+            const sz = (isDocked ? 1.8 : 2.2) + age * (isDocked ? 3.2 : 4.5);
+            const sCol = isNight
+              ? `rgba(168, 186, 216, ${sa.toFixed(2)})`
+              : (isSunset ? `rgba(255, 228, 200, ${sa.toFixed(2)})` : `rgba(246, 249, 252, ${sa.toFixed(2)})`);
+            drawPixelRectWorld(sWx - sz * 0.5 * wScale, sWy - sz * 0.4 * wScale, sz, sz * 0.72, sCol, wScale);
+          }
+
+          // Maritime navigation lights at Sunset & Night (port red, starboard green, masthead & stern)
+          if (isSunset || isNight) {
+            const navAlpha = isNight ? 0.92 : 0.55;
+            const navPts = [
+              { s: 18, w: -9.5, z: 19.5, col: '#ff3b3b', glow: 'rgba(255, 59, 59, 0.34)' },   // Port (red)
+              { s: 18, w: 9.5, z: 19.5, col: '#22e584', glow: 'rgba(34, 229, 132, 0.34)' },   // Starboard (green)
+              { s: 22, w: 0, z: 27.5, col: '#fff3c4', glow: 'rgba(255, 243, 196, 0.34)' },    // Masthead (warm white)
+            ];
+            if (isNight) {
+              navPts.push({ s: -64, w: 0, z: 12.5, col: '#ffe49a', glow: 'rgba(255, 228, 154, 0.30)' }); // Stern
+            }
+            const dotSz = Math.max(2, Math.round(2.0 * sPx));
+            vCtx.save();
+            for (const nl of navPts) {
+              const lx = offsetX + (pos.wx + (pos.tx * nl.s + nx * nl.w) * wScale) * scale;
+              const ly = offsetY + (pos.wy + bobY + (pos.ty * nl.s + ny * nl.w - nl.z) * wScale) * scale;
+              vCtx.globalAlpha = navAlpha;
+              vCtx.fillStyle = nl.glow;
+              vCtx.beginPath();
+              vCtx.arc(lx, ly, Math.max(2.6, 4.2 * sPx), 0, Math.PI * 2);
+              vCtx.fill();
+              vCtx.fillStyle = nl.col;
+              vCtx.fillRect(Math.round(lx - dotSz * 0.5), Math.round(ly - dotSz * 0.5), dotSz, dotSz);
+            }
+            vCtx.restore();
+          }
+        }
+      }, isSteamer ? 6.0 : 4.0);
     }
 
-    // 3. Road Cars, ZVV Buses, Cyclists & Sidewalk Pedestrians (zero-overlap lane flow & back-to-front sorted!)
+    // 3. Road Cars, VBZ/ZVV Buses (Line 161 Articulated & Line 165 Regional), Bus-Stop Commuters, Cyclists & Sidewalk Pedestrians
     const roadDrawList = [];
+    const dwellingStops = new Set(); // "roadId:stopIdx" currently hosting a dwelling bus
     for (let rIdx = 0; rIdx < (animData.roads || []).length; rIdx++) {
       const rd = animData.roads[rIdx];
       const busCount = rd.bus_count != null ? rd.bus_count : (rd.has_bus ? 1 : 0);
       const carCount = rd.car_count || 3;
-      const totalVehicles = carCount + busCount;
-      // Shared lane flow speed guarantees faster cars NEVER pass through slower cars or buses!
-      // Gentle bounded spacing oscillation keeps traffic organic while preserving safe headway.
+
+      // 3a. VBZ/ZVV Buses (multi-stop exact schedule + curb lay-by pull-in!)
+      for (let bIdx = 0; bIdx < busCount; bIdx++) {
+        // At night keep 1 active bus per bus route (vIdx === 0 -> 6 night buses, keeping Follow: Bus live!)
+        if (isNight && bIdx > 0) continue;
+        const st = evalBusState(rd, bIdx, tSec);
+        if (st.frac < 0.001 || st.frac > 0.999) continue;
+        if (st.isDwelling && st.stopIdx >= 0) {
+          dwellingStops.add(`${rd.id}:${st.stopIdx}`);
+        }
+        const pullIn = (1.0 - st.speedRatio) * 2.0 * wScale;
+        const shiftCurb = (p) => {
+          if (!p || pullIn < 0.01) return p;
+          const isoY = 0.55;
+          const gx = p.tx;
+          const gy = p.ty / isoY;
+          const gm = Math.hypot(gx, gy) || 1;
+          const rx = -gy / gm;
+          const ry = (gx / gm) * isoY;
+          return { ...p, wx: p.wx + rx * pullIn, wy: p.wy + ry * pullIn };
+        };
+
+        const isLine161 = rd.kind === 'seestrasse';
+        if (isLine161) {
+          const fFront = st.frac;
+          const fMidFront = fFront - 10.2 / rd.length_m;
+          const fMidRear = fFront - 11.8 / rd.length_m;
+          const fRear = fFront - 19.0 / rd.length_m;
+          if (fRear >= 0.001) {
+            const pFront = shiftCurb(samplePathAt(rd.pts, fFront, worldW, worldH, 3));
+            const pMidFront = shiftCurb(samplePathAt(rd.pts, fMidFront, worldW, worldH, 3));
+            const pMidRear = shiftCurb(samplePathAt(rd.pts, fMidRear, worldW, worldH, 3));
+            const pRear = shiftCurb(samplePathAt(rd.pts, fRear, worldW, worldH, 3));
+            if (pFront && pMidFront && pMidRear && pRear && (depthPixels || (!pFront.occ && !pRear.occ))) {
+              livingFrameCounts.buses++;
+              const midWx = (pFront.wx + pRear.wx) * 0.5;
+              const midWy = (pFront.wy + pRear.wy) * 0.5;
+              const midD16 = Math.round((pFront.d16 + pRear.d16) * 0.5);
+              roadDrawList.push({
+                type: 'bus_artic',
+                pos: { wx: midWx, wy: midWy, tx: pFront.tx, ty: pFront.ty, d16: midD16 },
+                pRear, pMidRear, pMidFront, pFront,
+                speedRatio: st.speedRatio,
+                isDwelling: st.isDwelling,
+              });
+              continue;
+            }
+          }
+        }
+
+        const pos = shiftCurb(samplePathAt(rd.pts, st.frac, worldW, worldH, 3));
+        if (!pos || (!depthPixels && pos.occ)) continue;
+        livingFrameCounts.buses++;
+        roadDrawList.push({
+          type: 'bus',
+          pos,
+          routeNum: isLine161 ? '161' : '165',
+          speedRatio: st.speedRatio,
+          isDwelling: st.isDwelling,
+        });
+      }
+
+      // 3b. Road Cars, Vans & Rare Swiss Emergency Vehicles (deterministic ~55% night reduction)
       const laneSpeed = Math.max(1.0, rd.speed_mps * (busCount > 0 ? 0.88 : 0.96));
       const cyc = rd.length_m / laneSpeed;
-      const maxJitter = Math.min(0.011, 0.24 / Math.max(1, totalVehicles));
-      for (let vIdx = 0; vIdx < totalVehicles; vIdx++) {
-        const isBus = vIdx < busCount;
+      const maxJitter = Math.min(0.011, 0.24 / Math.max(1, carCount));
+      for (let cIdx = 0; cIdx < carCount; cIdx++) {
+        const vIdx = busCount + cIdx;
+        if (isNight && ((vIdx * 7 + rIdx * 3) % 20) >= 9) continue;
         const jitter = Math.sin(tSec * 0.28 + vIdx * 2.17 + rIdx * 1.3) * maxJitter;
-        const frac = ((((tSec / cyc) + (rd.phase || 0) + vIdx / totalVehicles + jitter) % 1) + 1) % 1;
+        const frac = ((((tSec / cyc) + (rd.phase || 0) + (cIdx + 0.35) / Math.max(1, carCount) + jitter) % 1) + 1) % 1;
         if (frac < 0.001 || frac > 0.999) continue;
         const pos = samplePathAt(rd.pts, frac, worldW, worldH, 3);
         if (!pos || (!depthPixels && pos.occ)) continue;
-        roadDrawList.push({ type: isBus ? 'bus' : 'car', pos, colorIdx: vIdx + rIdx * 3 });
+        livingFrameCounts.cars++;
+        roadDrawList.push({ type: 'car', pos, colorIdx: vIdx + rIdx * 3 });
       }
 
-      // Cyclists & Sidewalk Pedestrians on Seestrasse, Dorfstrasse & Alte Landstrasse (never on A3 motorway!)
-      if (rd.kind !== 'motorway') {
+      // 3c. Cyclists & Sidewalk Pedestrians (never on A3 motorway; zoom LOD culled below scale < 0.35; deterministic night reduction!)
+      if (rd.kind !== 'motorway' && scale >= 0.35) {
         const isMain = rd.kind === 'seestrasse';
         const nCyclists = isMain ? 10 : 7;
         const nPeds = isMain ? 18 : 14;
@@ -2617,11 +3235,11 @@
         const pedCyc = rd.length_m / 1.35;
 
         for (let bIdx = 0; bIdx < nCyclists; bIdx++) {
+          if (isNight && ((bIdx + rIdx) % 5 !== 0)) continue;
           const frac = ((((tSec / bikeCyc) + (rd.phase || 0) * 0.7 + (bIdx + 0.35) / nCyclists) % 1) + 1) % 1;
           if (frac < 0.001 || frac > 0.999) continue;
           const base = samplePathAt(rd.pts, frac, worldW, worldH, 3);
           if (!base || (!depthPixels && base.occ)) continue;
-          // Shift slightly toward right curb / bike lane
           const isoY = 0.55;
           const gx = base.tx;
           const gy = base.ty / isoY;
@@ -2629,6 +3247,7 @@
           const rx = -gy / gm;
           const ry = (gx / gm) * isoY;
           const latPx = (isMain ? 3.0 : 2.0) * wScale;
+          livingFrameCounts.cyclists++;
           roadDrawList.push({
             type: 'cyclist',
             pos: { ...base, wx: base.wx + rx * latPx, wy: base.wy + ry * latPx },
@@ -2637,6 +3256,7 @@
         }
 
         for (let pIdx = 0; pIdx < nPeds; pIdx++) {
+          if (isNight && ((pIdx + rIdx) % 4 !== 0)) continue;
           const dir = (pIdx % 2 === 0) ? 1 : -1;
           const rawF = ((dir * (tSec / pedCyc) + (rd.phase || 0) * 1.3 + (pIdx + 0.17) / nPeds) % 1 + 1) % 1;
           if (rawF < 0.001 || rawF > 0.999) continue;
@@ -2649,6 +3269,7 @@
           const rx = -gy / gm;
           const ry = (gx / gm) * isoY;
           const latPx = (isMain ? 6.0 : 4.6) * wScale;
+          livingFrameCounts.roadPeds++;
           roadDrawList.push({
             type: 'ped',
             pos: {
@@ -2663,32 +3284,111 @@
         }
       }
     }
+
+    // 3d. Deduplicated Waiting VBZ/ZVV Bus-Stop Mini-Commuters (skipped when scale < 0.35 for zoom LOD)
+    if (scale >= 0.35) {
+      const busStops = getUniqueBusStops(worldW, worldH);
+      const stopCoats = ['#2563eb', '#d9382e', '#0d9488', '#334155', '#d97706', '#16a34a', '#7c3aed'];
+      const stopHairs = ['#2d241c', '#5c4028', '#8a6842', '#3a3430', '#b89458'];
+      for (let i = 0; i < busStops.length; i++) {
+        const bs = busStops[i];
+        const busHere = bs.refs.some((ref) => dwellingStops.has(`${ref.rd.id}:${ref.stopIdx}`));
+        const nWait = isNight ? 1 : (2 + (i % 2));
+        const curbBase = (bs.isMain ? 6.8 : 5.4) - (busHere ? 1.5 : 0);
+        for (let k = 0; k < nWait; k++) {
+          const along = ((k - (nWait - 1) * 0.5) * 4.2 + Math.sin(tSec * 0.45 + i * 1.7 + k) * 0.4) * wScale;
+          const lat = (curbBase + (k % 2) * 0.8) * wScale;
+          const wx = bs.u * worldW + bs.rx * lat + bs.tx * along;
+          const wy = bs.v * worldH + bs.ry * lat + bs.ty * along;
+          livingFrameCounts.busStopCommuters++;
+          roadDrawList.push({
+            type: 'stop_commuter',
+            pos: { wx, wy, d16: bs.d16 },
+            coat: shadeHex(stopCoats[(i * 3 + k) % stopCoats.length], 1.0, currentMode),
+            pants: shadeHex('#243040', 1.0, currentMode),
+            hair: stopHairs[(i + k) % stopHairs.length],
+            stride: busHere ? tSec * 6.5 + k : tSec * 1.1 + i + k,
+            bag: (k === 0 && i % 2 === 0) ? '#334155' : null,
+          });
+        }
+      }
+    }
+
     roadDrawList.sort((a, b) => a.pos.wy - b.pos.wy);
     for (const v of roadDrawList) {
-      const padW = (
-        v.type === 'bus' ? (isNight ? 58 : 38)
-          : v.type === 'car' ? (isNight ? 40 : 26)
-            : v.type === 'cyclist' ? 16 : 12
-      ) * wScale;
-      drawDepthMasked(v.pos.wx, v.pos.wy, padW, v.pos.d16, worldW, worldH, () => {
-        if (v.type === 'bus') {
-          draw3DBus(v.pos, wScale, currentMode);
+      let bounds;
+      let clampUp = 4.0;
+      if (v.type === 'bus_artic') {
+        const hdx = Math.abs(v.pFront.wx - v.pRear.wx) * 0.5;
+        const hdy = Math.abs(v.pFront.wy - v.pRear.wy) * 0.5;
+        const nExtra = isNight ? 30 * wScale : 6 * wScale;
+        bounds = {
+          ex: hdx + 16 * wScale + nExtra,
+          eyUp: hdy + 20 * wScale + (isNight ? 20 * wScale : 0),
+          eyDn: hdy + 10 * wScale + (isNight ? 20 * wScale : 0),
+        };
+        clampUp = 4.0;
+      } else if (v.type === 'bus') {
+        const atx = Math.abs(v.pos.tx);
+        const aty = Math.abs(v.pos.ty);
+        const nExtra = isNight ? 32 * wScale : 4 * wScale;
+        bounds = {
+          ex: (atx * 24 + 9) * wScale + nExtra,
+          eyUp: (aty * 24 + 16) * wScale + (isNight ? 18 * wScale : 0),
+          eyDn: (aty * 24 + 7) * wScale + (isNight ? 18 * wScale : 0),
+        };
+        clampUp = 4.0;
+      } else if (v.type === 'car') {
+        const atx = Math.abs(v.pos.tx);
+        const aty = Math.abs(v.pos.ty);
+        const nExtra = isNight ? 24 * wScale : (isSunset ? 10 * wScale : 2 * wScale);
+        bounds = {
+          ex: (atx * 12 + 7) * wScale + nExtra,
+          eyUp: (aty * 12 + 11) * wScale + (isNight ? 14 * wScale : 0),
+          eyDn: (aty * 12 + 6) * wScale + (isNight ? 14 * wScale : 0),
+        };
+        clampUp = 4.0;
+      } else if (v.type === 'cyclist') {
+        bounds = {
+          ex: (isNight ? 14 : 7) * wScale,
+          eyUp: 11 * wScale,
+          eyDn: (isNight ? 9 : 4) * wScale,
+        };
+        clampUp = 2.5;
+      } else {
+        bounds = { ex: 4.5 * wScale, eyUp: 9.5 * wScale, eyDn: 3.5 * wScale };
+        clampUp = 2.0;
+      }
+
+      drawDepthMasked(v.pos.wx, v.pos.wy, bounds, v.pos.d16, worldW, worldH, () => {
+        if (v.type === 'bus_artic') {
+          draw3DArticulatedBus(v.pRear, v.pMidRear, v.pMidFront, v.pFront, wScale, currentMode, tSec, v.speedRatio, v.isDwelling);
+        } else if (v.type === 'bus') {
+          draw3DBus(v.pos, wScale, currentMode, tSec, v.speedRatio, v.isDwelling, v.routeNum);
         } else if (v.type === 'car') {
-          draw3DCar(v.pos, v.colorIdx, wScale, currentMode);
+          draw3DCar(v.pos, v.colorIdx, wScale, currentMode, tSec);
         } else if (v.type === 'cyclist') {
           draw3DCyclist(v.pos, v.colorIdx, wScale, currentMode, tSec);
+        } else if (v.type === 'stop_commuter') {
+          drawMiniPerson(
+            offsetX + v.pos.wx * scale,
+            offsetY + v.pos.wy * scale,
+            scale * wScale * 0.90,
+            v.coat, v.pants, v.hair, isNight, v.stride, v.bag,
+          );
         } else {
           draw3DPedestrian(v.pos, v.colorIdx, wScale, currentMode, tSec);
         }
-      });
+      }, clampUp);
     }
 
-    // 4. SBB Seebahn Multi-Carriage Trains (true two-point rail-pinned articulated wagons!)
+    // 4. SBB Seebahn Multi-Carriage Trains (dead-center Bahnhof stop math & articulated 2-point wagons!)
     for (const tr of (animData.trains || [])) {
-      const headFrac = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
+      const trSt = evalTrainState(tr, tSec);
+      const headFrac = trSt.headFrac;
       if (headFrac < 0 || headFrac > 1.12) continue;
       const coachPitchFrac = 19.5 / tr.length_m;
-      const bodyLenFrac = 18.1 / tr.length_m; // 18.1 m carbody + 1.4 m articulated rubber gangway = 19.5 m pitch
+      const bodyLenFrac = 18.1 / tr.length_m;
       const nCars = tr.carriages || 4;
       const carSamples = [];
       for (let cIdx = 0; cIdx < nCars; cIdx++) {
@@ -2725,16 +3425,30 @@
           nextFront: nxt ? nxt.pFront : null,
         });
       }
+      if (units.length > 0) livingFrameCounts.trains++;
       units.sort((a, b) => a.midWy - b.midWy);
-      const trainPadW = (isNight ? 98 : 76) * wScale;
       for (const u of units) {
-        drawDepthMasked(u.midWx, u.midWy, trainPadW, u.midD16, worldW, worldH, () => {
-          draw3DTrainUnit(u.pRear, u.pFront, tr.kind, u.variant, wScale, currentMode, u.nextRear, u.nextFront, tSec);
-        });
+        const hdx = Math.abs(u.pFront.wx - u.pRear.wx) * 0.5;
+        const hdy = Math.abs(u.pFront.wy - u.pRear.wy) * 0.5;
+        const isLeadCar = u.variant === 0;
+        const isTailCar = u.variant === 2;
+        const beamX = (isNight && isLeadCar) ? 54 * wScale : ((isNight && isTailCar) ? 20 * wScale : 0);
+        const beamY = (isNight && isLeadCar) ? 32 * wScale : ((isNight && isTailCar) ? 14 * wScale : 0);
+        const trainBounds = {
+          ex: hdx + 16 * wScale + beamX,
+          eyUp: hdy + 26 * wScale + beamY,
+          eyDn: hdy + 12 * wScale + beamY,
+        };
+        drawDepthMasked(u.midWx, u.midWy, trainBounds, u.midD16, worldW, worldH, () => {
+          draw3DTrainUnit(
+            u.pRear, u.pFront, tr.kind, u.variant, wScale, currentMode,
+            u.nextRear, u.nextFront, tSec, trSt.isDwelling, trSt.dwellProgress,
+          );
+        }, 5.0);
       }
     }
 
-    // 5. Waving Swiss & Kilchberg Flags, Lindt 43.6 m Hochkamin Multi-Layered Pixel Steam & Lake Zurich Gulls
+    // 5. Waving Swiss & Kilchberg Flags, Lindt Hochkamin Steam, Village Chimneys, Dorfbrunnen Fountains & Lake Zurich Gulls
     if (animData.ambient) {
       const waveStep = Math.floor(tSec * 5.0) % 4;
       for (let fIdx = 0; fIdx < (animData.ambient.swiss_flags || []).length; fIdx++) {
@@ -2764,7 +3478,6 @@
           const kdy1 = (kPhase === 1 ? -1 : (kPhase === 3 ? 1 : 0)) * wScale;
           const kdy2 = (kPhase === 2 ? -1 : (kPhase === 0 ? 1 : 0)) * wScale;
           drawPixelRectWorld(kx, ky - 14 * wScale, 1.5, 15, isNight ? '#8a99b2' : '#d8dce2', wScale);
-          // Kilchberg ZH Coat of Arms (red upper/church spire field + golden lower band + crisp white spire silhouette)
           const kTop = isNight ? '#9c2c2c' : '#cc2e2a';
           const kGold = isNight ? '#b59238' : '#e8be42';
           drawPixelRectWorld(kx + 1.5 * wScale, ky - 14 * wScale, 3, 3.4, kTop, wScale);
@@ -2783,14 +3496,13 @@
         const cxWorld = stUv[0] * worldW;
         const cyWorld = stUv[1] * worldH;
         for (let p = 0; p < 10; p++) {
-          const age = ((tSec * 0.28 + p / 10) % 1);
+          const age = (((tSec * 0.28 + p / 10) % 1) + 1) % 1;
           const driftX = -age * 34 * wScale + Math.sin(age * 6.5 + p * 1.4) * 3.0 * wScale;
           const riseY = -(3 + age * 46) * wScale;
           const pxWorld = Math.round(cxWorld + driftX);
           const pyWorld = Math.round(cyWorld + riseY);
           const alpha = (1 - age) * (age < 0.12 ? age / 0.12 : 0.72);
           const sz = 2.6 + age * 7.8;
-          // Soft cool underside puff + bright NW-sunlit upper puff
           const shadeCol = isNight
             ? `rgba(110,126,158,${(alpha * 0.48).toFixed(2)})`
             : (isSunset ? `rgba(218,174,162,${(alpha * 0.62).toFixed(2)})` : `rgba(204,210,220,${(alpha * 0.60).toFixed(2)})`);
@@ -2802,18 +3514,90 @@
         }
       }
 
-      // Gliding Lake Zurich Gulls over Bendlikon Bay & Schooren (day & alpenglow)
+      // Cozy Hillside Village Chimney Smoke Wisps (M3 ambient.village_chimneys, Sunset & Night)
+      if ((isSunset || isNight) && (scale * wScale >= 0.22) && animData.ambient.village_chimneys) {
+        const chimneys = animData.ambient.village_chimneys;
+        for (let ci = 0; ci < chimneys.length; ci++) {
+          const c = chimneys[ci];
+          const sx = offsetX + c.u * worldW * scale;
+          const sy = offsetY + c.v * worldH * scale;
+          if (sx < -48 || sx > canvas.width + 48 || sy < -48 || sy > canvas.height + 48) continue;
+          const cxW = c.u * worldW;
+          const cyW = c.v * worldH;
+          const cPh = c.phase || 0;
+          for (let p = 0; p < 4; p++) {
+            const age = (((tSec * 0.22 + cPh + p / 4) % 1) + 1) % 1;
+            const driftX = -age * 14 * wScale + Math.sin(age * 5.2 + p * 1.9 + cPh * 6.28) * 1.6 * wScale;
+            const riseY = -(2 + age * 20) * wScale;
+            const sz = 1.4 + age * 3.2;
+            const alpha = (1 - age) * (age < 0.15 ? age / 0.15 : 1.0) * (isNight ? 0.36 : 0.44);
+            const col = isNight
+              ? `rgba(170,188,218,${alpha.toFixed(2)})`
+              : `rgba(255,222,196,${alpha.toFixed(2)})`;
+            drawPixelRectWorld(cxW + driftX - sz * 0.5 * wScale, cyW + riseY - sz * 0.4 * wScale, sz, sz * 0.72, col, wScale);
+          }
+        }
+      }
+
+      // 3 Sparkling Swiss Village Fountains / Dorfbrunnen (M3 ambient.fountains)
+      if ((scale * wScale >= 0.30) && animData.ambient.fountains) {
+        const fts = animData.ambient.fountains;
+        const sPx = scale * wScale;
+        ctx.save();
+        for (let fi = 0; fi < fts.length; fi++) {
+          const ft = fts[fi];
+          const sx = offsetX + ft.u * worldW * scale;
+          const sy = offsetY + ft.v * worldH * scale;
+          if (sx < -32 || sx > canvas.width + 32 || sy < -32 || sy > canvas.height + 32) continue;
+          const basinCol = isNight ? '#2d6488' : (isSunset ? '#5aaec4' : '#42b8d8');
+          const jetCol = isNight ? '#93c5fd' : (isSunset ? '#ffe4c8' : '#e8fbff');
+          const dropCol = isNight ? '#60a5fa' : '#7dd3fc';
+          // Basin water surface shimmer
+          ctx.fillStyle = basinCol;
+          ctx.fillRect(Math.round(sx - 2.2 * sPx), Math.round(sy - 1.1 * sPx), Math.max(3, Math.round(4.5 * sPx)), Math.max(2, Math.round(2.4 * sPx)));
+          // Expanding concentric water ripple
+          const rPhase = (((tSec * 0.9 + fi * 0.37) % 1) + 1) % 1;
+          const rRad = (1.2 + rPhase * 3.2) * sPx;
+          ctx.strokeStyle = isNight ? `rgba(147,197,253,${((1 - rPhase) * 0.45).toFixed(2)})` : `rgba(232,251,255,${((1 - rPhase) * 0.65).toFixed(2)})`;
+          ctx.lineWidth = Math.max(1.0, 0.9 * sPx);
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, rRad, rRad * 0.56, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          // Vertical sparkling pixel water jet + 3 dancing droplet pixels
+          const jetH = (3.2 + 0.6 * Math.sin(tSec * 6.5 + fi * 2.1)) * sPx;
+          ctx.fillStyle = jetCol;
+          ctx.fillRect(Math.round(sx - 0.5 * sPx), Math.round(sy - jetH), Math.max(1, Math.round(1.1 * sPx)), Math.max(2, Math.round(jetH)));
+          ctx.fillStyle = dropCol;
+          for (let d = 0; d < 3; d++) {
+            const dp = (((tSec * 2.4 + fi * 0.4 + d / 3) % 1) + 1) % 1;
+            const dx = (d - 1) * (1.2 + dp * 1.4) * sPx;
+            const dy = -jetH * (1 - dp * dp) - Math.sin(dp * Math.PI) * 1.4 * sPx;
+            const dSz = Math.max(1, Math.round(1.0 * sPx));
+            ctx.fillRect(Math.round(sx + dx), Math.round(sy + dy), dSz, dSz);
+          }
+        }
+        ctx.restore();
+      }
+
+      // Gliding Lake Zurich Gulls over Bendlikon Bay & Schooren (day & alpenglow, M3 uv + pixel radii schema!)
       if (!isNight && animData.ambient.gulls) {
         const gullCol = isSunset ? '#ffe6cf' : '#f4f6fa';
         const tipCol = isSunset ? '#b49284' : '#8a94a6';
         for (let gIdx = 0; gIdx < animData.ambient.gulls.length; gIdx++) {
           const g = animData.ambient.gulls[gIdx];
-          const ang = tSec * (g.speed || 0.25) + (g.phase || 0) * Math.PI * 2;
-          const gx = (g.cx + Math.cos(ang) * g.rx) * worldW;
-          const gy = (g.cy + Math.sin(ang) * g.ry) * worldH;
+          const spd = g.spd != null ? g.spd : (g.speed != null ? g.speed : 0.4);
+          const ph = g.ph != null ? g.ph : (g.phase != null ? g.phase : 0);
+          const ang = tSec * spd + ph * Math.PI * 2;
+          const baseU = Array.isArray(g.uv) ? g.uv[0] : (g.cx != null ? g.cx : 0.55);
+          const baseV = Array.isArray(g.uv) ? g.uv[1] : (g.cy != null ? g.cy : 0.62);
+          const rxPx = (g.rx > 1) ? g.rx * wScale : (g.rx || 0.004) * worldW;
+          const ryPx = (g.ry > 1) ? g.ry * wScale : (g.ry || 0.004) * worldH;
+          const gx = baseU * worldW + Math.cos(ang) * rxPx;
+          const gy = baseV * worldH + Math.sin(ang) * ryPx;
+          if (!Number.isFinite(gx) || !Number.isFinite(gy)) continue;
+          livingFrameCounts.gulls++;
           const flap = Math.sin(tSec * 7.5 + gIdx * 1.9);
           const wy = (flap > 0.25 ? -1.4 : (flap < -0.25 ? 1.2 : 0)) * wScale;
-          // Crisp 5px pixel V-wing gull
           drawPixelRectWorld(gx - 3.0 * wScale, gy + wy, 1.5, 1.2, tipCol, wScale);
           drawPixelRectWorld(gx - 1.6 * wScale, gy + wy * 0.4, 1.8, 1.2, gullCol, wScale);
           drawPixelRectWorld(gx, gy, 1.6, 1.4, gullCol, wScale);
@@ -2823,7 +3607,7 @@
       }
     }
 
-    // 5b. v5.1 Kilchberg Living Details & Dynamic Swiss Atmosphere
+    // 5b. Kilchberg Living Details & Dynamic Swiss Atmosphere
     drawKilchbergDetails(worldW, worldH, wScale, tSec, isNight, isSunset);
     drawAtmosphereAndLife(worldW, worldH, wScale, tSec, isNight, isSunset);
 
@@ -2846,7 +3630,7 @@
     [0.71, 0.43], [0.77, 0.37], [0.47, 0.41], [0.35, 0.32],
   ];
 
-  // Crisp 90s pixel-grid miniature villager/visitor/commuter sprite (used at Lindt Plaza, Bahnhof, Bendlikon Pier & Seebad)
+  // Crisp 90s pixel-grid miniature villager/visitor/commuter sprite (routes through vCtx for depth masking!)
   function drawMiniPerson(sx, sy, s, coatCol, pantsCol, hairCol, isNight, stridePhase, bagCol = null) {
     const p = Math.max(0.75, s);
     const pad = 16 * p;
@@ -2855,31 +3639,32 @@
     const ry = Math.round(sy);
     const step = Math.round(Math.sin(stridePhase) * 0.85 * p);
     // Grounded shadow
-    ctx.fillStyle = isNight ? 'rgba(6,10,20,0.48)' : 'rgba(18,24,32,0.30)';
-    ctx.fillRect(rx - Math.round(1.4 * p), ry, Math.max(2, Math.round(3.0 * p)), Math.max(1, Math.round(1.1 * p)));
+    vCtx.fillStyle = isNight ? 'rgba(6,10,20,0.48)' : 'rgba(18,24,32,0.30)';
+    vCtx.fillRect(rx - Math.round(1.4 * p), ry, Math.max(2, Math.round(3.0 * p)), Math.max(1, Math.round(1.1 * p)));
     // Striding legs
-    ctx.fillStyle = pantsCol;
-    ctx.fillRect(rx - Math.round(0.8 * p) + step, ry - Math.round(2.2 * p), Math.max(1, Math.round(0.95 * p)), Math.max(1, Math.round(2.2 * p)));
-    ctx.fillRect(rx + Math.round(0.1 * p) - step, ry - Math.round(2.2 * p), Math.max(1, Math.round(0.95 * p)), Math.max(1, Math.round(2.2 * p)));
+    vCtx.fillStyle = pantsCol;
+    vCtx.fillRect(rx - Math.round(0.8 * p) + step, ry - Math.round(2.2 * p), Math.max(1, Math.round(0.95 * p)), Math.max(1, Math.round(2.2 * p)));
+    vCtx.fillRect(rx + Math.round(0.1 * p) - step, ry - Math.round(2.2 * p), Math.max(1, Math.round(0.95 * p)), Math.max(1, Math.round(2.2 * p)));
     // Jacket torso
-    ctx.fillStyle = coatCol;
-    ctx.fillRect(rx - Math.round(1.0 * p), ry - Math.round(4.6 * p), Math.max(2, Math.round(2.1 * p)), Math.max(2, Math.round(2.5 * p)));
+    vCtx.fillStyle = coatCol;
+    vCtx.fillRect(rx - Math.round(1.0 * p), ry - Math.round(4.6 * p), Math.max(2, Math.round(2.1 * p)), Math.max(2, Math.round(2.5 * p)));
     // Optional Lindt golden-red shopping bag or commuter briefcase!
     if (bagCol) {
-      ctx.fillStyle = bagCol;
-      ctx.fillRect(rx + Math.round(1.0 * p), ry - Math.round(3.2 * p), Math.max(1, Math.round(1.1 * p)), Math.max(1, Math.round(1.5 * p)));
+      vCtx.fillStyle = bagCol;
+      vCtx.fillRect(rx + Math.round(1.0 * p), ry - Math.round(3.2 * p), Math.max(1, Math.round(1.1 * p)), Math.max(1, Math.round(1.5 * p)));
     }
     // Face + hair crown
-    ctx.fillStyle = isNight ? '#a88c72' : '#ecc29c';
-    ctx.fillRect(rx - Math.round(0.7 * p), ry - Math.round(5.9 * p), Math.max(1, Math.round(1.4 * p)), Math.max(1, Math.round(1.3 * p)));
-    ctx.fillStyle = hairCol;
-    ctx.fillRect(rx - Math.round(0.75 * p), ry - Math.round(6.4 * p), Math.max(1, Math.round(1.5 * p)), Math.max(1, Math.round(0.75 * p)));
+    vCtx.fillStyle = isNight ? '#a88c72' : '#ecc29c';
+    vCtx.fillRect(rx - Math.round(0.7 * p), ry - Math.round(5.9 * p), Math.max(1, Math.round(1.4 * p)), Math.max(1, Math.round(1.3 * p)));
+    vCtx.fillStyle = hairCol;
+    vCtx.fillRect(rx - Math.round(0.75 * p), ry - Math.round(6.4 * p), Math.max(1, Math.round(1.5 * p)), Math.max(1, Math.round(0.75 * p)));
   }
 
   function drawKilchbergDetails(worldW, worldH, wScale, tSec, isNight, isSunset) {
     const s = scale * wScale;
     const toX = (u) => u * worldW * scale + offsetX;
     const toY = (v) => v * worldH * scale + offsetY;
+    const vig = (animData && animData.ambient && animData.ambient.vignettes) || {};
     // Zoom-invariant world-space UV viewport bounds (NEVER culls pier/landmark pedestrians at ANY zoom level!)
     const padU = Math.max(0.004, 48 / Math.max(1, worldW * scale));
     const padV = Math.max(0.008, 48 / Math.max(1, worldH * scale));
@@ -2894,15 +3679,18 @@
     };
     const coats = ['#d9382e', '#2563eb', '#0d9488', '#d97706', '#7c3aed', '#e11d48', '#334155', '#16a34a'];
     const hairs = ['#2d241c', '#5c4028', '#8a6842', '#3a3430', '#b89458'];
+    const walkerBounds = { ex: 4.5 * wScale, eyUp: 9.5 * wScale, eyDn: 3.5 * wScale };
 
     ctx.save();
 
     // =========================================================================
     // 1. REFORMIERTE KIRCHE KILCHBERG — Live Real-Time Swiss Tower Clock + Circling Swifts!
     // =========================================================================
-    if (boxInView(0.285, 0.298, 0.296, 0.324)) {
-      const cx = toX(0.29035);
-      const cy = toY(0.31775);
+    const rkClock = (vig.reformierte_kirche && vig.reformierte_kirche.clock) || [0.29037, 0.31779];
+    const rkSpire = (vig.reformierte_kirche && vig.reformierte_kirche.spire) || [0.29037, 0.30554];
+    if (boxInView(rkClock[0] - 0.006, rkSpire[1] - 0.008, rkClock[0] + 0.006, rkClock[1] + 0.007)) {
+      const cx = toX(rkClock[0]);
+      const cy = toY(rkClock[1]);
       // Real Zurich local time (falls back smoothly when ?t= fixed time is used for deterministic captures)
       let hr, min, sec;
       if (fixedAnimTime !== null) {
@@ -2914,7 +3702,6 @@
       }
       const rDial = 6.2 * s;
       if (rDial >= 2.2) {
-        // Dark navy dial inside the real gold bezel (subtle warm lantern glow at night!)
         ctx.fillStyle = isNight ? '#1c2a42' : '#162030';
         ctx.beginPath();
         ctx.arc(cx, cy, rDial, 0, Math.PI * 2);
@@ -2924,7 +3711,6 @@
           ctx.lineWidth = Math.max(1.0, 1.1 * s);
           ctx.stroke();
         }
-        // Golden hour & minute hands
         const minAng = ((min + sec / 60) / 60) * Math.PI * 2 - Math.PI * 0.5;
         const hrAng = (((hr % 12) + min / 60) / 12) * Math.PI * 2 - Math.PI * 0.5;
         ctx.strokeStyle = isNight ? '#ffe38a' : '#f4cf58';
@@ -2945,8 +3731,8 @@
 
       // 4 graceful dark swifts orbiting the Reformierte Kirche steeple (Midday & Alpenglow!)
       if (!isNight) {
-        const spX = toX(0.2904);
-        const spY = toY(0.3055);
+        const spX = toX(rkSpire[0]);
+        const spY = toY(rkSpire[1]);
         ctx.fillStyle = isSunset ? '#2e2230' : '#26303d';
         for (let b = 0; b < 4; b++) {
           const ang = tSec * (0.95 + b * 0.13) + b * 1.62;
@@ -2962,16 +3748,18 @@
     }
 
     // =========================================================================
-    // 2. LINDT HOME OF CHOCOLATE — Shimmering Golden Fountain Atrium + Visitors on Schokoladenplatz!
+    // 2. LINDT HOME OF CHOCOLATE — 9m Golden Chocolate Fountain Atrium Shimmer + Depth-Masked Plaza Walkers!
     // =========================================================================
-    if (boxInView(0.372, 0.643, 0.384, 0.658)) {
+    const lindtAtrium = (vig.lindt_hoc && vig.lindt_hoc.atrium) || [0.37821, 0.64638];
+    const lindtPlaza = (vig.lindt_hoc && vig.lindt_hoc.plaza) || [0.37800, 0.65101];
+    if (boxInView(lindtAtrium[0] - 0.007, lindtAtrium[1] - 0.005, lindtAtrium[0] + 0.007, lindtPlaza[1] + 0.008)) {
       const shimmer = 0.76 + 0.24 * Math.sin(tSec * 3.4);
-      const arcPts = [
-        [0.3764, 0.6468], [0.3775, 0.6463], [0.3786, 0.6462], [0.3798, 0.6464],
+      const arcOffsets = [
+        [-0.0018, 0.0004], [-0.0007, -0.0001], [0.0004, -0.0002], [0.0016, 0.0000],
       ];
-      for (let i = 0; i < arcPts.length; i++) {
-        const ax = toX(arcPts[i][0]);
-        const ay = toY(arcPts[i][1]);
+      for (let i = 0; i < arcOffsets.length; i++) {
+        const ax = toX(lindtAtrium[0] + arcOffsets[i][0]);
+        const ay = toY(lindtAtrium[1] + arcOffsets[i][1]);
         const pGlow = 0.75 + 0.25 * Math.sin(tSec * 4.2 + i * 1.3);
         const rw = Math.max(3, 5.2 * s);
         const rh = Math.max(2, 3.6 * s);
@@ -2980,68 +3768,95 @@
           : (isSunset ? `rgba(255, 204, 102, ${(0.54 * pGlow).toFixed(2)})` : `rgba(255, 214, 118, ${(0.38 * pGlow).toFixed(2)})`);
         ctx.fillRect(Math.round(ax - rw * 0.5), Math.round(ay - rh * 0.5), Math.round(rw), Math.round(rh));
       }
+
+      // 9-meter Golden Chocolate Fountain vertical shimmer visible inside the glass atrium!
+      const fx = toX(lindtAtrium[0]);
+      const fy = toY(lindtAtrium[1]);
+      const colW = Math.max(2, 2.8 * s);
+      const colH = Math.max(4, 7.5 * s);
+      const fAlpha = isNight ? (0.86 * shimmer) : (isSunset ? (0.70 * shimmer) : 0.38);
+      ctx.fillStyle = `rgba(245, 168, 24, ${(fAlpha * 0.85).toFixed(2)})`;
+      ctx.fillRect(Math.round(fx - colW * 0.5), Math.round(fy - colH * 0.6), Math.round(colW), Math.round(colH));
+      // 3 downward-flowing liquid-gold shimmer highlights inside the fountain column
+      for (let k = 0; k < 3; k++) {
+        const prog = (((tSec * 1.4 + k / 3) % 1) + 1) % 1;
+        const yOff = (prog - 0.55) * 6.5 * s;
+        ctx.fillStyle = `rgba(255, 242, 178, ${(fAlpha * (1.0 - Math.abs(prog - 0.5))).toFixed(2)})`;
+        ctx.fillRect(Math.round(fx - colW * 0.32), Math.round(fy + yOff), Math.max(1.5, Math.round(colW * 0.65)), Math.max(1.5, Math.round(1.5 * s)));
+      }
+
       if (isNight || isSunset) {
-        const gRad = 26 * s;
-        const grad = ctx.createRadialGradient(toX(0.3782), toY(0.6472), 2 * s, toX(0.3782), toY(0.6498), gRad);
-        grad.addColorStop(0, isNight ? `rgba(255, 202, 92, ${(0.34 * shimmer).toFixed(2)})` : `rgba(255, 198, 104, ${(0.20 * shimmer).toFixed(2)})`);
+        const gRad = 28 * s;
+        const grad = ctx.createRadialGradient(fx, toY(lindtAtrium[1] + 0.0008), 2 * s, fx, toY(lindtAtrium[1] + 0.0034), gRad);
+        grad.addColorStop(0, isNight ? `rgba(255, 206, 98, ${(0.38 * shimmer).toFixed(2)})` : `rgba(255, 200, 106, ${(0.24 * shimmer).toFixed(2)})`);
         grad.addColorStop(1, 'rgba(255, 198, 104, 0)');
         ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.ellipse(toX(0.3782), toY(0.6498), gRad * 1.25, gRad * 0.72, -0.15, 0, Math.PI * 2);
+        ctx.ellipse(fx, toY(lindtAtrium[1] + 0.0034), gRad * 1.28, gRad * 0.74, -0.15, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      const plazaWalkers = [
-        { u0: 0.3758, v0: 0.6510, u1: 0.3800, v1: 0.6496, spd: 0.08, ph: 0.1, bag: '#e5b93c' },
-        { u0: 0.3802, v0: 0.6524, u1: 0.3764, v1: 0.6504, spd: 0.07, ph: 0.45, bag: '#d62c28' },
-        { u0: 0.3770, v0: 0.6534, u1: 0.3794, v1: 0.6486, spd: 0.06, ph: 0.72, bag: '#e5b93c' },
-        { u0: 0.3762, v0: 0.6494, u1: 0.3790, v1: 0.6528, spd: 0.055, ph: 0.25, bag: null },
-        { u0: 0.3792, v0: 0.6488, u1: 0.3772, v1: 0.6520, spd: 0.065, ph: 0.88, bag: '#e5b93c' },
-        { u0: 0.3776, v0: 0.6495, u1: 0.3780, v1: 0.6500, spd: 0.03, ph: 0.3, bag: '#d62c28' },
-        { u0: 0.3783, v0: 0.6498, u1: 0.3787, v1: 0.6503, spd: 0.03, ph: 0.6, bag: null },
+      // Plaza visitors anchored to M3 lindt_hoc.plaza & depth-masked cleanly behind foreground geometry
+      const plazaOffsets = [
+        { du0: -0.0022, dv0: 0.0000, du1: 0.0020, dv1: -0.0014, spd: 0.08, ph: 0.1, bag: '#e5b93c' },
+        { du0: 0.0022, dv0: 0.0014, du1: -0.0016, dv1: -0.0006, spd: 0.07, ph: 0.45, bag: '#d62c28' },
+        { du0: -0.0010, dv0: 0.0024, du1: 0.0014, dv1: -0.0024, spd: 0.06, ph: 0.72, bag: '#e5b93c' },
+        { du0: -0.0018, dv0: -0.0016, du1: 0.0010, dv1: 0.0018, spd: 0.055, ph: 0.25, bag: null },
+        { du0: 0.0012, dv0: -0.0022, du1: -0.0008, dv1: 0.0010, spd: 0.065, ph: 0.88, bag: '#e5b93c' },
+        { du0: -0.0004, dv0: -0.0015, du1: 0.0000, dv1: -0.0010, spd: 0.03, ph: 0.3, bag: '#d62c28' },
+        { du0: 0.0003, dv0: -0.0012, du1: 0.0007, dv1: -0.0007, spd: 0.03, ph: 0.6, bag: null },
       ];
-      const nVis = isNight ? 3 : plazaWalkers.length;
+      const nVis = isNight ? 2 : (isSunset ? 5 : plazaOffsets.length);
       for (let i = 0; i < nVis; i++) {
-        const w = plazaWalkers[i];
+        const w = plazaOffsets[i];
         const p = 0.5 + 0.5 * Math.sin(tSec * w.spd * Math.PI * 2 + w.ph * Math.PI * 2);
-        const vx = toX(w.u0 + (w.u1 - w.u0) * p);
-        const vy = toY(w.v0 + (w.v1 - w.v0) * p);
+        const wu = lindtPlaza[0] + w.du0 + (w.du1 - w.du0) * p;
+        const wv = lindtPlaza[1] + w.dv0 + (w.dv1 - w.dv0) * p;
+        const wx = wu * worldW;
+        const wy = wv * worldH;
         const coat = shadeHex(coats[i % coats.length], 1.0, currentMode);
         const pants = shadeHex('#263040', 1.0, currentMode);
-        drawMiniPerson(vx, vy, s, coat, pants, hairs[i % hairs.length], isNight, tSec * 7.5 + i * 1.9, w.bag);
+        const d16 = evalWalkerD16(wx, wy, 413.9, worldW, worldH, false);
+        drawDepthMasked(wx, wy, walkerBounds, d16, worldW, worldH, () => {
+          drawMiniPerson(toX(wu), toY(wv), s, coat, pants, hairs[i % hairs.length], isNight, tSec * 7.5 + i * 1.9, w.bag);
+        }, 2.0);
       }
     }
 
     // =========================================================================
     // 3. TC KILCHBERG CLAY TENNIS COURTS — 3 Live Animated Matches on Exact 3D Courts!
     // =========================================================================
-    if (!isNight && boxInView(0.156, 0.335, 0.188, 0.362)) {
-      const courts = [
-        { swU: 0.17391, swV: 0.34386, neU: 0.17963, neV: 0.33954, latU: 0.00074, latV: 0.00125, ph: 0.0, freq: 1.55 },
-        { swU: 0.17698, swV: 0.34871, neU: 0.18261, neV: 0.34424, latU: 0.00076, latV: 0.00123, ph: 1.3, freq: 1.42 },
-        { swU: 0.16397, swV: 0.35390, neU: 0.16963, neV: 0.34947, latU: 0.00076, latV: 0.00124, ph: 2.1, freq: 1.36 },
+    const tcSrc = Array.isArray(vig.tc_kilchberg) && vig.tc_kilchberg.length >= 3
+      ? vig.tc_kilchberg
+      : [
+        { sw: [0.17388, 0.34389], ne: [0.17966, 0.33951], lat: [0.00074, 0.00125] },
+        { sw: [0.17697, 0.34873], ne: [0.18262, 0.34423], lat: [0.00076, 0.00123] },
+        { sw: [0.16390, 0.35396], ne: [0.16970, 0.34942], lat: [0.00076, 0.00124] },
       ];
-      for (let ci = 0; ci < courts.length; ci++) {
-        const c = courts[ci];
-        if (!boxInView(c.swU - 0.003, c.neV - 0.004, c.neU + 0.003, c.swV + 0.004)) continue;
+    if (!isNight && boxInView(0.156, 0.334, 0.188, 0.362)) {
+      const tcMeta = [{ ph: 0.0, freq: 1.55 }, { ph: 1.3, freq: 1.42 }, { ph: 2.1, freq: 1.36 }];
+      for (let ci = 0; ci < tcSrc.length; ci++) {
+        const c = tcSrc[ci];
+        const m = tcMeta[ci % tcMeta.length];
+        if (!boxInView(c.sw[0] - 0.003, c.ne[1] - 0.004, c.ne[0] + 0.003, c.sw[1] + 0.004)) continue;
 
-        const cyc = (tSec * c.freq + c.ph) % 2.0;
+        const cyc = (((tSec * m.freq + m.ph) % 2.0) + 2.0) % 2.0;
         const ballF = cyc < 1.0 ? cyc : (2.0 - cyc);
         const latA = Math.sin(tSec * 0.78 + ci * 2.4) * 0.68;
         const latB = Math.cos(tSec * 0.85 + ci * 1.7) * 0.68;
         const ballLat = latA * (1 - ballF) + latB * ballF;
 
-        const pAx = toX(c.swU + c.latU * latA);
-        const pAy = toY(c.swV + c.latV * latA);
-        const pBx = toX(c.neU + c.latU * latB);
-        const pBy = toY(c.neV + c.latV * latB);
+        const pAx = toX(c.sw[0] + c.lat[0] * latA);
+        const pAy = toY(c.sw[1] + c.lat[1] * latA);
+        const pBx = toX(c.ne[0] + c.lat[0] * latB);
+        const pBy = toY(c.ne[1] + c.lat[1] * latB);
         const whiteKit = isSunset ? '#ffe8d4' : '#f4f7fa';
         const shortCol = ci === 0 ? '#1e3a5f' : (ci === 1 ? '#991b1b' : '#166534');
         drawMiniPerson(pBx, pBy, s * 0.90, whiteKit, shortCol, hairs[ci % hairs.length], false, tSec * 10.0 + 1.0);
         drawMiniPerson(pAx, pAy, s * 0.90, whiteKit, '#1e3a5f', hairs[(ci + 2) % hairs.length], false, tSec * 10.0);
 
-        const bu = c.swU + (c.neU - c.swU) * ballF + c.latU * ballLat;
-        const bv = c.swV + (c.neV - c.swV) * ballF + c.latV * ballLat;
+        const bu = c.sw[0] + (c.ne[0] - c.sw[0]) * ballF + c.lat[0] * ballLat;
+        const bv = c.sw[1] + (c.ne[1] - c.sw[1]) * ballF + c.lat[1] * ballLat;
         const arcH = Math.sin(ballF * Math.PI) * 8.5 * s;
         const bx = toX(bu);
         const by = toY(bv);
@@ -3056,17 +3871,19 @@
     // =========================================================================
     // 3b. SPORTPLATZ HOCHWEID — Live FC Kilchberg Football Match & Night Floodlights!
     // =========================================================================
-    if (boxInView(0.292, 0.208, 0.336, 0.252)) {
-      const fCU = 0.31377, fCV = 0.22952;
-      const fLenU = 0.01364, fLenV = -0.00936; // Half-length vector along pitch
-      const fLatU = 0.00506, fLatV = 0.00946;  // Half-width vector across pitch
+    const spVig = vig.sportplatz_hochweid || {
+      center: [0.31377, 0.22953], half_l: [0.01364, -0.00936], half_w: [0.00506, 0.00945],
+    };
+    const fCU = spVig.center[0], fCV = spVig.center[1];
+    if (boxInView(fCU - 0.022, fCV - 0.022, fCU + 0.022, fCV + 0.022)) {
+      const fLenU = spVig.half_l[0], fLenV = spVig.half_l[1];
+      const fLatU = spVig.half_w[0], fLatV = spVig.half_w[1];
       const fieldUV = (lu, lv) => ({
         u: fCU + lu * fLenU + lv * fLatU,
         v: fCV + lu * fLenV + lv * fLatV,
       });
 
       if (isNight) {
-        // Warm golden stadium floodlight pools illuminating Sportplatz Hochweid main turf at night!
         const masts = [[-0.58, -1.04], [0.58, -1.04], [-0.58, 1.04], [0.58, 1.04]];
         for (let mi = 0; mi < masts.length; mi++) {
           const p = fieldUV(masts[mi][0], masts[mi][1]);
@@ -3083,7 +3900,6 @@
           ctx.fill();
         }
       } else {
-        // Live 5v5 + 2 Goalkeepers FC Kilchberg (Royal Blue) vs Guests (Swiss Red) match!
         const ballAng = tSec * 0.42;
         const ballLU = Math.sin(ballAng) * 0.64 + Math.sin(ballAng * 2.3) * 0.16;
         const ballLV = Math.cos(ballAng * 1.35) * 0.56;
@@ -3092,18 +3908,14 @@
         const gkA = isSunset ? '#e6c238' : '#facc15';
         const gkB = isSunset ? '#58c448' : '#4ade80';
 
-        // Build players list with screen Y so we painter-sort cleanly back-to-front
         const players = [
-          // 2 Goalkeepers guarding each 3D goalmouth
           { lu: -0.92, lv: Math.sin(tSec * 1.4) * 0.14, kit: gkA, shorts: '#1e293b', hi: 0 },
           { lu: 0.92, lv: Math.cos(tSec * 1.3) * 0.14, kit: gkB, shorts: '#1e293b', hi: 1 },
-          // 5 FC Kilchberg Blue outfield players
           { lu: -0.52 + ballLU * 0.35 + Math.sin(tSec * 0.9) * 0.08, lv: -0.34 + ballLV * 0.28, kit: blueKit, shorts: '#f8fafc', hi: 2 },
           { lu: -0.45 + ballLU * 0.38 + Math.cos(tSec * 1.1) * 0.09, lv: 0.32 + ballLV * 0.30, kit: blueKit, shorts: '#f8fafc', hi: 3 },
           { lu: ballLU * 0.88 - 0.06, lv: ballLV * 0.86 + Math.sin(tSec * 1.6) * 0.07, kit: blueKit, shorts: '#f8fafc', hi: 4 },
           { lu: 0.18 + ballLU * 0.45 + Math.sin(tSec * 1.2 + 1.0) * 0.11, lv: -0.28 + ballLV * 0.36, kit: blueKit, shorts: '#f8fafc', hi: 0 },
           { lu: 0.26 + ballLU * 0.44 + Math.cos(tSec * 1.0 + 2.0) * 0.10, lv: 0.36 + ballLV * 0.32, kit: blueKit, shorts: '#f8fafc', hi: 1 },
-          // 5 Red visiting outfield players
           { lu: 0.52 + ballLU * 0.34 + Math.cos(tSec * 0.95) * 0.08, lv: -0.30 + ballLV * 0.28, kit: redKit, shorts: '#f8fafc', hi: 2 },
           { lu: 0.46 + ballLU * 0.36 + Math.sin(tSec * 1.05) * 0.09, lv: 0.30 + ballLV * 0.30, kit: redKit, shorts: '#f8fafc', hi: 3 },
           { lu: ballLU * 0.86 + 0.07, lv: ballLV * 0.84 + Math.cos(tSec * 1.5) * 0.08, kit: redKit, shorts: '#f8fafc', hi: 4 },
@@ -3120,7 +3932,6 @@
           drawMiniPerson(d.x, d.y, s * 0.88, d.pl.kit, d.pl.shorts, hairs[d.pl.hi % hairs.length], false, tSec * 9.0 + d.idx * 1.3);
         }
 
-        // Bouncing crisp white pixel football!
         const bp = fieldUV(ballLU, ballLV);
         const fbx = toX(bp.u);
         const fby = toY(bp.v);
@@ -3136,11 +3947,13 @@
     // =========================================================================
     // 4. SEEBAD KILCHBERG — Pool Swimmers, Pixel-Art Beach Umbrellas, Jetty Bathers & Lake Swimmers!
     // =========================================================================
-    if (boxInView(0.400, 0.698, 0.429, 0.732)) {
-      const poolX = toX(0.4090);
-      const poolY = toY(0.7092);
+    const seebadPool = (vig.seebad_kilchberg && vig.seebad_kilchberg.pool) || [0.40901, 0.70921];
+    const seebadJetty = (vig.seebad_kilchberg && vig.seebad_kilchberg.jetty) || [[0.4126, 0.71361], [0.4216, 0.7232]];
+    if (boxInView(seebadPool[0] - 0.010, seebadPool[1] - 0.012, seebadJetty[1][0] + 0.008, seebadJetty[1][1] + 0.010)) {
+      const poolX = toX(seebadPool[0]);
+      const poolY = toY(seebadPool[1]);
       if (isNight) {
-        if (boxInView(0.404, 0.703, 0.415, 0.716)) {
+        if (boxInView(seebadPool[0] - 0.005, seebadPool[1] - 0.006, seebadPool[0] + 0.006, seebadPool[1] + 0.007)) {
           const grad = ctx.createRadialGradient(poolX, poolY, 2 * s, poolX, poolY, 22 * s);
           grad.addColorStop(0, 'rgba(64, 228, 240, 0.34)');
           grad.addColorStop(1, 'rgba(32, 160, 200, 0)');
@@ -3150,13 +3963,12 @@
           ctx.fill();
         }
       } else {
-        // 3 animated swimmers inside Seebad Kilchberg's turquoise pool
-        if (boxInView(0.405, 0.704, 0.414, 0.715)) {
+        if (boxInView(seebadPool[0] - 0.004, seebadPool[1] - 0.005, seebadPool[0] + 0.005, seebadPool[1] + 0.006)) {
           const swimCaps = ['#f43f5e', '#facc15', '#ffffff'];
           for (let sw = 0; sw < 3; sw++) {
             const prog = 0.5 + 0.5 * Math.sin(tSec * (0.28 + sw * 0.05) + sw * 2.1);
-            const su = 0.4071 + prog * 0.0028 + sw * 0.0005;
-            const sv = 0.7069 + (1 - prog) * 0.0018 + sw * 0.0013;
+            const su = seebadPool[0] - 0.0019 + prog * 0.0028 + sw * 0.0005;
+            const sv = seebadPool[1] - 0.0023 + (1 - prog) * 0.0018 + sw * 0.0013;
             const sx = toX(su);
             const sy = toY(sv);
             const px = Math.max(1.2, 1.3 * s);
@@ -3167,7 +3979,6 @@
           }
         }
 
-        // 3 crisp pixel-grid-snapped 90s pixel-art beach umbrellas on the Seebad sunlit lawn
         if (boxInView(0.401, 0.699, 0.409, 0.706)) {
           const umbrellas = [
             { u: 0.4036, v: 0.7018, c1: '#d9382e', c2: '#f4f6f8', dk: '#8f1d18' },
@@ -3197,21 +4008,20 @@
           }
         }
 
-        // 4 bathers strolling along the long wooden Seebad Kilchberg jetty (zoom-invariant UV bounds!)
-        if (boxInView(0.410, 0.711, 0.425, 0.727)) {
+        if (boxInView(seebadJetty[0][0] - 0.003, seebadJetty[0][1] - 0.003, seebadJetty[1][0] + 0.004, seebadJetty[1][1] + 0.004)) {
           for (let jb = 0; jb < 4; jb++) {
             const f = 0.14 + 0.76 * (0.5 + 0.5 * Math.sin(tSec * (0.11 + jb * 0.03) + jb * 1.7));
-            const ju = 0.4126 + (0.4216 - 0.4126) * f;
-            const jv = 0.7136 + (0.7232 - 0.7136) * f;
+            const ju = seebadJetty[0][0] + (seebadJetty[1][0] - seebadJetty[0][0]) * f;
+            const jv = seebadJetty[0][1] + (seebadJetty[1][1] - seebadJetty[0][1]) * f;
             drawMiniPerson(toX(ju), toY(jv), s * 0.92, shadeHex(coats[(jb + 2) % coats.length], 1.0, currentMode), '#2b4c7e', hairs[jb], false, tSec * 6.5 + jb);
           }
         }
-        // 2 open-lake swimmers off the Seebad pier tip
         if (boxInView(0.419, 0.721, 0.428, 0.731)) {
           for (let ls = 0; ls < 2; ls++) {
             const ang = tSec * (0.32 + ls * 0.08) + ls * 3.1;
             const lsu = 0.4235 + Math.cos(ang) * 0.0022;
             const lsv = 0.7252 + Math.sin(ang) * 0.0024;
+            if (!isWaterUV(lsu, lsv)) continue;
             const lx = toX(lsu);
             const ly = toY(lsv);
             const px = Math.max(1.2, 1.3 * s);
@@ -3225,46 +4035,171 @@
     }
 
     // =========================================================================
-    // 5. BENDLIKON ZSG STEAMER PIER — Waiting Passengers, Lake Zurich Swans & SUP Paddlers!
+    // 5. BENDLIKON ZSG STEAMER PIER (Badweg 1.1) — Gangplank Boarding, Moored Sailboats, Swans, Ducks & SUPs!
     // =========================================================================
     {
-      if (boxInView(0.578, 0.573, 0.589, 0.584)) {
+      const bpPax = (vig.bendlikon_pier && vig.bendlikon_pier.pax) || [0.58359, 0.57841];
+      if (boxInView(bpPax[0] - 0.006, bpPax[1] - 0.006, bpPax[0] + 0.007, bpPax[1] + 0.009)) {
         let shipNear = false;
+        let shipDocked = false;
+        let dwellProg = 0;
         for (const sh of (animData.ships || [])) {
           if (sh.kind === 'zsg_steamer') {
-            const f = evalWithStationStop(tSec, sh.length_m, sh.speed_mps, sh.stop_frac, sh.dwell_sec, sh.phase || 0);
-            if (Math.abs(f - sh.stop_frac) < 0.04) shipNear = true;
+            const st = evalWithStationStop(tSec, sh.length_m, sh.speed_mps, sh.stop_frac, sh.dwell_sec, sh.phase || 0, 5.0, 6.0);
+            if (st.isDwelling) {
+              shipDocked = true;
+              shipNear = true;
+              dwellProg = st.dwellProgress;
+            } else if (st.frac >= 0 && Math.abs(st.frac - sh.stop_frac) < 0.04) {
+              shipNear = true;
+            }
           }
         }
+
+        // Animated wooden gangplank bridging Badweg 1.1 pier edge to MS Helvetia during docking dwell!
+        let gpExt = 0;
+        if (shipDocked) {
+          gpExt = dwellProg < 0.15 ? (dwellProg / 0.15) : (dwellProg > 0.85 ? (1.0 - dwellProg) / 0.15 : 1.0);
+          const gpU0 = 0.5846, gpV0 = 0.5805;
+          const gpU1 = gpU0 + (0.5856 - gpU0) * gpExt;
+          const gpV1 = gpV0 + (0.5844 - gpV0) * gpExt;
+          const x0 = toX(gpU0), y0 = toY(gpV0);
+          const x1 = toX(gpU1), y1 = toY(gpV1);
+          // Wooden deck plank
+          ctx.strokeStyle = isNight ? '#5c4228' : '#8c6239';
+          ctx.lineWidth = Math.max(2.2, 3.2 * s);
+          ctx.lineCap = 'butt';
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+          // Crisp silver-white safety handrails on both sides
+          ctx.strokeStyle = isNight ? '#94a3b8' : '#dce2ea';
+          ctx.lineWidth = Math.max(0.8, 0.9 * s);
+          for (const hOff of [-1.4 * s, 1.4 * s]) {
+            ctx.beginPath();
+            ctx.moveTo(x0 + hOff, y0 - 1.5 * s);
+            ctx.lineTo(x1 + hOff, y1 - 1.5 * s);
+            ctx.stroke();
+          }
+        }
+
         const pCount = isNight ? 2 : 5;
         for (let i = 0; i < pCount; i++) {
-          const shift = shipNear ? 0.0004 : 0;
-          const pu = 0.5818 + i * 0.00088 + Math.sin(tSec * 0.4 + i * 1.7) * 0.00022 + shift;
-          const pv = 0.5792 - i * 0.00042 + Math.cos(tSec * 0.35 + i * 2.1) * 0.00016 + shift;
-          drawMiniPerson(
-            toX(pu), toY(pv), s * 0.96,
-            shadeHex(coats[(i + 1) % coats.length], 1.0, currentMode),
-            shadeHex('#243040', 1.0, currentMode),
-            hairs[i % hairs.length],
-            isNight,
-            shipNear ? tSec * 7.5 + i : tSec * 1.2 + i,
-            i === 1 ? '#b45309' : null,
-          );
+          let pu;
+          let pv;
+          let stride = shipNear ? tSec * 7.5 + i : tSec * 1.2 + i;
+          // Animate 2 passengers walking across the deployed gangplank to board MS Helvetia!
+          if (shipDocked && i < 2 && dwellProg >= 0.18 && dwellProg <= 0.82) {
+            const bProg = Math.min(1.0, Math.max(0.0, (dwellProg - 0.18 - i * 0.12) / 0.42));
+            pu = 0.5844 + (0.5855 - 0.5844) * bProg;
+            pv = 0.5801 + (0.5841 - 0.5801) * bProg;
+            stride = tSec * 9.0 + i * 1.5;
+          } else {
+            const shift = shipNear ? 0.0004 : 0;
+            pu = bpPax[0] - 0.00175 + i * 0.00088 + Math.sin(tSec * 0.4 + i * 1.7) * 0.00022 + shift;
+            pv = bpPax[1] + 0.00082 - i * 0.00042 + Math.cos(tSec * 0.35 + i * 2.1) * 0.00016 + shift;
+          }
+          const wx = pu * worldW;
+          const wy = pv * worldH;
+          const d16 = evalWalkerD16(wx, wy, 407.2, worldW, worldH, true);
+          drawDepthMasked(wx, wy, walkerBounds, d16, worldW, worldH, () => {
+            drawMiniPerson(
+              toX(pu), toY(pv), s * 0.96,
+              shadeHex(coats[(i + 1) % coats.length], 1.0, currentMode),
+              shadeHex('#243040', 1.0, currentMode),
+              hairs[i % hairs.length],
+              isNight,
+              stride,
+              i === 1 ? '#b45309' : null,
+            );
+          }, 2.0);
         }
       }
 
-      // Graceful White Lake Zurich Mute Swans (Zürichsee Höckerschwäne) gliding in Bendlikon & Schooren Bays!
+      // 5 Verified Open-Water Moored Sailboats with Gentle Bobbing, Swaying Masts & Night Anchor Lights!
+      const mooredBoats = [
+        { u: 0.5758, v: 0.5835, pen: '#d9382e' }, // Bendlikon SW
+        { u: 0.5935, v: 0.5675, pen: '#2563eb' }, // Bendlikon NE
+        { u: 0.4435, v: 0.6995, pen: '#d9382e' }, // Schooren NE
+        { u: 0.4145, v: 0.7315, pen: '#2563eb' }, // Schooren SW 1
+        { u: 0.4045, v: 0.7395, pen: '#eab308' }, // Schooren SW 2
+      ];
+      for (let idx = 0; idx < mooredBoats.length; idx++) {
+        const mb = mooredBoats[idx];
+        if (!isWaterUV(mb.u, mb.v)) continue;
+        const bx = toX(mb.u);
+        const by = toY(mb.v);
+        if (!inView(bx, by, 32)) continue;
+        const bobPx = Math.sin(tSec * (2.1 + idx * 0.23) + idx * 1.7) * 0.75 * s;
+        const swayPx = Math.sin(tSec * (1.7 + idx * 0.19) + idx * 2.3) * 1.15 * s;
+        const p = Math.max(0.85, s);
+        const hy = by + bobPx;
+
+        // Subtle water ripple oval underneath moored hull
+        ctx.strokeStyle = isNight ? 'rgba(130, 175, 224, 0.26)' : 'rgba(226, 246, 255, 0.42)';
+        ctx.lineWidth = Math.max(0.8, 0.9 * p);
+        ctx.beginPath();
+        ctx.ellipse(bx, by + 1.8 * p, 6.4 * p, 2.3 * p, -0.15, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Crisp pixel-grid white sailboat hull + dark cockpit recess
+        ctx.fillStyle = shadeHex('#2c3a48', 0.9, currentMode);
+        ctx.fillRect(Math.round(bx - 5.4 * p), Math.round(hy - 0.8 * p), Math.max(4, Math.round(10.8 * p)), Math.max(2, Math.round(3.6 * p)));
+        ctx.fillStyle = shadeHex('#eef2f6', 1.04, currentMode);
+        ctx.fillRect(Math.round(bx - 5.0 * p), Math.round(hy - 1.4 * p), Math.max(4, Math.round(10.0 * p)), Math.max(2, Math.round(3.0 * p)));
+        ctx.fillStyle = shadeHex('#26384c', 0.95, currentMode);
+        ctx.fillRect(Math.round(bx - 2.4 * p), Math.round(hy - 0.8 * p), Math.max(2, Math.round(4.4 * p)), Math.max(1.5, Math.round(1.6 * p)));
+
+        // Tall swaying silver mast + tiny fluttering pennant
+        const mastTopX = bx + swayPx;
+        const mastTopY = hy - 18.0 * p;
+        ctx.strokeStyle = shadeHex('#cbd5e1', 1.0, currentMode);
+        ctx.lineWidth = Math.max(1.0, 1.05 * p);
+        ctx.beginPath();
+        ctx.moveTo(bx, hy - 1.2 * p);
+        ctx.lineTo(mastTopX, mastTopY);
+        ctx.stroke();
+        // Furled boom
+        ctx.strokeStyle = shadeHex('#f8fafc', 1.0, currentMode);
+        ctx.lineWidth = Math.max(1.0, 1.2 * p);
+        ctx.beginPath();
+        ctx.moveTo(bx + swayPx * 0.25, hy - 5.0 * p);
+        ctx.lineTo(bx - 4.8 * p + swayPx * 0.25, hy - 4.2 * p);
+        ctx.stroke();
+        // Tiny fluttering masthead pennant
+        const flutter = Math.sin(tSec * 6.0 + idx * 1.9) * 0.9 * p;
+        ctx.fillStyle = shadeHex(mb.pen, 1.05, currentMode);
+        ctx.fillRect(Math.round(mastTopX), Math.round(mastTopY + flutter * 0.4), Math.max(2, Math.round(3.2 * p)), Math.max(1, Math.round(1.2 * p)));
+
+        // Warm masthead anchor light + water reflection dot at night!
+        if (isNight) {
+          const aSz = Math.max(1.5, 1.6 * p);
+          ctx.fillStyle = 'rgba(255, 232, 163, 0.32)';
+          ctx.beginPath();
+          ctx.arc(mastTopX, mastTopY, Math.max(2.2, 2.8 * p), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffe8a3';
+          ctx.fillRect(Math.round(mastTopX - aSz * 0.5), Math.round(mastTopY - aSz * 0.5), Math.round(aSz), Math.round(aSz));
+          ctx.fillStyle = 'rgba(255, 224, 140, 0.36)';
+          ctx.fillRect(Math.round(bx + swayPx * 0.3 - aSz * 0.5), Math.round(by + 4.0 * p), Math.round(aSz), Math.max(1, Math.round(1.0 * p)));
+        }
+      }
+
+      // 5 Graceful White Lake Zurich Mute Swans (100% waterMask-verified open-water coordinates!)
       const swanLoops = [
-        { cu: 0.5880, cv: 0.5845, ru: 0.0045, rv: 0.0038, spd: 0.14, ph: 0.0 },
-        { cu: 0.5865, cv: 0.5860, ru: 0.0040, rv: 0.0035, spd: 0.14, ph: 0.35 },
-        { cu: 0.4270, cv: 0.7145, ru: 0.0038, rv: 0.0035, spd: 0.16, ph: 1.4 },
-        { cu: 0.4255, cv: 0.7160, ru: 0.0035, rv: 0.0032, spd: 0.16, ph: 1.85 },
-        { cu: 0.6780, cv: 0.5200, ru: 0.0042, rv: 0.0036, spd: 0.13, ph: 3.1 },
+        { cu: 0.5960, cv: 0.5915, ru: 0.0042, rv: 0.0036, spd: 0.14, ph: 0.0  },
+        { cu: 0.6005, cv: 0.5955, ru: 0.0038, rv: 0.0033, spd: 0.14, ph: 0.35 },
+        { cu: 0.4400, cv: 0.7285, ru: 0.0036, rv: 0.0032, spd: 0.16, ph: 1.4  },
+        { cu: 0.4440, cv: 0.7315, ru: 0.0034, rv: 0.0030, spd: 0.16, ph: 1.85 },
+        { cu: 0.6960, cv: 0.5370, ru: 0.0040, rv: 0.0034, spd: 0.13, ph: 3.1  },
       ];
       for (const sw of swanLoops) {
         const ang = tSec * sw.spd + sw.ph;
         const su = sw.cu + Math.cos(ang) * sw.ru;
         const sv = sw.cv + Math.sin(ang) * sw.rv;
+        if (!isWaterUV(su, sv)) continue;
+        livingFrameCounts.swans++;
         const sx = toX(su);
         const sy = toY(sv);
         if (!inView(sx, sy, 24)) continue;
@@ -3279,46 +4214,210 @@
         ctx.fillRect(Math.round(sx + dir * 2.0 * px), Math.round(sy - 1.9 * px), Math.max(1, Math.round(0.9 * px)), Math.max(1, Math.round(0.7 * px)));
       }
 
-      // 2 Stand-Up Paddleboarders (SUPs) gliding peacefully at realistic ~1.2 m/s parallel to Kilchberg's shore (Day & Alpenglow!)
+      // 3 Lakeside Mallard Duck Pairs (Drake + Hen, day & sunset, 100% waterMask-verified!)
+      if (!isNight) {
+        const duckPairs = [
+          { cu: 0.5160, cv: 0.6540, ru: 0.0028, rv: 0.0024, spd: 0.18, ph: 0.4 },
+          { cu: 0.6380, cv: 0.5650, ru: 0.0026, rv: 0.0022, spd: 0.16, ph: 2.2 },
+          { cu: 0.7700, cv: 0.4700, ru: 0.0030, rv: 0.0025, spd: 0.15, ph: 4.1 },
+        ];
+        for (const dp of duckPairs) {
+          for (let mate = 0; mate < 2; mate++) {
+            const ang = tSec * dp.spd + dp.ph - mate * 0.28;
+            const du = dp.cu + Math.cos(ang) * dp.ru;
+            const dv = dp.cv + Math.sin(ang) * dp.rv;
+            if (!isWaterUV(du, dv)) continue;
+            livingFrameCounts.ducks++;
+            const dx = toX(du);
+            const dy = toY(dv);
+            if (!inView(dx, dy, 18)) continue;
+            const dir = -Math.sin(ang) >= 0 ? 1 : -1;
+            const px = Math.max(0.9, 1.0 * s);
+            // Tiny water ripple behind duck
+            ctx.fillStyle = 'rgba(232, 248, 255, 0.42)';
+            ctx.fillRect(Math.round(dx - dir * 2.2 * px), Math.round(dy + 0.3 * px), Math.max(1.5, Math.round(2.0 * px)), Math.max(1, Math.round(0.7 * px)));
+            if (mate === 0) {
+              // Leading drake: grey-brown body + white neck ring + emerald-green head
+              ctx.fillStyle = shadeHex('#78716c', 1.0, currentMode);
+              ctx.fillRect(Math.round(dx - 1.2 * px), Math.round(dy - 0.5 * px), Math.max(2, Math.round(2.5 * px)), Math.max(1.2, Math.round(1.3 * px)));
+              ctx.fillStyle = '#f8fafc';
+              ctx.fillRect(Math.round(dx + dir * 0.8 * px), Math.round(dy - 1.0 * px), Math.max(1, Math.round(0.9 * px)), Math.max(1, Math.round(0.6 * px)));
+              ctx.fillStyle = '#15803d';
+              ctx.fillRect(Math.round(dx + dir * 0.9 * px), Math.round(dy - 1.8 * px), Math.max(1, Math.round(1.0 * px)), Math.max(1, Math.round(1.0 * px)));
+            } else {
+              // Trailing hen: warm mottled brown
+              ctx.fillStyle = shadeHex('#8c6a4a', 1.0, currentMode);
+              ctx.fillRect(Math.round(dx - 1.1 * px), Math.round(dy - 0.5 * px), Math.max(2, Math.round(2.3 * px)), Math.max(1.2, Math.round(1.2 * px)));
+              ctx.fillStyle = shadeHex('#6f5238', 1.0, currentMode);
+              ctx.fillRect(Math.round(dx + dir * 0.8 * px), Math.round(dy - 1.5 * px), Math.max(1, Math.round(0.9 * px)), Math.max(1, Math.round(0.9 * px)));
+            }
+          }
+        }
+      }
+
+      // 2 Stand-Up Paddleboarders (SUPs) moving at realistic slow speed (~1.57–1.72 m/s),
+      // strictly on open water, rotated along travel axis with clean return-leg heading & wake flip!
       if (!isNight) {
         const sups = [
-          { u0: 0.562, v0: 0.606, u1: 0.625, v1: 0.562, spd: 0.0024, ph: 0.15, board: '#38bdf8', shirt: '#f43f5e' },
-          { u0: 0.435, v0: 0.720, u1: 0.495, v1: 0.665, spd: 0.0021, ph: 0.62, board: '#fbbf24', shirt: '#0d9488' },
+          { u0: 0.566, v0: 0.610, u1: 0.629, v1: 0.566, spd: 0.0024, ph: 0.15, board: '#38bdf8', shirt: '#f43f5e' },
+          { u0: 0.446, v0: 0.730, u1: 0.506, v1: 0.675, spd: 0.0021, ph: 0.62, board: '#fbbf24', shirt: '#0d9488' },
         ];
         for (let i = 0; i < sups.length; i++) {
           const sp = sups[i];
-          const p = 0.5 + 0.5 * Math.sin(tSec * sp.spd * Math.PI * 2 + sp.ph * Math.PI * 2);
+          const phase = tSec * sp.spd * Math.PI * 2 + sp.ph * Math.PI * 2;
+          const p = 0.5 + 0.5 * Math.sin(phase);
+          const cosP = Math.cos(phase);
+          const headingSign = cosP >= 0 ? 1 : -1; // +1 = SW->NE, -1 = NE->SW
+          const speedMag = Math.abs(cosP);
           const su = sp.u0 + (sp.u1 - sp.u0) * p;
           const sv = sp.v0 + (sp.v1 - sp.v0) * p;
+          if (!isWaterUV(su, sv)) continue;
+          livingFrameCounts.sups++;
           const sx = toX(su);
           const sy = toY(sv);
           if (!inView(sx, sy, 30)) continue;
+
+          // Unit travel vector in screen pixels, flipped cleanly on return leg!
+          const rawDx = (sp.u1 - sp.u0) * worldW * scale;
+          const rawDy = (sp.v1 - sp.v0) * worldH * scale;
+          const len = Math.hypot(rawDx, rawDy) || 1;
+          const tx = (rawDx / len) * headingSign;
+          const ty = (rawDy / len) * headingSign;
+          const ang = Math.atan2(ty, tx);
           const px = Math.max(1.0, 1.15 * s);
-          ctx.fillStyle = 'rgba(232,248,255,0.44)';
-          ctx.fillRect(Math.round(sx - 5.5 * px), Math.round(sy + 1.5 * px), Math.max(2, Math.round(4.0 * px)), Math.max(1, Math.round(1.0 * px)));
+
+          // Trailing water wake strictly behind the board along (-tx, -ty), fading gently at turnarounds
+          if (speedMag > 0.08) {
+            const wakeA = (0.44 * speedMag).toFixed(2);
+            ctx.fillStyle = `rgba(232,248,255,${wakeA})`;
+            for (let k = 0; k < 2; k++) {
+              const dist = (5.2 + k * 2.4) * px;
+              const wx = sx - tx * dist;
+              const wy = sy - ty * dist;
+              const wLen = (2.8 - k * 0.7) * px;
+              ctx.fillRect(Math.round(wx - wLen * 0.5), Math.round(wy - 0.5 * px), Math.max(2, Math.round(wLen)), Math.max(1, Math.round(1.0 * px)));
+            }
+          }
+
+          // SUP board rotated cleanly along diagonal travel axis (pointed nose at +4.2*px, square tail at -3.8*px)
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(ang);
           ctx.fillStyle = shadeHex(sp.board, 1.0, currentMode);
-          ctx.fillRect(Math.round(sx - 3.6 * px), Math.round(sy - 0.6 * px), Math.max(4, Math.round(7.2 * px)), Math.max(1.5, Math.round(1.8 * px)));
-          drawMiniPerson(sx, sy - 0.4 * px, s * 0.88, shadeHex(sp.shirt, 1.0, currentMode), '#1e293b', hairs[i], false, 0);
+          ctx.beginPath();
+          ctx.moveTo(-3.8 * px, -0.95 * px);
+          ctx.lineTo(2.4 * px, -0.95 * px);
+          ctx.lineTo(4.2 * px, 0);
+          ctx.lineTo(2.4 * px, 0.95 * px);
+          ctx.lineTo(-3.8 * px, 0.95 * px);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+
+          // Upright standing paddler + paddle blade sweeping cleanly along the travel axis
+          drawMiniPerson(sx, sy - 0.5 * px, s * 0.88, shadeHex(sp.shirt, 1.0, currentMode), '#1e293b', hairs[i], false, 0);
           const stroke = Math.sin(tSec * 1.35 + i * 2.1);
           ctx.strokeStyle = '#334155';
           ctx.lineWidth = Math.max(1.0, 0.9 * s);
           ctx.beginPath();
-          ctx.moveTo(sx + 0.8 * px, sy - 4.0 * px);
-          ctx.lineTo(sx + (1.6 + stroke * 1.4) * px, sy + 1.0 * px);
+          ctx.moveTo(sx + tx * 0.5 * px, sy - 4.0 * px);
+          ctx.lineTo(sx + tx * (0.9 + stroke * 1.6) * px, sy + ty * (0.9 + stroke * 1.6) * px + 1.0 * px);
           ctx.stroke();
         }
       }
     }
 
     // =========================================================================
-    // 6. BAHNHOF KILCHBERG — Platform Commuters, Footbridge Walkers & Warm Platform Lamps!
+    // 5b. GOLDEN-HOUR SUNSET JOGGERS (Seestrasse Lakefront Promenade) & WARM CAFE/TERRACE GLOW!
     // =========================================================================
-    if (boxInView(0.547, 0.489, 0.570, 0.508)) {
+    if (isSunset && animData && animData.roads && scale >= 0.35) {
+      const seeRd = animData.roads.find((r) => r.id === 'seestrasse_sb');
+      if (seeRd && seeRd.pts && seeRd.pts.length > 10) {
+        const joggers = [
+          { f0: 0.36, f1: 0.52, spd: 0.0085, ph: 0.1, shirt: '#f97316' },
+          { f0: 0.56, f1: 0.72, spd: 0.0078, ph: 0.55, shirt: '#38bdf8' },
+          { f0: 0.42, f1: 0.60, spd: 0.0082, ph: 0.82, shirt: '#a3e635' },
+        ];
+        for (let ji = 0; ji < joggers.length; ji++) {
+          const jg = joggers[ji];
+          const jp = 0.5 + 0.5 * Math.sin(tSec * jg.spd * Math.PI * 2 + jg.ph * Math.PI * 2);
+          const f = jg.f0 + (jg.f1 - jg.f0) * jp;
+          const pos = samplePathAt(seeRd.pts, f, worldW, worldH, 3);
+          if (!pos) continue;
+          const isoY = 0.55;
+          const gx = pos.tx;
+          const gy = pos.ty / isoY;
+          const gm = Math.hypot(gx, gy) || 1;
+          const rx = -gy / gm;
+          const ry = (gx / gm) * isoY;
+          // Offset lakeward onto promenade sidewalk so joggers never overlap cars
+          const jWx = pos.wx + rx * 5.6 * wScale;
+          const jWy = pos.wy + ry * 5.6 * wScale;
+          drawDepthMasked(jWx, jWy, walkerBounds, pos.d16, worldW, worldH, () => {
+            drawMiniPerson(
+              offsetX + jWx * scale,
+              offsetY + jWy * scale,
+              s * 0.92,
+              shadeHex(jg.shirt, 1.06, currentMode),
+              '#1e293b',
+              hairs[ji % hairs.length],
+              false,
+              tSec * 12.5 + ji * 1.7,
+            );
+          }, 2.0);
+        }
+      }
+    }
+
+    if (isSunset || isNight) {
+      const cfCenter = (vig.cf_meyer_haus && vig.cf_meyer_haus.center) || [0.48102, 0.42361];
+      const terraces = [
+        { u: 0.5818, v: 0.5768, r: 16 },            // Bendlikon Pier lakeside terrace
+        { u: 0.4068, v: 0.7072, r: 15 },            // Seebad bathhouse pavilion terrace
+        { u: cfCenter[0], v: cfCenter[1], r: 17 },  // C.F. Meyer-Haus garden terrace
+      ];
+      for (let ti = 0; ti < terraces.length; ti++) {
+        const tc = terraces[ti];
+        const tx = toX(tc.u);
+        const ty = toY(tc.v);
+        if (!inView(tx, ty, 36)) continue;
+        const rad = tc.r * s;
+        const grad = ctx.createRadialGradient(tx, ty, 1.5 * s, tx, ty, rad);
+        grad.addColorStop(0, isNight ? 'rgba(255, 198, 112, 0.30)' : 'rgba(255, 198, 112, 0.24)');
+        grad.addColorStop(0.55, isNight ? 'rgba(255, 184, 96, 0.12)' : 'rgba(255, 184, 96, 0.09)');
+        grad.addColorStop(1, 'rgba(255, 180, 88, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(tx, ty, rad * 1.15, rad * 0.72, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Cozy sunset patio visitors strolling near warm terrace lanterns
+        if (isSunset && scale >= 0.45) {
+          for (let g = 0; g < 2; g++) {
+            const gu = tc.u + (g - 0.5) * 0.0011 + Math.sin(tSec * 0.3 + ti + g * 2.1) * 0.0002;
+            const gv = tc.v + (g === 0 ? 0.0003 : -0.0002);
+            drawMiniPerson(toX(gu), toY(gv), s * 0.86, shadeHex(coats[(ti * 2 + g) % coats.length], 1.0, currentMode), '#243040', hairs[(ti + g) % hairs.length], false, tSec * 1.4 + g);
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // 6. BAHNHOF KILCHBERG — Depth-Masked Platform Commuters, Footbridge Walkers & Warm Platform Lamps!
+    // =========================================================================
+    const bhVig = vig.bahnhof_kilchberg || {
+      plat_sw: [0.55049, 0.50304],
+      plat_ne: [0.56449, 0.49558],
+      footbridge: [[0.56281, 0.49120], [0.56679, 0.49719]],
+    };
+    const platSw = bhVig.plat_sw || [0.55049, 0.50304];
+    const platNe = bhVig.plat_ne || [0.56449, 0.49558];
+    const bhFb = bhVig.footbridge || [[0.56281, 0.49120], [0.56679, 0.49719]];
+    if (boxInView(platSw[0] - 0.005, Math.min(platNe[1], bhFb[0][1]) - 0.004, Math.max(platNe[0], bhFb[1][0]) + 0.005, platSw[1] + 0.006)) {
       if (isNight || isSunset) {
         for (let l = 0; l < 5; l++) {
           const f = l / 4;
-          const lu = 0.5505 + f * (0.5645 - 0.5505);
-          const lv = 0.5030 + f * (0.4956 - 0.5030);
+          const lu = platSw[0] + f * (platNe[0] - platSw[0]);
+          const lv = platSw[1] + f * (platNe[1] - platSw[1]);
           const lx = toX(lu);
           const ly = toY(lv);
           if (!inView(lx, ly, 36)) continue;
@@ -3332,37 +4431,55 @@
           ctx.fill();
         }
       }
-      // 8 commuters standing cleanly on the concrete NW & SE Bahnhof Kilchberg platforms
+      // 8 commuters standing cleanly on the NW & SE Bahnhof Kilchberg platforms (depth-masked!)
       const nComm = isNight ? 4 : 8;
+      const dPlatU = platNe[0] - platSw[0];
+      const dPlatV = platNe[1] - platSw[1];
       for (let c = 0; c < nComm; c++) {
         const isSE = c % 2 === 1;
         const baseF = 0.12 + (c / nComm) * 0.78 + Math.sin(tSec * 0.25 + c * 1.9) * 0.04;
-        const cu = (isSE ? 0.5518 : 0.5502) + baseF * 0.0145;
-        const cv = (isSE ? 0.5050 : 0.5032) - baseF * 0.0074;
-        drawMiniPerson(
-          toX(cu), toY(cv), s * 0.92,
-          shadeHex(coats[(c + 3) % coats.length], 1.0, currentMode),
-          shadeHex('#1e293b', 1.0, currentMode),
-          hairs[c % hairs.length],
-          isNight,
-          tSec * 3.0 + c * 1.5,
-          c % 3 === 0 ? '#334155' : null,
-        );
+        const cu = (isSE ? platSw[0] + 0.0013 : platSw[0] - 0.0003) + baseF * dPlatU;
+        const cv = (isSE ? platSw[1] + 0.0020 : platSw[1] + 0.0002) + baseF * dPlatV;
+        const wx = cu * worldW;
+        const wy = cv * worldH;
+        const d16 = evalWalkerD16(wx, wy, 424.6, worldW, worldH, false);
+        drawDepthMasked(wx, wy, walkerBounds, d16, worldW, worldH, () => {
+          drawMiniPerson(
+            toX(cu), toY(cv), s * 0.92,
+            shadeHex(coats[(c + 3) % coats.length], 1.0, currentMode),
+            shadeHex('#1e293b', 1.0, currentMode),
+            hairs[c % hairs.length],
+            isNight,
+            tSec * 3.0 + c * 1.5,
+            c % 3 === 0 ? '#334155' : null,
+          );
+        }, 2.0);
       }
-      // 2 pedestrians crossing the Bahnhof Kilchberg pedestrian footbridge!
+      // 2 pedestrians crossing the elevated Bahnhof Kilchberg pedestrian footbridge (onElevatedDeck=true!)
       for (let fb = 0; fb < 2; fb++) {
         const pf = 0.5 + 0.5 * Math.sin(tSec * (0.14 + fb * 0.04) + fb * 2.5);
-        const fu = 0.5628 + (0.5668 - 0.5628) * pf;
-        const fv = 0.4912 + (0.4972 - 0.4912) * pf;
-        drawMiniPerson(toX(fu), toY(fv), s * 0.9, shadeHex(coats[fb + 4], 1.0, currentMode), '#27303f', hairs[fb + 1], isNight, tSec * 7.5 + fb);
+        const fu = bhFb[0][0] + (bhFb[1][0] - bhFb[0][0]) * pf;
+        const fv = bhFb[0][1] + (bhFb[1][1] - bhFb[0][1]) * pf;
+        const wx = fu * worldW;
+        const wy = fv * worldH;
+        const d16 = evalWalkerD16(wx, wy, 428.0, worldW, worldH, true);
+        drawDepthMasked(wx, wy, walkerBounds, d16, worldW, worldH, () => {
+          drawMiniPerson(toX(fu), toY(fv), s * 0.9, shadeHex(coats[fb + 4], 1.0, currentMode), '#27303f', hairs[fb + 1], isNight, tSec * 7.5 + fb);
+        }, 2.0);
       }
     }
 
     // =========================================================================
-    // 7. COZY NIGHTTIME STREETLAMP GLOWS ALONG SEESTRASSE & DORFSTRASSE VIADUCT
+    // 7. COZY NIGHTTIME STREETLAMP GLOWS ALONG ALL 3 MAIN ARTERIES (Cached!)
     // =========================================================================
     if (isNight && animData && animData.roads) {
-      const lampRoads = animData.roads.filter((r) => r.id === 'seestrasse_sb' || r.id === 'dorfstrasse_viaduct_up');
+      if (!drawKilchbergDetails._lampRoads || drawKilchbergDetails._lampRoadsSrc !== animData) {
+        drawKilchbergDetails._lampRoadsSrc = animData;
+        drawKilchbergDetails._lampRoads = animData.roads.filter(
+          (r) => r.id === 'seestrasse_sb' || r.id === 'dorfstrasse_viaduct_up' || r.id === 'alte_landstrasse_eb',
+        );
+      }
+      const lampRoads = drawKilchbergDetails._lampRoads;
       for (const rd of lampRoads) {
         const pts = rd.pts || [];
         const step = rd.id === 'seestrasse_sb' ? 28 : 26;
@@ -3379,6 +4496,11 @@
           ctx.beginPath();
           ctx.ellipse(sx, sy, lr * 1.15, lr * 0.72, 0, 0, Math.PI * 2);
           ctx.fill();
+          if (s >= 0.8) {
+            const gSz = Math.max(1.5, Math.round(1.5 * s));
+            ctx.fillStyle = 'rgba(255, 236, 176, 0.86)';
+            ctx.fillRect(Math.round(sx - gSz * 0.5), Math.round(sy - 3.5 * s), gSz, gSz);
+          }
         }
       }
     }
@@ -3388,6 +4510,7 @@
 
   function drawAtmosphereAndLife(worldW, worldH, wScale, tSec, isNight, isSunset) {
     const s = scale * wScale;
+    const vig = (animData && animData.ambient && animData.ambient.vignettes) || {};
     ctx.save();
 
     // A. Open-Lake Sun / Moon Water Glints (strictly clipped to eroded pure waterMask!)
@@ -3397,9 +4520,7 @@
       for (let i = 0; i < 96; i++) {
         const gu = 0.42 + hash01(i * 3.1 + 1) * 0.56;
         const gv = 0.34 + hash01(i * 5.7 + 2) * 0.62;
-        const mx = Math.floor(gu * waterW);
-        const my = Math.floor(gv * waterH);
-        if (mx < 0 || mx >= waterW || my < 0 || my >= waterH || !waterMask[my * waterW + mx]) continue;
+        if (!isWaterUV(gu, gv)) continue;
         const sx = gu * worldW * scale + offsetX;
         const sy = gv * worldH * scale + offsetY;
         if (sx < -8 || sx > canvas.width + 8 || sy < -8 || sy > canvas.height + 8) continue;
@@ -3417,11 +4538,35 @@
       }
     }
 
+    // A2. Animated Moonlit Water Shimmer Band across Lake Zurich (Night only, strictly waterMask-clipped!)
+    if (isNight && waterMask && waterW > 0 && waterH > 0) {
+      ctx.globalAlpha = 1.0;
+      for (let i = 0; i < 32; i++) {
+        const f = i / 31;
+        const spread = (hash01(i * 13.7 + 5) - 0.5) * 0.042;
+        const mu = 0.74 - f * 0.18 + spread + Math.sin(tSec * 1.4 + i * 1.7) * 0.0025;
+        const mv = 0.54 + f * 0.24 + (hash01(i * 7.3 + 9) - 0.5) * 0.012;
+        if (!isWaterUV(mu, mv)) continue;
+        const sx = mu * worldW * scale + offsetX;
+        const sy = mv * worldH * scale + offsetY;
+        if (sx < -24 || sx > canvas.width + 24 || sy < -10 || sy > canvas.height + 10) continue;
+        const pulse = 0.35 + 0.65 * Math.pow(0.5 + 0.5 * Math.sin(tSec * 2.1 + i * 2.3), 2.0);
+        const wPx = Math.max(3, Math.round((5.5 + hash01(i * 4.1) * 7.0) * s));
+        const hPx = Math.max(1, Math.round(1.3 * s));
+        ctx.globalAlpha = pulse * 0.54;
+        ctx.fillStyle = (i % 3 === 0) ? '#dbeafe' : '#93c5fd';
+        ctx.fillRect(Math.round(sx - wPx * 0.5), Math.round(sy), wPx, hPx);
+      }
+    }
+
     // B. Sub-Pixel-Exact Harbor Navigation Beacons at Bendlikon ZSG Steamer Pier & Schooren Seebad Pier (Alpenglow & Night)
+    ctx.globalAlpha = 1.0;
     if (isNight || isSunset) {
+      const bpBeacon = (vig.bendlikon_pier && vig.bendlikon_pier.beacon) || [0.58700, 0.57838];
+      const sbBeacon = (vig.seebad_kilchberg && vig.seebad_kilchberg.beacon) || [0.42221, 0.72359];
       const piers = [
-        { u: 0.5870, v: 0.5784, col: '#ffb84d', glow: 'rgba(255,184,77,0.32)', freq: 1.4 }, // Bendlikon ZSG Pier outer bollard
-        { u: 0.4222, v: 0.7236, col: '#6ee7b7', glow: 'rgba(110,231,183,0.30)', freq: 1.9 }, // Schooren Seebad Pier outer tip
+        { u: bpBeacon[0], v: bpBeacon[1], col: '#ffb84d', glow: 'rgba(255,184,77,0.32)', freq: 1.4 },
+        { u: sbBeacon[0], v: sbBeacon[1], col: '#6ee7b7', glow: 'rgba(110,231,183,0.30)', freq: 1.9 },
       ];
       for (const p of piers) {
         const sx = p.u * worldW * scale + offsetX;
@@ -3448,44 +4593,73 @@
       }
     }
 
-    // C. Bahnhof Kilchberg SBB Railway Signal Light (exact track exit: green -> Swiss red when train is at station!)
+    // C. Dual-Track Bahnhof Kilchberg SBB Typ L/N Railway Signals (Independent Northbound & Southbound 3-Aspect Masts!)
+    ctx.globalAlpha = 1.0;
     {
-      const sigU = 0.5685;
-      const sigV = 0.4922;
-      const sx = sigU * worldW * scale + offsetX;
-      const sy = sigV * worldH * scale + offsetY;
-      if (sx > -20 && sx < canvas.width + 20 && sy > -20 && sy < canvas.height + 20) {
-        let trainNear = false;
-        for (const tr of (animData.trains || [])) {
-          const hf = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
-          if (Math.abs(hf - tr.stop_frac) < 0.065) { trainNear = true; break; }
+      const bhVig = vig.bahnhof_kilchberg || {};
+      const nbAnchor = bhVig.signal || [0.56849, 0.49218];
+      const platSw = bhVig.plat_sw || [0.55049, 0.50304];
+      const sbAnchor = [platSw[0] - 0.0045, platSw[1] + 0.0012];
+      const trackSignals = [
+        { trId: 'sbb_ic_north', u: nbAnchor[0], v: nbAnchor[1] }, // Gleis 1 East (Northbound)
+        { trId: 'sbb_s8_south', u: sbAnchor[0], v: sbAnchor[1] }, // Gleis 2 West (Southbound)
+      ];
+      for (const sig of trackSignals) {
+        const sx = sig.u * worldW * scale + offsetX;
+        const sy = sig.v * worldH * scale + offsetY;
+        if (sx <= -24 || sx >= canvas.width + 24 || sy <= -24 || sy >= canvas.height + 24) continue;
+        const tr = (animData.trains || []).find((t) => t.id === sig.trId);
+        let aspect = 'green'; // Fahrbegriff 1 (clear)
+        if (tr) {
+          const st = evalTrainState(tr, tSec);
+          const mf = st.midFrac;
+          if (st.isDwelling || (mf >= tr.stop_frac - 0.035 && mf <= tr.stop_frac + 0.085)) {
+            aspect = 'red'; // Halt
+          } else if (mf > tr.stop_frac + 0.085 && mf <= tr.stop_frac + 0.135) {
+            aspect = 'amber'; // Fahrbegriff 2 (caution)
+          }
         }
-        const sigCol = trainNear ? '#ff3b3b' : '#22e584';
-        const sigGlow = trainNear ? 'rgba(255,59,59,0.32)' : 'rgba(34,229,132,0.30)';
-        const dot = Math.max(1.8, 1.9 * s);
-        // Tiny dark SBB signal mast
-        ctx.globalAlpha = 0.85;
+        const sigCol = aspect === 'red' ? '#ff3b3b' : (aspect === 'amber' ? '#fbbf24' : '#22e584');
+        const sigGlow = aspect === 'red' ? 'rgba(255,59,59,0.34)' : (aspect === 'amber' ? 'rgba(251,191,36,0.32)' : 'rgba(34,229,132,0.30)');
+        const lensOffY = aspect === 'green' ? -1.4 * s : (aspect === 'amber' ? 0 : 1.4 * s);
+        const dot = Math.max(1.8, 1.8 * s);
+
+        // Dark SBB steel mast & vertical Typ L/N signal hood
+        ctx.globalAlpha = 0.88;
         ctx.fillStyle = isNight ? '#475569' : '#1e293b';
-        ctx.fillRect(Math.round(sx - 0.5 * s), Math.round(sy), Math.max(1, Math.round(1.0 * s)), Math.max(3, Math.round(5.5 * s)));
+        ctx.fillRect(Math.round(sx - 0.5 * s), Math.round(sy + 1.5 * s), Math.max(1, Math.round(1.0 * s)), Math.max(3, Math.round(5.0 * s)));
+        const hoodW = Math.max(2.6, 2.4 * s);
+        const hoodH = Math.max(4.6, 4.8 * s);
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(Math.round(sx - hoodW * 0.5), Math.round(sy - hoodH * 0.5), Math.round(hoodW), Math.round(hoodH));
+        ctx.strokeStyle = isNight ? '#64748b' : '#cbd5e1';
+        ctx.lineWidth = Math.max(0.6, 0.5 * s);
+        ctx.strokeRect(Math.round(sx - hoodW * 0.5), Math.round(sy - hoodH * 0.5), Math.round(hoodW), Math.round(hoodH));
+
+        const ly = sy + lensOffY;
         if (isNight || isSunset) {
-          ctx.globalAlpha = isNight ? 0.85 : 0.45;
+          ctx.globalAlpha = isNight ? 0.86 : 0.48;
           ctx.fillStyle = sigGlow;
           ctx.beginPath();
-          ctx.arc(sx, sy, dot * 2.8, 0, Math.PI * 2);
+          ctx.arc(sx, ly, dot * 2.6, 0, Math.PI * 2);
           ctx.fill();
         }
-        ctx.globalAlpha = isNight ? 0.98 : 0.88;
+        ctx.globalAlpha = isNight ? 0.98 : 0.90;
         ctx.fillStyle = sigCol;
-        ctx.fillRect(Math.round(sx - dot * 0.5), Math.round(sy - dot * 0.5), Math.max(2, Math.round(dot)), Math.max(2, Math.round(dot)));
+        ctx.fillRect(Math.round(sx - dot * 0.5), Math.round(ly - dot * 0.5), Math.max(2, Math.round(dot)), Math.max(2, Math.round(dot)));
       }
     }
 
-    // D. Subtle Swiss Church Bell Acoustic Ripples (Reformierte Kirche & St. Elisabeth peals in Day/Sunset!)
+    // D. Swiss Church Bell Acoustic Ripples (canonical tSec % 52 < 20, anchored to M3 belfries!)
+    ctx.globalAlpha = 1.0;
     if (!isNight) {
-      const bellCycle = tSec % 52;
+      const bellCycle = ((tSec % 52) + 52) % 52;
       if (bellCycle < 20) {
         const bellEnv = bellCycle < 2.2 ? (bellCycle / 2.2) : (bellCycle > 17.0 ? (20 - bellCycle) / 3.0 : 1.0);
-        const spires = [[0.29035, 0.3120], [0.40667, 0.3425]];
+        const spires = [
+          (vig.reformierte_kirche && vig.reformierte_kirche.belfry) || [0.29037, 0.31203],
+          (vig.st_elisabeth && vig.st_elisabeth.belfry) || [0.41165, 0.32675],
+        ];
         ctx.strokeStyle = isSunset ? '#ffd89b' : '#fff3c4';
         ctx.lineWidth = Math.max(1.0, 1.2 * s);
         for (let si = 0; si < spires.length; si++) {
@@ -3493,7 +4667,7 @@
           const sy = spires[si][1] * worldH * scale + offsetY;
           if (sx < -80 || sx > canvas.width + 80 || sy < -80 || sy > canvas.height + 80) continue;
           for (let rIdx = 0; rIdx < 2; rIdx++) {
-            const phase = ((tSec * 0.48 + rIdx * 0.5 + si * 0.25) % 1);
+            const phase = (((tSec * 0.48 + rIdx * 0.5 + si * 0.25) % 1) + 1) % 1;
             const rad = (5 + phase * 26) * s;
             ctx.globalAlpha = (1 - phase) * 0.32 * bellEnv;
             ctx.beginPath();
@@ -3505,6 +4679,7 @@
     }
 
     // E. Nighttime Park Fireflies (gentle warm-gold pixel glints drifting through Kilchberg's parks!)
+    ctx.globalAlpha = 1.0;
     if (isNight) {
       const dot = Math.max(1.5, 1.4 * s);
       for (let i = 0; i < 36; i++) {
@@ -3524,13 +4699,88 @@
       }
     }
 
+    // E2. 2 Graceful Soaring Red Kites (Rotmilan) circling Kilchberg's wooded ridges (Day & Alpenglow only!)
+    ctx.globalAlpha = 1.0;
+    if (!isNight) {
+      const redKites = [
+        { cu: 0.655, cv: 0.285, ru: 0.024, rv: 0.014, spd: 0.16, ph: 0.2 }, // Sanatorium Kilchberg wooded ridge
+        { cu: 0.315, cv: 0.305, ru: 0.022, rv: 0.013, spd: 0.14, ph: 3.6 }, // Reformierte Kirche / Dorf wooded ridge
+      ];
+      for (let ki = 0; ki < redKites.length; ki++) {
+        const rk = redKites[ki];
+        const ang = tSec * rk.spd + rk.ph;
+        const ku = rk.cu + Math.cos(ang) * rk.ru;
+        const kv = rk.cv + Math.sin(ang) * rk.rv;
+        livingFrameCounts.redKites++;
+        const sx = ku * worldW * scale + offsetX;
+        const sy = kv * worldH * scale + offsetY;
+        if (sx < -36 || sx > canvas.width + 36 || sy < -36 || sy > canvas.height + 36) continue;
+        const dx = -Math.sin(ang) * rk.ru * worldW;
+        const dy = Math.cos(ang) * rk.rv * worldH;
+        const flightAng = Math.atan2(dy, dx);
+        const wingBeat = Math.sin(tSec * 2.2 + ki * 2.5) > 0.82 ? Math.sin(tSec * 12.0 + ki) * 1.2 : 0;
+        const p = Math.max(0.85, s);
+
+        // Subtle sunlit ground shadow beneath the soaring raptor
+        ctx.save();
+        ctx.translate(sx + 8 * p, sy + 14 * p);
+        ctx.rotate(flightAng);
+        ctx.fillStyle = 'rgba(18, 26, 22, 0.14)';
+        ctx.beginPath();
+        ctx.moveTo(4.0 * p, 0);
+        ctx.lineTo(-0.5 * p, -6.5 * p);
+        ctx.lineTo(-2.5 * p, -1.5 * p);
+        ctx.lineTo(-5.5 * p, 0);
+        ctx.lineTo(-2.5 * p, 1.5 * p);
+        ctx.lineTo(-0.5 * p, 6.5 * p);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // Crisp Rotmilan silhouette: rufous-chestnut angled wings, pale wing windows, dark wingtips & forked tail!
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(flightAng);
+        const span = (6.8 + wingBeat * 0.4) * p;
+        // Chestnut-rufous wings
+        ctx.fillStyle = isSunset ? '#b24b2c' : '#9a3b22';
+        ctx.beginPath();
+        ctx.moveTo(3.6 * p, 0);
+        ctx.lineTo(0.8 * p, -span);
+        ctx.lineTo(-2.0 * p, -span * 0.72);
+        ctx.lineTo(-1.8 * p, 0);
+        ctx.lineTo(-2.0 * p, span * 0.72);
+        ctx.lineTo(0.8 * p, span);
+        ctx.closePath();
+        ctx.fill();
+        // Signature forked reddish tail
+        ctx.fillStyle = isSunset ? '#c95830' : '#b44524';
+        ctx.beginPath();
+        ctx.moveTo(-1.4 * p, -0.8 * p);
+        ctx.lineTo(-5.6 * p, -2.0 * p);
+        ctx.lineTo(-4.0 * p, 0);
+        ctx.lineTo(-5.6 * p, 2.0 * p);
+        ctx.lineTo(-1.4 * p, 0.8 * p);
+        ctx.closePath();
+        ctx.fill();
+        // Pale primary wing-window patches + dark fingered wingtips
+        ctx.fillStyle = isSunset ? '#f6e0c8' : '#e8d5c0';
+        ctx.fillRect(Math.round(-0.4 * p), Math.round(-span * 0.65), Math.max(1.2, Math.round(1.4 * p)), Math.max(1.2, Math.round(1.8 * p)));
+        ctx.fillRect(Math.round(-0.4 * p), Math.round(span * 0.45), Math.max(1.2, Math.round(1.4 * p)), Math.max(1.2, Math.round(1.8 * p)));
+        ctx.fillStyle = '#1e1b18';
+        ctx.fillRect(Math.round(-0.8 * p), Math.round(-span - 0.4 * p), Math.max(1.2, Math.round(1.6 * p)), Math.max(1.2, Math.round(1.6 * p)));
+        ctx.fillRect(Math.round(-0.8 * p), Math.round(span - 1.2 * p), Math.max(1.2, Math.round(1.6 * p)), Math.max(1.2, Math.round(1.6 * p)));
+        ctx.restore();
+      }
+    }
+
     // F. Soft Drifting Swiss Cloud Shadows (Midday & Alpenglow — gentle SW->NE atmospheric motion!)
+    ctx.globalAlpha = 1.0;
     if (!isNight) {
       const cloudCol = isSunset ? 'rgba(34, 24, 52, 0.062)' : 'rgba(22, 38, 66, 0.052)';
-      ctx.globalAlpha = 1.0;
       ctx.fillStyle = cloudCol;
       for (let c = 0; c < 6; c++) {
-        const cu = ((tSec * 0.0042 + c * 0.19 + hash01(c * 11.3) * 0.08) % 1.35) - 0.18;
+        const cu = (((tSec * 0.0042 + c * 0.19 + hash01(c * 11.3) * 0.08) % 1.35) + 1.35) % 1.35 - 0.18;
         const cv = 0.16 + (c % 3) * 0.24 + Math.sin(tSec * 0.05 + c) * 0.03 - cu * 0.14;
         const sx = cu * worldW * scale + offsetX;
         const sy = cv * worldH * scale + offsetY;
@@ -3712,15 +4962,14 @@
     // 1. Swiss SBB Trains (carries moderately across the village; hushes when dwelling at Bahnhof Kilchberg!)
     let bestTrain = { level: 0, brightness: 0.08, pan: 0 };
     for (const tr of (animData.trains || [])) {
-      const f0 = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
-      const f1 = evalWithStationStop(tSec + 0.15, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
-      if (f0 < 0.01 || f0 > 1.05) continue;
-      const isMoving = Math.abs(f1 - f0) > 1e-5;
-      const midF = Math.max(0.01, Math.min(0.99, f0 - (30.0 / tr.length_m)));
+      const st = evalTrainState(tr, tSec);
+      if (st.headFrac < 0.01 || st.headFrac > 1.12) continue;
+      const isMoving = !st.isDwelling && st.speedRatio > 0.05;
+      const midF = Math.max(0.01, Math.min(0.99, st.midFrac));
       const pos = samplePathAt(tr.pts, midF, worldW, worldH, 2);
       if (!pos) continue;
       const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.14);
-      const lvl = sp.level * (isMoving ? 1.0 : 0.12);
+      const lvl = sp.level * (isMoving ? (0.35 + 0.65 * st.speedRatio) : 0.12);
       if (lvl > bestTrain.level) {
         bestTrain = { level: lvl, brightness: sp.brightness * (isMoving ? 1.0 : 0.4), pan: sp.pan };
       }
@@ -3740,25 +4989,35 @@
       const isMotorway = rd.kind === 'motorway';
       const busCount = rd.bus_count != null ? rd.bus_count : (rd.has_bus ? 1 : 0);
       const carCount = rd.car_count || 3;
-      const totalV = carCount + busCount;
+
+      for (let bIdx = 0; bIdx < busCount; bIdx++) {
+        if (isNight && bIdx > 0) continue;
+        const st = evalBusState(rd, bIdx, tSec);
+        if (st.frac < 0.001 || st.frac > 0.999) continue;
+        const pos = samplePathAt(rd.pts, st.frac, worldW, worldH, 2);
+        if (!pos) continue;
+        const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.075);
+        const busLvl = sp.level * (st.isDwelling ? 0.35 : (0.5 + 0.5 * st.speedRatio));
+        if (busLvl > bestBus.level) bestBus = { level: busLvl, brightness: sp.brightness, pan: sp.pan };
+      }
+
       const laneSpeed = Math.max(1.0, rd.speed_mps * (busCount > 0 ? 0.88 : 0.96));
       const cyc = rd.length_m / laneSpeed;
-      const maxJitter = Math.min(0.011, 0.24 / Math.max(1, totalV));
-      for (let vIdx = 0; vIdx < totalV; vIdx++) {
-        const isBus = vIdx < busCount;
+      const maxJitter = Math.min(0.011, 0.24 / Math.max(1, carCount));
+      for (let cIdx = 0; cIdx < carCount; cIdx++) {
+        const vIdx = busCount + cIdx;
+        if (isNight && ((vIdx * 7 + rIdx * 3) % 20) >= 9) continue;
         const jitter = Math.sin(tSec * 0.28 + vIdx * 2.17 + rIdx * 1.3) * maxJitter;
-        const frac = ((((tSec / cyc) + (rd.phase || 0) + vIdx / totalV + jitter) % 1) + 1) % 1;
+        const frac = ((((tSec / cyc) + (rd.phase || 0) + (cIdx + 0.35) / Math.max(1, carCount) + jitter) % 1) + 1) % 1;
         if (frac < 0.001 || frac > 0.999) continue;
         const pos = samplePathAt(rd.pts, frac, worldW, worldH, 2);
         if (!pos) continue;
         const sp = computeSpatialFactor(
           pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm,
-          isBus ? 0.075 : (isMotorway ? 0.062 : 0.085),
+          isMotorway ? 0.062 : 0.085,
         );
         if (sp.level <= 0.002) continue;
-        if (isBus) {
-          if (sp.level > bestBus.level) bestBus = sp;
-        } else if (isMotorway) {
+        if (isMotorway) {
           const cl = sp.level * 0.90;
           mwSumLvl += cl * cl;
           mwPanSum += sp.pan * cl;
@@ -3783,14 +5042,21 @@
     // 4. Lake Zurich ZSG Steamer Boat (localized to the boat on the lake)
     let bestBoat = { level: 0, brightness: 0.08, pan: 0 };
     for (const ship of (animData.ships || [])) {
-      const frac = ship.closed
-        ? (((tSec / (ship.length_m / Math.max(0.5, ship.speed_mps))) + (ship.phase || 0)) % 1 + 1) % 1
-        : evalWithStationStop(tSec, ship.length_m, ship.speed_mps, ship.stop_frac, ship.dwell_sec, ship.phase || 0);
+      if (isNight && ship.kind !== 'zsg_steamer') continue;
+      let frac;
+      let isDocked = false;
+      if (ship.closed) {
+        frac = (((tSec / (ship.length_m / Math.max(0.5, ship.speed_mps))) + (ship.phase || 0)) % 1 + 1) % 1;
+      } else {
+        const st = evalWithStationStop(tSec, ship.length_m, ship.speed_mps, ship.stop_frac, ship.dwell_sec, ship.phase || 0, 5.0, 6.0);
+        frac = st.frac;
+        isDocked = st.isDwelling;
+      }
       if (frac < 0 || frac > 1) continue;
       const pos = samplePathAt(ship.pts, frac, worldW, worldH, 2);
       if (!pos) continue;
       const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.09);
-      const mul = ship.kind === 'zsg_steamer' ? 1.0 : 0.28;
+      const mul = (ship.kind === 'zsg_steamer' ? (isDocked ? 0.35 : 1.0) : 0.28);
       if (sp.level * mul > bestBoat.level) {
         bestBoat = { level: sp.level * mul, brightness: sp.brightness, pan: sp.pan };
       }
@@ -3853,21 +5119,28 @@
     applyChannelSpatial('bells', bestBell.level, bestBell.brightness, bestBell.pan);
   }
 
-  let followTarget = null; // null | 'train' | 'boat'
+  let followTarget = null; // null | 'train' | 'boat' | 'bus'
   let cinemaMode = false;
+
+  const FOLLOW_LABELS = {
+    train: 'Follow: Train',
+    boat: 'Follow: Boat',
+    bus: 'Follow: Bus',
+  };
 
   function getAnimTimeSec() {
     return fixedAnimTime !== null ? fixedAnimTime : performance.now() * 0.001;
   }
 
   function setFollowMode(mode) {
-    followTarget = mode;
+    followTarget = (mode === 'train' || mode === 'boat' || mode === 'bus') ? mode : null;
     const btn = document.getElementById('btn-follow');
     if (btn) {
-      btn.textContent = mode === 'train' ? 'Follow: Train' : (mode === 'boat' ? 'Follow: Boat' : 'Follow: Off');
-      btn.classList.toggle('active', !!mode);
+      btn.textContent = FOLLOW_LABELS[followTarget] || 'Follow: Off';
+      btn.classList.toggle('active', !!followTarget);
+      btn.title = 'Cycle Follow Camera: Train → Boat → Bus → Off (F)';
     }
-    if (mode) {
+    if (followTarget) {
       if (!showAnimations) {
         showAnimations = true;
         const ba = document.getElementById('btn-toggle-anim');
@@ -3896,30 +5169,51 @@
     const { width: worldW, height: worldH } = getWorldSize();
     let targetPos = null;
     if (followTarget === 'train' && (animData.trains || []).length) {
-      // Pick whichever SBB train is currently inside the visible Kilchberg track (0.05..0.95)
-      for (const tr of animData.trains) {
-        const hf = evalWithStationStop(tSec, tr.length_m, tr.speed_mps, tr.stop_frac, tr.dwell_sec, tr.phase || 0);
-        const midF = hf - (38.0 / tr.length_m);
-        if (midF > 0.04 && midF < 0.96) {
-          targetPos = samplePathAt(tr.pts, midF, worldW, worldH, 2);
+      // Prefer double-deck SBB S8 (sbb_s8_south); fall back to any other active train during its 6s offscreen buffer
+      const primary = animData.trains.find((t) => t.id === 'sbb_s8_south') || animData.trains[0];
+      const ordered = primary ? [primary, ...animData.trains.filter((t) => t !== primary)] : animData.trains;
+      for (const tr of ordered) {
+        const st = evalTrainState(tr, tSec);
+        if (st.midFrac > 0.04 && st.midFrac < 0.96) {
+          targetPos = samplePathAt(tr.pts, st.midFrac, worldW, worldH, 2);
           if (targetPos) break;
         }
       }
+      if (!targetPos && primary) {
+        const st = evalTrainState(primary, tSec);
+        const clamped = Math.max(0.02, Math.min(0.98, st.midFrac >= 0 ? st.midFrac : (primary.stop_frac || 0.5)));
+        targetPos = samplePathAt(primary.pts, clamped, worldW, worldH, 2);
+      }
     } else if (followTarget === 'boat' && (animData.ships || []).length) {
-      // Follow the flagship ZSG Lake Zurich steamer (MS Helvetia)!
-      const b = animData.ships.find((x) => x.kind === 'zsg_steamer') || animData.ships[0];
+      // Follow the flagship ZSG Lake Zurich paddle steamer (MS Helvetia)!
+      const b = animData.ships.find((x) => x.id === 'zsg_ms_helvetia' || x.kind === 'zsg_steamer') || animData.ships[0];
       if (b) {
         const cyc = b.length_m / Math.max(0.5, b.speed_mps);
         const f = b.closed
           ? (((tSec / cyc) + (b.phase || 0)) % 1 + 1) % 1
-          : evalWithStationStop(tSec, b.length_m, b.speed_mps, b.stop_frac, b.dwell_sec || 0, b.phase || 0);
-        targetPos = samplePathAt(b.pts, Math.max(0.02, Math.min(0.98, f)), worldW, worldH, 2);
+          : evalWithStationStop(tSec, b.length_m, b.speed_mps, b.stop_frac, b.dwell_sec || 0, b.phase || 0, 5.0, 6.0).frac;
+        targetPos = samplePathAt(b.pts, Math.max(0.02, Math.min(0.98, f >= 0 ? f : 0.02)), worldW, worldH, 2);
+      }
+    } else if (followTarget === 'bus' && (animData.roads || []).length) {
+      // Follow VBZ/ZVV bus riding the curved Dorfstrasse horseshoe viaduct!
+      const rd = animData.roads.find((r) => r.id === 'dorfstrasse_viaduct_up')
+        || animData.roads.find((r) => r.has_bus || (r.bus_count || 0) > 0);
+      if (rd) {
+        const busCount = rd.bus_count != null ? rd.bus_count : (rd.has_bus ? 1 : 0);
+        const st0 = evalBusState(rd, 0, tSec);
+        let f = st0.frac;
+        if ((f < 0.01 || f > 0.99) && currentMode !== 'night' && busCount > 1) {
+          const st1 = evalBusState(rd, 1, tSec);
+          if (st1.frac >= 0.01 && st1.frac <= 0.99) f = st1.frac;
+        }
+        targetPos = samplePathAt(rd.pts, Math.max(0.01, Math.min(0.99, f >= 0 ? f : 0.01)), worldW, worldH, 2);
       }
     }
     if (!targetPos) return;
     const desiredX = canvas.width * 0.5 - targetPos.wx * scale;
     const desiredY = canvas.height * 0.5 - targetPos.wy * scale;
-    if (snap) {
+    const jumpDist = Math.hypot(desiredX - offsetX, desiredY - offsetY);
+    if (snap || jumpDist > canvas.width * 0.8) {
       offsetX = desiredX;
       offsetY = desiredY;
     } else {
@@ -3943,8 +5237,11 @@
 
   const btnFollow = document.getElementById('btn-follow');
   if (btnFollow) {
+    btnFollow.title = 'Cycle Follow Camera: Train → Boat → Bus → Off (F)';
     btnFollow.addEventListener('click', () => {
-      const next = !followTarget ? 'train' : (followTarget === 'train' ? 'boat' : null);
+      const next = !followTarget
+        ? 'train'
+        : (followTarget === 'train' ? 'boat' : (followTarget === 'boat' ? 'bus' : null));
       setFollowMode(next);
     });
   }
@@ -4153,8 +5450,8 @@
     } else {
       fitToScreen();
     }
-    const qFollow = urlParams.get('follow');
-    if (qFollow === 'train' || qFollow === 'boat') {
+    const qFollow = (urlParams.get('follow') || '').toLowerCase();
+    if (qFollow === 'train' || qFollow === 'boat' || qFollow === 'bus') {
       setFollowMode(qFollow);
       draw();
     }
@@ -4168,5 +5465,29 @@
         loadTileManifest(m);
       }
     }
+  });
+
+  // Non-intrusive read-only telemetry snapshot (PROJECT.md § Interface Contract #5)
+  Object.defineProperty(window, '__dioramaDebug', {
+    configurable: true,
+    enumerable: false,
+    get() {
+      const { width, height } = getWorldSize();
+      const cu = (width > 0 && scale > 0) ? (canvas.width * 0.5 - offsetX) / (width * scale) : 0.5;
+      const cv = (height > 0 && scale > 0) ? (canvas.height * 0.5 - offsetY) / (height * scale) : 0.5;
+      return {
+        mode: currentMode,
+        scale,
+        u: cu,
+        v: cv,
+        dpr: window.devicePixelRatio || 1,
+        animTime: getAnimTimeSec(),
+        followTarget,
+        showAnimations,
+        waterMaskReady: !!(waterMask && waterW > 0 && waterH > 0),
+        depthStats: { ...depthFrameStats },
+        livingCounts: { ...livingFrameCounts },
+      };
+    },
   });
 })();

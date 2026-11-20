@@ -250,6 +250,7 @@ def _ensure_v2_rasters(cache_dir: Path, bldg_npz: Path, force: bool = False) -> 
                     arr = ds.read([1, 2, 3], window=win, out_shape=(3, r1 - r0, c1 - c0), resampling=Resampling.average)
                     out25[r0:r1, c0:c1, :] = np.transpose(arr, (1, 2, 0))
         np.save(ortho25_p, out25)
+        del out25
 
     if (force or not roof_mask_p.exists() or not roof_edge25_p.exists()) and bldg_npz.exists():
         print("[scene] Rasterizing exact LOD2 building roof mask & 25cm parapet rim bands...")
@@ -292,12 +293,19 @@ def _ensure_v2_rasters(cache_dir: Path, bldg_npz: Path, force: bool = False) -> 
         step = np.zeros((h25, w25), dtype=np.uint8)
         step[bmap25 > 0] = 1
         e1 = _erode_same_id(bmap25)       # > 0.25m
+        del bmap25
         e2 = _erode_same_id(e1)           # > 0.50m
+        del e1
         step[e2 > 0] = 2
         e3 = _erode_same_id(e2)           # > 0.75m
+        del e2
         step[e3 > 0] = 3
-        e4 = _erode_same_id(_erode_same_id(e3))  # > 1.25m
+        e3b = _erode_same_id(e3)          # > 1.00m
+        del e3
+        e4 = _erode_same_id(e3b)          # > 1.25m
+        del e3b
         step[e4 > 0] = 4
+        del e4
         np.save(roof_edge25_p, step)
 
 
@@ -610,6 +618,7 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
     road_centerlines_hw: list[tuple[LineString, float]] = []
     rail_all_centerlines: list[tuple[LineString, float]] = []
     surf_road_lines: list[LineString] = []
+    raw_surf_steps: list[LineString] = []
 
     raw_bridges_main_road: list[LineString] = []
     raw_bridges_local_road: list[LineString] = []
@@ -658,6 +667,11 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
             # Surface ground transportation
             if cls in ("footway", "path", "track", "pedestrian", "cycleway"):
                 foot_geoms.append(ls.buffer(1.05))
+                if subcls == "steps":
+                    raw_surf_steps.append(ls)
+            elif subcls == "steps" or cls == "steps":
+                foot_geoms.append(ls.buffer(1.05))
+                raw_surf_steps.append(ls)
             elif cls == "motorway":
                 hw = 5.4 if not p.get("ramp") else 3.4
                 mw_geoms.append(ls.buffer(hw))
@@ -977,6 +991,40 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
         f"[scene] Built {cur_bid} elevated 3D bridges/viaducts, "
         f"{len(viaduct_piers)} concrete viaduct piers & {len(catenary_portals)} SBB catenary portals!"
     )
+
+    # Extract surface MVT staircases (subclass == "steps") as dedicated overlay fields
+    # while keeping legacy sem == G_FOOTPATH bit-for-bit compatible
+    merged_surf_steps = [
+        ls for ls in _merge_group(raw_surf_steps)
+        if ls.length >= 1.0 and ls.intersects(diorama_poly)
+    ]
+    steps_mask = np.zeros((GRID_H, GRID_W), dtype=np.bool_)
+    steps_dist = np.zeros((GRID_H, GRID_W), dtype=np.float16)
+    steps_along = np.zeros((GRID_H, GRID_W), dtype=np.float16)
+    steps_ang = np.zeros((GRID_H, GRID_W), dtype=np.float16)
+    surface_steps: list[dict] = []
+    if merged_surf_steps:
+        step_polys = [ls.buffer(1.05, cap_style=2) for ls in merged_surf_steps]
+        raw_steps_r = rasterize(
+            [(g, 1) for g in step_polys if g is not None and not g.is_empty],
+            out_shape=(GRID_H, GRID_W),
+            transform=tfm,
+            dtype=np.uint8,
+        ) > 0
+        steps_mask = raw_steps_r & (sem == G_FOOTPATH) & (~lake_mask) & (bridge_cls != BR_STEPS)
+        if steps_mask.any():
+            s_d, s_al, _, s_ang = _rasterize_centerline_field(
+                [(ls, 1.05) for ls in merged_surf_steps], max_dist_m=3.0
+            )
+            steps_dist[steps_mask] = s_d[steps_mask]
+            steps_along[steps_mask] = s_al[steps_mask]
+            steps_ang[steps_mask] = s_ang[steps_mask]
+        for ls in merged_surf_steps:
+            surface_steps.append({
+                "coords": [[round(float(x), 2), round(float(y), 2)] for x, y in ls.coords],
+                "length": round(float(ls.length), 2),
+            })
+    print(f"[scene] Extracted {len(surface_steps)} surface staircases ({int(steps_mask.sum()):,} 0.5m cells)!")
 
     # Collect street names & housenumbers for building metadata matching
     street_pts = []
@@ -1367,6 +1415,10 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
         road_hw=road_hw,
         road_ang=road_ang,
         crosswalk_mask=crosswalk_mask.astype(np.uint8),
+        steps_mask=steps_mask.astype(np.uint8),
+        steps_dist=steps_dist,
+        steps_along=steps_along,
+        steps_ang=steps_ang,
         bridge_cls=bridge_cls,
         bridge_z=bridge_z,
         bridge_sdist=bridge_sdist,
@@ -1391,6 +1443,7 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
                 "catenary_portals": catenary_portals,
                 "sports_fields": sports_fields,
                 "sports_enclosures": sports_enclosures,
+                "surface_steps": surface_steps,
             },
             indent=2,
         )

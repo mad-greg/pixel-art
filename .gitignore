@@ -10,3 +10,6 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+
+# Teamwork coordination metadata
+.agents/

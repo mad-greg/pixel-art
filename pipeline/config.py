@@ -101,9 +101,9 @@ LANDMARKS = [
         "name": "Bendlikon Bay & ZSG Boat Pier",
         "subtitle": "Kilchberg ZH (See) steamer landing, moored sailboats & lakeside villas",
         "category": "Waterfront & Harbor",
-        "e": 2684130.0,
-        "n": 1241885.0,
-        "z": 412.0,
+        "e": 2684061.0,
+        "n": 1242076.0,
+        "z": 410.2,
         "crop_radius_m": 205.0,
     },
     {

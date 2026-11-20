@@ -36,12 +36,43 @@ CROP_SPECS = [
 ]
 
 
+PLATE_CARTOUCHE_META: dict[str, tuple[str, str]] = {
+    "lindt_hoc": (
+        "PLATE I  —  LINDT HOME OF CHOCOLATE & 1899 FACTORY CAMPUS",
+        "SEESTRASSE 204 · SCHOOREN · 6 COCOA SILOS & 43.6m SMOKESTACK",
+    ),
+    "reformierte_kirche": (
+        "PLATE II  —  REFORMIERTE KIRCHE KILCHBERG & HISTORIC DORF",
+        "13TH-C. HILLTOP SPIRE · CEMETERY · DORFSTRASSE HORSESHOE VIADUCT",
+    ),
+    "bendlikon_pier": (
+        "PLATE III  —  BENDLIKON HARBOR, ZSG STEAMER PIER & PAVILION",
+        "LAKE ZURICH PROMENADE · MOORED FLEET · TIMBER JETTIES",
+    ),
+    "bahnhof_stockengut": (
+        "PLATE IV  —  BAHNHOF KILCHBERG, WEINBERG & GEMEINDEHAUS",
+        "SBB SEEBAHN CATENARY · PLATFORM CANOPIES · TERRACED VINEYARDS",
+    ),
+    "schooren_seebad": (
+        "PLATE V  —  SEEBAD KILCHBERG & SCHOOREN LAKESIDE VILLAS",
+        "TIMBER BADI BATHHOUSE · THREE SWIM JETTIES · VILLA NAVILLE",
+    ),
+    "sanatorium_ridge": (
+        "PLATE VI  —  SANATORIUM KILCHBERG & STOCKEN RIDGE",
+        "1906 HISTORIC PAVILIONS · ALPINE MEADOWS · UPLAND FORESTS",
+    ),
+}
+
+
 def render_everything(
     mpp_full: float = 0.25,
     mpp_crop: float = 0.22,
     presets: tuple[str, ...] = ("day", "sunset", "night"),
     skip_crops: bool = False,
     skip_animations: bool = False,
+    skip_full: bool = False,
+    crops: tuple[str, ...] | None = None,
+    crop_preset: str = "day",
 ) -> None:
     extract_scene(force=False)
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,43 +85,66 @@ def render_everything(
     print(f"[render] Loaded Kilchberg 3D scene in {time.time() - t0:.1f}s")
 
     meta_out_p = DOCS_DIR / "data" / "kilchberg_interactive.json"
-    for idx_p, pkey in enumerate(presets):
-        t_p = time.time()
-        need_meta = (pkey == "day") or (idx_p == 0 and not meta_out_p.exists())
-        tiles_dir = DOCS_DIR / "assets" / "tiles" / pkey
-        ov_webp = DOCS_DIR / "assets" / f"diorama_{pkey}.webp"
-        out_png = RENDERS_DIR / f"kilchberg_diorama_{pkey}.png"
+    if not skip_full:
+        for idx_p, pkey in enumerate(presets):
+            t_p = time.time()
+            need_meta = (pkey == "day") or (idx_p == 0 and not meta_out_p.exists())
+            tiles_dir = DOCS_DIR / "assets" / "tiles" / pkey
+            ov_webp = DOCS_DIR / "assets" / f"diorama_{pkey}.webp"
+            out_png = RENDERS_DIR / f"kilchberg_diorama_{pkey}.png"
 
-        meta = render_diorama_tiled_hires(
-            scene,
-            mpp=mpp_full,
-            preset_key=pkey,
-            tiles_dir=tiles_dir,
-            overview_webp_path=ov_webp,
-            full_png_path=out_png,
-            tile_size=1024,
-            collect_hit_boxes=need_meta,
-        )
-        if meta:
-            meta_out_p.write_text(json.dumps(meta, separators=(",", ":")))
-        mf = json.loads((tiles_dir / "manifest.json").read_text())
-        print(
-            f"[render] Ultra-HD Tiled Diorama ({pkey}): {mf['width']}x{mf['height']} px "
-            f"({mf['cols']}x{mf['rows']} tiles @ {mpp_full:.2f} m/px) in {time.time() - t_p:.1f}s"
-        )
+            meta = render_diorama_tiled_hires(
+                scene,
+                mpp=mpp_full,
+                preset_key=pkey,
+                tiles_dir=tiles_dir,
+                overview_webp_path=ov_webp,
+                full_png_path=out_png,
+                tile_size=1024,
+                collect_hit_boxes=need_meta,
+            )
+            if meta:
+                meta_out_p.write_text(json.dumps(meta, separators=(",", ":")))
+            mf = json.loads((tiles_dir / "manifest.json").read_text())
+            print(
+                f"[render] Ultra-HD Tiled Diorama ({pkey}): {mf['width']}x{mf['height']} px "
+                f"({mf['cols']}x{mf['rows']} tiles @ {mpp_full:.2f} m/px) in {time.time() - t_p:.1f}s"
+            )
 
     if not skip_crops:
+        import gc
+        from .pixel_shader import PRESETS, compute_shadow_grid
+
+        crop_filter = set(crops) if crops else None
+        p_c = PRESETS[crop_preset]
+        crop_sh = compute_shadow_grid(scene, p_c.sun_az_deg, p_c.sun_alt_deg)
         for lm_id, fname in CROP_SPECS:
+            if crop_filter is not None and lm_id not in crop_filter:
+                continue
             lm = next(x for x in LANDMARKS if x["id"] == lm_id)
             r = lm["crop_radius_m"]
             box_lv = (lm["e"] - r, lm["n"] - r * 1.15, lm["e"] + r, lm["n"] + r * 1.15)
             cam_c = IsometricCamera(mpp=mpp_crop)
             t_c = time.time()
-            img_c, _ = render_diorama(scene, cam_c, preset_key="day", crop_box_lv95=box_lv, add_frame=True)
+            p_title, p_sub = PLATE_CARTOUCHE_META.get(lm_id, (None, None))
+            img_c, _ = render_diorama(
+                scene,
+                cam_c,
+                preset_key=crop_preset,
+                crop_box_lv95=box_lv,
+                add_frame=True,
+                sun_shadow_override=crop_sh,
+                plate_title=p_title,
+                plate_subtitle=p_sub,
+            )
             out_c = CROPS_DIR / fname
             img_c.save(out_c, optimize=True)
             img_c.save(DOCS_DIR / "assets" / fname.replace(".png", ".webp"), format="WEBP", lossless=True, method=4)
-            print(f"[render] Crop {fname}: {img_c.size[0]}x{img_c.size[1]} @ {mpp_crop:.2f} m/px ({time.time() - t_c:.1f}s)")
+            print(f"[render] Crop {fname} ({crop_preset}): {img_c.size[0]}x{img_c.size[1]} @ {mpp_crop:.2f} m/px ({time.time() - t_c:.1f}s)")
+            del img_c
+            gc.collect()
+        del crop_sh
+        gc.collect()
 
     if not skip_animations:
         export_animations(mpp_full=mpp_full)
@@ -103,6 +157,9 @@ if __name__ == "__main__":
     ap.add_argument("--mpp-crop", type=float, default=0.22)
     ap.add_argument("--skip-crops", action="store_true")
     ap.add_argument("--skip-animations", action="store_true")
+    ap.add_argument("--skip-full", action="store_true")
+    ap.add_argument("--crops", nargs="+", default=None)
+    ap.add_argument("--crop-preset", choices=["day", "sunset", "night"], default="day")
     args = ap.parse_args()
     render_everything(
         mpp_full=args.mpp_full,
@@ -110,4 +167,7 @@ if __name__ == "__main__":
         presets=tuple(args.presets),
         skip_crops=args.skip_crops,
         skip_animations=args.skip_animations,
+        skip_full=args.skip_full,
+        crops=tuple(args.crops) if args.crops else None,
+        crop_preset=args.crop_preset,
     )

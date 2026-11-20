@@ -1,95 +1,222 @@
-"""Export 100% GIS-accurate 3D isometric animation paths and occlusion masks for Kilchberg ZH.
+"""Export 100% GIS-accurate 3D isometric animation paths and ambient anchors for Kilchberg ZH.
 
-Builds docs/data/kilchberg_animations.json directly from:
-- swisstopo MVT transportation vectors (SBB Seebahn railway, Seestrasse, A3 motorway, village streets)
-- Lake Zurich open-water bathymetry/mask (ZSG Bendlikon steamer route + offshore sailboat loops)
-- 0.5 m LiDAR DSM + swissBUILDINGS3D 3.0 roof elevations for analytical camera-ray 3D occlusion
-  so trains and cars pass cleanly BEHIND foreground buildings, bridges, and trees!
+Builds docs/data/kilchberg_animations.json directly from cached official swisstopo datasets
+(/tmp/kilchberg-cache/scene_kilchberg_05m.npz, buildings_kilchberg_3d.npz,
+buildings_kilchberg_meta.json, and mvt/*.pbf) with zero external downloads and zero PNG hacks:
+- SBB Seebahn double-track railway (true West/Gleis 2 & East/Gleis 1 tracks, strictly flat
+  BR_RAIL_BRIDGE elevations, centered Bahnhof Kilchberg platform stops)
+- All 8 edge-to-edge road lanes (Seestrasse NB/SB, Dorfstrasse Horseshoe Viaduct up/dn with
+  smooth G1 Bezier junction fillets, A3 Motorway NB/SB, Alte Landstrasse EB/WB) clipped cleanly
+  against scene.diorama_mask with class-filtered bilinear bridge_z, full 3D camera-ray occlusion,
+  16-bit depth packing, and official ZVV/DIDOK bus stop fractions
+- Lake Zurich ZSG steamer (edge-to-edge NE->SW path docking parallel to canonical Bendlikon Pier
+  Badweg 1.1) plus 4 offshore leisure vessels and deterministic coastal shoreline extraction
+- LV95-projected ambient anchors (Lindt Hochkamin, 10 residential pitched-roof village chimneys,
+  3 village Dorfbrunnen fountains, 4 Swiss/Kilchberg flags, 4 open-water gull orbits, vignettes)
 """
 
 from __future__ import annotations
+
+import gc
 import heapq
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
+
 import numpy as np
+from rasterio.features import shapes as rio_shapes
+from rasterio.transform import from_bounds
 from scipy import ndimage
+from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Point, shape
 from shapely.ops import linemerge, unary_union
+from shapely.prepared import prep
 
-from .config import DOCS_DIR, E_MAX, E_MIN, IsometricCamera, LAKE_SURFACE_Z, N_MAX, N_MIN, RAW_CACHE_DIR
-from .extract_scene import GRID_H, GRID_RES, GRID_W, _load_mvt_features, build_diorama_polygon
-from .pixel_shader import SceneData, compute_full_canvas_geometry
+from .config import (
+    DOCS_DIR,
+    E_MAX,
+    E_MIN,
+    IsometricCamera,
+    LAKE_SURFACE_Z,
+    N_MAX,
+    N_MIN,
+    RAW_CACHE_DIR,
+)
+from .extract_scene import (
+    BR_MOTORWAY,
+    BR_RAIL_BRIDGE,
+    BR_ROAD_VIADUCT,
+    GRID_H,
+    GRID_RES,
+    GRID_W,
+    _load_mvt_features,
+    build_diorama_polygon,
+)
+from .pixel_shader import compute_full_canvas_geometry
+
+DEPTH_MIN = -2400.0
+DEPTH_MAX = 2400.0
+
+# Official swisstopo / ZVV DIDOK bus stop catalog in LV95 (Lines 161, 162, 165)
+BUS_STOP_CATALOG: list[tuple[str, float, float]] = [
+    ("Paradiesstrasse (Mönchhof)", 2683794.2, 1242581.3),
+    ("Bendlikon",                  2684046.7, 1241843.7),
+    ("Lindt & Sprüngli",           2684145.0, 1241545.0),
+    ("Schooren",                   2684272.2, 1241360.5),
+    ("Schulhaus Dorfstrasse",      2683836.9, 1241822.6),
+    ("Schwelle (Kilchberg Dorf)",  2683654.9, 1241790.5),
+    ("Gemeindehaus",               2683651.3, 1242162.0),
+    ("Sanatorium",                 2683594.3, 1242379.5),
+    ("Paradiessteig",              2683488.3, 1242671.6),
+    ("Hornhaldenstrasse",          2683400.2, 1242915.3),
+]
+
+# Curated pitched-roof Kilchberg residential buildings (bldg_idx, smoke phase)
+VILLAGE_CHIMNEY_SPECS: list[tuple[int, float]] = [
+    (1506, 0.05),  # Dorfstrasse 118 (Lebern / Dorf)
+    (1546, 0.17),  # C.-F.-Meyer-Strasse 18 (Böndler)
+    (1640, 0.29),  # Schoorenstrasse 38 (Schooren)
+    (939,  0.41),  # Brunnenmoosstrasse 4 (Schwelle / St. Elisabeth)
+    (1809, 0.53),  # Stockenstrasse 117 (Stocken Ridge)
+    (1560, 0.62),  # Dorfstrasse 5 (Bendlikon)
+    (1241, 0.71),  # Alte Landstrasse 134 (Schwelle / C.F. Meyer)
+    (537,  0.80),  # Mönchhofstrasse 14 (Schwelle / Mönchhof)
+    (203,  0.89),  # Stockenstrasse 55 (Im Breitloo / Weinberg)
+    (103,  0.96),  # Rennweg 100 (Mönchhof / Horn)
+]
+
+# Verified village Dorfbrunnen (name, E, N) — clear of all buildings, bridges, and road lanes
+FOUNTAIN_SPECS: list[tuple[str, float, float]] = [
+    ("Dorfplatz (Reformierte Kirche)",     2683429.0, 1241314.0),
+    ("C.F. Meyer-Haus (Alte Landstrasse)", 2683691.0, 1241858.0),
+    ("Bahnhofplatz Kilchberg",             2683888.0, 1242049.0),
+]
 
 
-def _snap_key(pt: tuple[float, float], tol: float = 4.0) -> tuple[int, int]:
+@dataclass
+class _AnimScene:
+    """Lightweight subset of SceneData (~280 MB RSS) bit-for-bit identical for geometry & occlusion."""
+
+    dem: np.ndarray
+    diorama_mask: np.ndarray
+    lake_mask: np.ndarray
+    bridge_cls: np.ndarray
+    bridge_z: np.ndarray
+    verts: np.ndarray
+    surf_type: np.ndarray
+    bldg_idx: np.ndarray
+    meta: dict
+
+
+def _load_anim_scene(cache_dir: Path = RAW_CACHE_DIR) -> _AnimScene:
+    with np.load(cache_dir / "scene_kilchberg_05m.npz") as s:
+        dem = np.asarray(s["dem"], dtype=np.float32)
+        diorama_mask = np.asarray(s["diorama_mask"], dtype=np.bool_)
+        lake_mask = np.asarray(s["lake_mask"], dtype=np.bool_)
+        bridge_cls = np.asarray(s["bridge_cls"], dtype=np.uint8)
+        bridge_z = np.asarray(s["bridge_z"], dtype=np.float32)
+    with np.load(cache_dir / "buildings_kilchberg_3d.npz") as b:
+        verts = np.asarray(b["verts"], dtype=np.float32)
+        surf_type = np.asarray(b["surf_type"], dtype=np.uint8)
+        bldg_idx = np.asarray(b["bldg_idx"], dtype=np.int32)
+    meta = json.loads((cache_dir / "buildings_kilchberg_meta.json").read_text())
+    return _AnimScene(
+        dem=dem,
+        diorama_mask=diorama_mask,
+        lake_mask=lake_mask,
+        bridge_cls=bridge_cls,
+        bridge_z=bridge_z,
+        verts=verts,
+        surf_type=surf_type,
+        bldg_idx=bldg_idx,
+        meta=meta,
+    )
+
+
+def _snap_key(pt: tuple[float, float], tol: float) -> tuple[int, int]:
     return (int(round(pt[0] / tol)), int(round(pt[1] / tol)))
 
 
-def _stitch_longest_path(
-    geoms: list[LineString],
+def _flatten_lines(geoms: list) -> list[LineString]:
+    out: list[LineString] = []
+    for g in geoms:
+        if g is None or g.is_empty:
+            continue
+        if g.geom_type == "LineString":
+            out.append(g)
+        elif hasattr(g, "geoms"):
+            for sub in g.geoms:
+                if sub.geom_type == "LineString" and not sub.is_empty:
+                    out.append(sub)
+    return out
+
+
+def _stitch_exact_path(
+    geoms: list,
     start_target: tuple[float, float],
     end_target: tuple[float, float],
-    snap_tol: float = 8.0,
+    subdiv_m: float = 4.0,
+    snap_m: float = 1.2,
+    bridge_m: float = 3.5,
 ) -> LineString | None:
-    """Build a snapped segment graph and extract the shortest continuous path between two endpoints."""
+    """Build a tightly-snapped, subdivided LV95 segment graph and extract the exact shortest path."""
     adj: dict[tuple[int, int], list[tuple[tuple[int, int], float, list[tuple[float, float]]]]] = {}
     node_xy: dict[tuple[int, int], tuple[float, float]] = {}
 
-    def add_seg(coords: list[tuple[float, float]]) -> None:
+    for ls in _flatten_lines(geoms):
+        coords = list(ls.coords)
         if len(coords) < 2:
-            return
-        ls = LineString(coords)
-        if ls.length < 1.0:
-            return
-        # Subdivide at ~12m intervals so overlapping MVT tile buffer lines share interior nodes!
-        n_sub = max(1, int(math.ceil(ls.length / 12.0)))
-        s_pts = [ls.interpolate(float(ls.length * k / n_sub)).coords[0] for k in range(n_sub + 1)]
-        for k in range(n_sub):
-            p0, p1 = s_pts[k], s_pts[k + 1]
-            seg_len = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
-            if seg_len < 0.2:
+            continue
+        for k in range(len(coords) - 1):
+            x0, y0 = float(coords[k][0]), float(coords[k][1])
+            x1, y1 = float(coords[k + 1][0]), float(coords[k + 1][1])
+            seg_len = math.hypot(x1 - x0, y1 - y0)
+            if seg_len < 0.1:
                 continue
-            u = _snap_key(p0, snap_tol)
-            v = _snap_key(p1, snap_tol)
-            if u == v:
-                continue
-            node_xy.setdefault(u, p0)
-            node_xy.setdefault(v, p1)
-            adj.setdefault(u, []).append((v, seg_len, [p0, p1]))
-            adj.setdefault(v, []).append((u, seg_len, [p1, p0]))
-
-    for g in geoms:
-        if g.geom_type == "LineString":
-            add_seg(list(g.coords))
-        elif hasattr(g, "geoms"):
-            for sub in g.geoms:
-                if sub.geom_type == "LineString":
-                    add_seg(list(sub.coords))
+            n_sub = max(1, int(math.ceil(seg_len / subdiv_m)))
+            for s in range(n_sub):
+                t0 = s / n_sub
+                t1 = (s + 1) / n_sub
+                p0 = (x0 + (x1 - x0) * t0, y0 + (y1 - y0) * t0)
+                p1 = (x0 + (x1 - x0) * t1, y0 + (y1 - y0) * t1)
+                d = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+                if d < 0.05:
+                    continue
+                u = _snap_key(p0, snap_m)
+                v = _snap_key(p1, snap_m)
+                if u == v:
+                    continue
+                node_xy.setdefault(u, p0)
+                node_xy.setdefault(v, p1)
+                adj.setdefault(u, []).append((v, d, [p0, p1]))
+                adj.setdefault(v, []).append((u, d, [p1, p0]))
 
     if not node_xy:
         return None
 
-    # Bridge tiny MVT tile/junction gaps up to 20m
     keys = list(node_xy.keys())
-    for i, u in enumerate(keys):
-        ux, uy = node_xy[u]
-        for j in range(i + 1, len(keys)):
-            v = keys[j]
+    if bridge_m > 0.1 and len(keys) > 1:
+        xy_arr = np.asarray([node_xy[k] for k in keys], dtype=np.float64)
+        tree = cKDTree(xy_arr)
+        for i, j in sorted(tree.query_pairs(r=bridge_m)):
+            u, v = keys[i], keys[j]
+            ux, uy = node_xy[u]
             vx, vy = node_xy[v]
             d = math.hypot(ux - vx, uy - vy)
-            if 0.1 < d <= 20.0:
-                adj.setdefault(u, []).append((v, d * 2.2, [(ux, uy), (vx, vy)]))
-                adj.setdefault(v, []).append((u, d * 2.2, [(vx, vy), (ux, uy)]))
+            if 0.05 < d <= bridge_m:
+                w = d * 2.5
+                adj.setdefault(u, []).append((v, w, [(ux, uy), (vx, vy)]))
+                adj.setdefault(v, []).append((u, w, [(vx, vy), (ux, uy)]))
 
     src = min(keys, key=lambda k: math.hypot(node_xy[k][0] - start_target[0], node_xy[k][1] - start_target[1]))
     dst = min(keys, key=lambda k: math.hypot(node_xy[k][0] - end_target[0], node_xy[k][1] - end_target[1]))
     if src == dst:
         return None
 
-    dist = {src: 0.0}
+    dist: dict[tuple[int, int], float] = {src: 0.0}
     prev: dict[tuple[int, int], tuple[tuple[int, int], list[tuple[float, float]]]] = {}
-    pq = [(0.0, src)]
+    pq: list[tuple[float, tuple[int, int]]] = [(0.0, src)]
     while pq:
         d_u, u = heapq.heappop(pq)
         if u == dst:
@@ -117,19 +244,182 @@ def _stitch_longest_path(
     merged_pts: list[tuple[float, float]] = []
     for seg in chain:
         for pt in seg:
-            if not merged_pts or math.hypot(pt[0] - merged_pts[-1][0], pt[1] - merged_pts[-1][1]) > 0.5:
+            if not merged_pts or math.hypot(pt[0] - merged_pts[-1][0], pt[1] - merged_pts[-1][1]) > 0.25:
                 merged_pts.append((float(pt[0]), float(pt[1])))
     return LineString(merged_pts) if len(merged_pts) >= 2 else None
 
 
-def _resample_smooth_line(ls: LineString, step_m: float = 2.5, offset_right_m: float = 0.0) -> tuple[np.ndarray, np.ndarray, float]:
-    """Uniformly resample a LineString in LV95 meters with optional right-hand lane offset."""
+def _fillet_polyline(
+    coords: list[tuple[float, float]],
+    corner_deg: float = 20.0,
+    max_trim_m: float = 6.5,
+    n_arc: int = 10,
+) -> LineString:
+    """Replace sharp interior polyline corners with G1 tangent-continuous quadratic Bezier arcs."""
+    pts: list[np.ndarray] = []
+    for c in coords:
+        p = np.array([float(c[0]), float(c[1])], dtype=np.float64)
+        if not pts or float(np.hypot(p[0] - pts[-1][0], p[1] - pts[-1][1])) >= 0.5:
+            pts.append(p)
+    if len(pts) < 3:
+        return LineString([(float(p[0]), float(p[1])) for p in pts])
+
+    out: list[tuple[float, float]] = [(float(pts[0][0]), float(pts[0][1]))]
+    ts = np.linspace(0.0, 1.0, n_arc + 1)
+    for i in range(1, len(pts) - 1):
+        p_prev, p_cur, p_next = pts[i - 1], pts[i], pts[i + 1]
+        v1 = p_cur - p_prev
+        v2 = p_next - p_cur
+        l1 = float(np.hypot(v1[0], v1[1]))
+        l2 = float(np.hypot(v2[0], v2[1]))
+        if l1 < 1e-3 or l2 < 1e-3:
+            continue
+        u1 = v1 / l1
+        u2 = v2 / l2
+        dot = max(-1.0, min(1.0, float(u1[0] * u2[0] + u1[1] * u2[1])))
+        theta_deg = math.degrees(math.acos(dot))
+        if theta_deg > corner_deg:
+            t1 = min(max_trim_m, 0.44 * l1)
+            t2 = min(max_trim_m, 0.44 * l2)
+            q0 = p_cur - t1 * u1
+            q1 = p_cur
+            q2 = p_cur + t2 * u2
+            for t in ts:
+                omt = 1.0 - float(t)
+                b = (omt * omt) * q0 + (2.0 * omt * float(t)) * q1 + (float(t) * float(t)) * q2
+                pt = (float(b[0]), float(b[1]))
+                if math.hypot(pt[0] - out[-1][0], pt[1] - out[-1][1]) > 0.1:
+                    out.append(pt)
+        else:
+            pt = (float(p_cur[0]), float(p_cur[1]))
+            if math.hypot(pt[0] - out[-1][0], pt[1] - out[-1][1]) > 0.1:
+                out.append(pt)
+
+    last = (float(pts[-1][0]), float(pts[-1][1]))
+    if math.hypot(last[0] - out[-1][0], last[1] - out[-1][1]) > 0.1:
+        out.append(last)
+    return LineString(out)
+
+
+def _join_with_fillet(
+    ls_a: LineString,
+    ls_b: LineString,
+    junc_pt: tuple[float, float],
+    trim_m: float = 8.0,
+    n_arc: int = 12,
+) -> LineString:
+    """Join two road LineStrings at junc_pt using a G1 quadratic Bezier junction fillet."""
+    jp = Point(float(junc_pt[0]), float(junc_pt[1]))
+    sa = float(ls_a.project(jp))
+    sb = float(ls_b.project(jp))
+    sa_end = max(0.0, sa - trim_m)
+    sb_start = min(float(ls_b.length), sb + trim_m)
+
+    pts: list[tuple[float, float]] = []
+
+    def _append_range(ls: LineString, s0: float, s1: float, step: float = 2.0) -> None:
+        if s1 <= s0 + 0.05:
+            p = ls.interpolate(s0).coords[0]
+            pt = (float(p[0]), float(p[1]))
+            if not pts or math.hypot(pt[0] - pts[-1][0], pt[1] - pts[-1][1]) > 0.1:
+                pts.append(pt)
+            return
+        n_s = max(2, int(math.ceil((s1 - s0) / step)) + 1)
+        for s in np.linspace(s0, s1, n_s):
+            p = ls.interpolate(float(s)).coords[0]
+            pt = (float(p[0]), float(p[1]))
+            if not pts or math.hypot(pt[0] - pts[-1][0], pt[1] - pts[-1][1]) > 0.1:
+                pts.append(pt)
+
+    _append_range(ls_a, 0.0, sa_end, step=2.0)
+
+    q0_c = ls_a.interpolate(sa_end).coords[0]
+    q2_c = ls_b.interpolate(sb_start).coords[0]
+    q0 = np.array([float(q0_c[0]), float(q0_c[1])], dtype=np.float64)
+    q1 = np.array([float(junc_pt[0]), float(junc_pt[1])], dtype=np.float64)
+    q2 = np.array([float(q2_c[0]), float(q2_c[1])], dtype=np.float64)
+    for t in np.linspace(0.0, 1.0, n_arc + 1)[1:-1]:
+        omt = 1.0 - float(t)
+        b = (omt * omt) * q0 + (2.0 * omt * float(t)) * q1 + (float(t) * float(t)) * q2
+        pt = (float(b[0]), float(b[1]))
+        if not pts or math.hypot(pt[0] - pts[-1][0], pt[1] - pts[-1][1]) > 0.1:
+            pts.append(pt)
+
+    _append_range(ls_b, sb_start, float(ls_b.length), step=2.0)
+    return LineString(pts)
+
+
+def _offset_then_clip(
+    ls: LineString,
+    diorama_mask: np.ndarray,
+    step_m: float = 3.0,
+    offset_right_m: float = 0.0,
+    sig_m: float = 3.6,
+    inset_m: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray, float] | None:
+    """Smooth & laterally offset an unclipped LV95 spine, then clip cleanly edge-to-edge to diorama_mask."""
+    L_raw = float(ls.length)
+    if L_raw < 10.0:
+        return None
+    n_d = max(4, int(math.ceil(L_raw)) + 1)
+    ss_d = np.linspace(0.0, L_raw, n_d)
+    pts_d = np.asarray([ls.interpolate(float(s)).coords[0] for s in ss_d], dtype=np.float64)
+
+    e_sm = ndimage.gaussian_filter1d(pts_d[:, 0], sigma=sig_m, mode="nearest") if n_d >= 7 else pts_d[:, 0].copy()
+    n_sm = ndimage.gaussian_filter1d(pts_d[:, 1], sigma=sig_m, mode="nearest") if n_d >= 7 else pts_d[:, 1].copy()
+
+    if abs(offset_right_m) > 1e-3:
+        de = np.gradient(e_sm)
+        dn = np.gradient(n_sm)
+        nm = np.maximum(1e-6, np.hypot(de, dn))
+        # Right-hand Swiss lane normal in (E, N): (+dn, -de) / nm
+        e_sm = e_sm + (dn / nm) * offset_right_m
+        n_sm = n_sm - (de / nm) * offset_right_m
+        # Light post-offset smoothing eliminates inner-corner cusp pinching on tight bends
+        e_sm = ndimage.gaussian_filter1d(e_sm, sigma=1.8, mode="nearest")
+        n_sm = ndimage.gaussian_filter1d(n_sm, sigma=1.8, mode="nearest")
+
+    ls_off = LineString(list(zip(e_sm.tolist(), n_sm.tolist())))
+    L_off = float(ls_off.length)
+    n_c = max(4, int(math.ceil(L_off / 0.25)) + 1)
+    ss_c = np.linspace(0.0, L_off, n_c)
+    pts_c = np.asarray([ls_off.interpolate(float(s)).coords[0] for s in ss_c], dtype=np.float64)
+
+    cols = np.floor((pts_c[:, 0] - E_MIN) / GRID_RES).astype(np.int32)
+    rows = np.floor((N_MAX - pts_c[:, 1]) / GRID_RES).astype(np.int32)
+    in_bounds = (cols >= 0) & (cols < GRID_W) & (rows >= 0) & (rows < GRID_H)
+    inside = np.zeros(n_c, dtype=bool)
+    inside[in_bounds] = diorama_mask[rows[in_bounds], cols[in_bounds]]
+
+    idx_t = np.nonzero(inside)[0]
+    if len(idx_t) < 4:
+        return None
+    runs = np.split(idx_t, np.where(np.diff(idx_t) > 1)[0] + 1)
+    best_run = max(runs, key=len)
+
+    s0 = float(ss_c[best_run[0]]) + inset_m
+    s1 = float(ss_c[best_run[-1]]) - inset_m
+    if s1 <= s0 + step_m:
+        return None
+
+    L_fin = s1 - s0
+    n_fin = max(4, int(round(L_fin / step_m)) + 1)
+    ss_fin = np.linspace(s0, s1, n_fin)
+    pts_fin = np.asarray([ls_off.interpolate(float(s)).coords[0] for s in ss_fin], dtype=np.float64)
+    return pts_fin[:, 0], pts_fin[:, 1], float(L_fin)
+
+
+def _resample_smooth_line(
+    ls: LineString,
+    step_m: float = 2.5,
+    offset_right_m: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Uniformly resample a LineString in LV95 meters with optional right-hand offset."""
     total_len = float(ls.length)
     n_pts = max(4, int(round(total_len / step_m)) + 1)
     s_vals = np.linspace(0.0, total_len, n_pts)
-    pts = np.array([ls.interpolate(float(s)).coords[0] for s in s_vals], dtype=np.float64)
+    pts = np.asarray([ls.interpolate(float(s)).coords[0] for s in s_vals], dtype=np.float64)
 
-    # Light Gaussian smoothing on E/N so MVT vertices curve organically
     if len(pts) >= 7:
         e_sm = ndimage.gaussian_filter1d(pts[:, 0], sigma=1.3, mode="nearest")
         n_sm = ndimage.gaussian_filter1d(pts[:, 1], sigma=1.3, mode="nearest")
@@ -140,14 +430,17 @@ def _resample_smooth_line(ls: LineString, step_m: float = 2.5, offset_right_m: f
         de = np.gradient(e_sm)
         dn = np.gradient(n_sm)
         norm = np.maximum(1e-6, np.hypot(de, dn))
-        # Right-hand normal in (E, N): (+dn, -de) / norm
         e_sm = e_sm + (dn / norm) * offset_right_m
         n_sm = n_sm - (de / norm) * offset_right_m
 
     return e_sm, n_sm, total_len
 
 
-def _catmull_rom_closed_or_open(ctrl: list[tuple[float, float]], step_m: float = 3.0, closed: bool = False) -> tuple[np.ndarray, np.ndarray, float]:
+def _catmull_rom_closed_or_open(
+    ctrl: list[tuple[float, float]],
+    step_m: float = 3.0,
+    closed: bool = False,
+) -> tuple[np.ndarray, np.ndarray, float]:
     pts = np.asarray(ctrl, dtype=np.float64)
     if closed:
         pts_ext = np.vstack([pts[-1:], pts, pts[:2]])
@@ -170,21 +463,154 @@ def _catmull_rom_closed_or_open(ctrl: list[tuple[float, float]], step_m: float =
             dense.append((float(xy[0]), float(xy[1])))
     if closed:
         dense.append(dense[0])
-    else:
-        dense.append((float(pts[-1, 0]), float(pts[-1, 1])))
+        ls = LineString(dense)
+        total_len = float(ls.length)
+        n_unique = max(24, int(round(total_len / step_m)))
+        s_vals = np.linspace(0.0, total_len, n_unique, endpoint=False)
+        u_pts = np.asarray([ls.interpolate(float(s)).coords[0] for s in s_vals], dtype=np.float64)
+        e_sm = ndimage.gaussian_filter1d(u_pts[:, 0], sigma=1.3, mode="wrap")
+        n_sm = ndimage.gaussian_filter1d(u_pts[:, 1], sigma=1.3, mode="wrap")
+
+        # Rotate closed loop so index 0 sits at the flattest mid-side stretch (zero seam kink & smooth tanWin=3 wrap)
+        de_prev = e_sm - np.roll(e_sm, 1)
+        dn_prev = n_sm - np.roll(n_sm, 1)
+        de_next = np.roll(e_sm, -1) - e_sm
+        dn_next = np.roll(n_sm, -1) - n_sm
+        l1 = np.maximum(1e-9, np.hypot(de_prev, dn_prev))
+        l2 = np.maximum(1e-9, np.hypot(de_next, dn_next))
+        dots = np.clip((de_prev * de_next + dn_prev * dn_next) / (l1 * l2), -1.0, 1.0)
+        turn_deg = np.degrees(np.arccos(dots))
+        turn_win = ndimage.uniform_filter1d(turn_deg, size=7, mode="wrap")
+        best_k = int(np.argmin(turn_win))
+        e_sm = np.roll(e_sm, -best_k)
+        n_sm = np.roll(n_sm, -best_k)
+
+        # Explicitly close the loop so pts[-1] == pts[0] identically (0.000 m seam gap)
+        e_sm = np.append(e_sm, e_sm[0])
+        n_sm = np.append(n_sm, n_sm[0])
+        closed_len = float(np.sum(np.hypot(np.diff(e_sm), np.diff(n_sm))))
+        return e_sm, n_sm, closed_len
+
+    dense.append((float(pts[-1, 0]), float(pts[-1, 1])))
     ls = LineString(dense)
     return _resample_smooth_line(ls, step_m=step_m, offset_right_m=0.0)
 
 
-def _build_obstacle_surface(scene: SceneData, include_bridges: bool = True, include_trees: bool = False) -> np.ndarray:
-    """Build 0.5 m foreground obstacle elevation grid (3D LOD2 building roofs + optional bridges/trees)."""
+def _bilinear_weights(e: np.ndarray, n: np.ndarray):
+    cf = np.clip((e - E_MIN) / GRID_RES - 0.5, 0.0, GRID_W - 1.001)
+    rf = np.clip((N_MAX - n) / GRID_RES - 0.5, 0.0, GRID_H - 1.001)
+    c0 = np.floor(cf).astype(np.int32)
+    r0 = np.floor(rf).astype(np.int32)
+    dc = cf - c0
+    dr = rf - r0
+    w00 = (1.0 - dr) * (1.0 - dc)
+    w01 = (1.0 - dr) * dc
+    w10 = dr * (1.0 - dc)
+    w11 = dr * dc
+    return r0, c0, w00, w01, w10, w11
+
+
+def _sample_bilinear_dem(dem: np.ndarray, e: np.ndarray, n: np.ndarray) -> np.ndarray:
+    r0, c0, w00, w01, w10, w11 = _bilinear_weights(e, n)
+    return (
+        w00 * dem[r0, c0]
+        + w01 * dem[r0, c0 + 1]
+        + w10 * dem[r0 + 1, c0]
+        + w11 * dem[r0 + 1, c0 + 1]
+    ).astype(np.float64)
+
+
+def _sample_road_z(
+    scene: _AnimScene,
+    e: np.ndarray,
+    n: np.ndarray,
+    underpass_poly=None,
+    allowed_bridge_cls: tuple[int, ...] = (),
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bilinear DEM + class-filtered normalized bilinear bridge_z, plus underpass depth drop."""
+    r0, c0, w00, w01, w10, w11 = _bilinear_weights(e, n)
+    z_dem = (
+        w00 * scene.dem[r0, c0]
+        + w01 * scene.dem[r0, c0 + 1]
+        + w10 * scene.dem[r0 + 1, c0]
+        + w11 * scene.dem[r0 + 1, c0 + 1]
+    ).astype(np.float64)
+
+    on_bridge = np.zeros(len(e), dtype=bool)
+    z = z_dem.copy()
+    if allowed_bridge_cls:
+        cls_arr = np.asarray(allowed_bridge_cls, dtype=np.uint8)
+        b00 = np.isin(scene.bridge_cls[r0, c0], cls_arr)
+        b01 = np.isin(scene.bridge_cls[r0, c0 + 1], cls_arr)
+        b10 = np.isin(scene.bridge_cls[r0 + 1, c0], cls_arr)
+        b11 = np.isin(scene.bridge_cls[r0 + 1, c0 + 1], cls_arr)
+        bw00 = np.where(b00, w00, 0.0)
+        bw01 = np.where(b01, w01, 0.0)
+        bw10 = np.where(b10, w10, 0.0)
+        bw11 = np.where(b11, w11, 0.0)
+        bw_sum = bw00 + bw01 + bw10 + bw11
+        on_bridge = bw_sum > 0.25
+        bz_num = (
+            bw00 * scene.bridge_z[r0, c0]
+            + bw01 * scene.bridge_z[r0, c0 + 1]
+            + bw10 * scene.bridge_z[r0 + 1, c0]
+            + bw11 * scene.bridge_z[r0 + 1, c0 + 1]
+        )
+        bz_interp = bz_num / np.maximum(1e-6, bw_sum)
+        z = np.where(on_bridge, np.maximum(z_dem, bz_interp), z_dem)
+
+    if len(z) >= 5:
+        z = ndimage.gaussian_filter1d(z, sigma=1.2, mode="nearest")
+
+    z_vis = z.copy()
+    z_depth = z.copy()
+    if underpass_poly is not None:
+        p_under = prep(underpass_poly)
+        for i in range(len(e)):
+            if not on_bridge[i] and p_under.contains(Point(float(e[i]), float(n[i]))):
+                z_depth[i] -= 6.0
+    return z_vis, z_depth
+
+
+def _sample_rail_z(scene: _AnimScene, e: np.ndarray, n: np.ndarray) -> np.ndarray:
+    """Bilinear DEM + strictly flat bridge_z ONLY where bridge_cls == BR_RAIL_BRIDGE (4)."""
+    r0, c0, w00, w01, w10, w11 = _bilinear_weights(e, n)
+    z_dem = (
+        w00 * scene.dem[r0, c0]
+        + w01 * scene.dem[r0, c0 + 1]
+        + w10 * scene.dem[r0 + 1, c0]
+        + w11 * scene.dem[r0 + 1, c0 + 1]
+    ).astype(np.float64)
+
+    b00 = scene.bridge_cls[r0, c0] == BR_RAIL_BRIDGE
+    b01 = scene.bridge_cls[r0, c0 + 1] == BR_RAIL_BRIDGE
+    b10 = scene.bridge_cls[r0 + 1, c0] == BR_RAIL_BRIDGE
+    b11 = scene.bridge_cls[r0 + 1, c0 + 1] == BR_RAIL_BRIDGE
+    bw00 = np.where(b00, w00, 0.0)
+    bw01 = np.where(b01, w01, 0.0)
+    bw10 = np.where(b10, w10, 0.0)
+    bw11 = np.where(b11, w11, 0.0)
+    bw_sum = bw00 + bw01 + bw10 + bw11
+    on_rbr = bw_sum > 0.25
+    bz_num = (
+        bw00 * scene.bridge_z[r0, c0]
+        + bw01 * scene.bridge_z[r0, c0 + 1]
+        + bw10 * scene.bridge_z[r0 + 1, c0]
+        + bw11 * scene.bridge_z[r0 + 1, c0 + 1]
+    )
+    bz_interp = bz_num / np.maximum(1e-6, bw_sum)
+    z_raw = np.where(on_rbr, np.maximum(z_dem, bz_interp), z_dem)
+    z_sm = ndimage.gaussian_filter1d(z_raw, sigma=1.0, mode="nearest") if len(z_raw) >= 5 else z_raw
+    # Preserve strictly flat rail bridge elevation on BR_RAIL_BRIDGE spans!
+    return np.where(on_rbr, z_raw, z_sm) + 0.55
+
+
+def _build_obstacle_surface(scene: _AnimScene, include_bridges: bool = True) -> np.ndarray:
+    """Build 0.5 m foreground obstacle elevation grid (3D LOD2 building roofs + optional bridges)."""
     obs_z = scene.dem.astype(np.float32).copy()
-    if include_trees:
-        obs_z = np.maximum(obs_z, (scene.dem + scene.chm).astype(np.float32))
-    if include_bridges and hasattr(scene, "bridge_z") and hasattr(scene, "bridge_cls"):
+    if include_bridges:
         has_br = scene.bridge_cls > 0
         obs_z[has_br] = np.maximum(obs_z[has_br], scene.bridge_z[has_br] + 1.0)
-    # Stamp exact 3D building roof elevations onto roof triangles' bounding footprints
     roof_tris = scene.verts[scene.surf_type == 1]
     for tri in roof_tris:
         z_top = float(tri[:, 2].max())
@@ -197,43 +623,6 @@ def _build_obstacle_surface(scene: SceneData, include_bridges: bool = True, incl
     return obs_z
 
 
-def _sample_ground_z(dem: np.ndarray, e: np.ndarray, n: np.ndarray) -> np.ndarray:
-    cols = np.clip(((e - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
-    rows = np.clip(((N_MAX - n) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
-    z = dem[rows, cols].astype(np.float64)
-    return ndimage.gaussian_filter1d(z, sigma=2.0, mode="nearest") if len(z) >= 5 else z
-
-
-def _sample_road_z(
-    scene: SceneData,
-    e: np.ndarray,
-    n: np.ndarray,
-    underpass_poly=None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Sample road elevation returning (z_vis, z_depth):
-    - z_vis: smooth bare-earth / 3D bridge deck elevation for screen projection (no sudden screen jumps!)
-    - z_depth: sinks by -5.5 m inside railway underpasses/tunnels for 16-bit depth occlusion beneath tracks."""
-    cols = np.clip(((e - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
-    rows = np.clip(((N_MAX - n) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
-    z = scene.dem[rows, cols].astype(np.float64)
-    on_bridge = np.zeros(len(e), dtype=bool)
-    if hasattr(scene, "bridge_z") and hasattr(scene, "bridge_cls"):
-        br_z = scene.bridge_z[rows, cols].astype(np.float64)
-        on_bridge = scene.bridge_cls[rows, cols] > 0
-        z = np.where(on_bridge, np.maximum(z, br_z), z)
-    if len(z) >= 5:
-        z = ndimage.gaussian_filter1d(z, sigma=1.6, mode="nearest")
-    z_vis = z.copy()
-    z_depth = z.copy()
-    if underpass_poly is not None:
-        from shapely.prepared import prep
-        p_under = prep(underpass_poly)
-        for i in range(len(e)):
-            if not on_bridge[i] and p_under.contains(Point(float(e[i]), float(n[i]))):
-                z_depth[i] -= 6.0
-    return z_vis, z_depth
-
-
 def _compute_occlusion(
     obs_z: np.ndarray,
     cam: IsometricCamera,
@@ -242,7 +631,7 @@ def _compute_occlusion(
     z: np.ndarray,
     vehicle_h: float = 2.2,
 ) -> np.ndarray:
-    """Analytical 3D ray-march along orthographic camera ray to detect foreground building/tree occlusion."""
+    """Analytical 3D ray-march along orthographic camera ray to detect foreground building/bridge occlusion."""
     th = math.radians(cam.azimuth_from_deg)
     ray_de = math.sin(th)
     ray_dn = math.cos(th)
@@ -279,205 +668,535 @@ def _pack_path(
     z_depth: np.ndarray | None = None,
 ) -> list[list[float | int]]:
     px, py, _ = cam.project(e, n, z)
-    # Compute exact 16-bit camera depth at mid-vehicle elevation (cleanly clears road/bridge deck under tires,
-    # while properly testing behind foreground trees, buildings, overhead bridges, and railway underpasses!)
     zd_use = z if z_depth is None else z_depth
     _, _, pd_veh = cam.project(e, n, zd_use + vehicle_h * 0.72)
-    DEPTH_MIN, DEPTH_MAX = -2400.0, 2400.0
-    d_u16 = np.clip(np.round((pd_veh - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 65535.0), 0, 65535).astype(np.int32)
+    d_u16 = np.clip(
+        np.round((pd_veh - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 65535.0),
+        0,
+        65535,
+    ).astype(np.int32)
     u = (px + shift_x) / W_full
     v = (py + shift_y) / H_full
     if obs_z is not None:
         occ = _compute_occlusion(obs_z, cam, e, n, zd_use, vehicle_h=vehicle_h)
     else:
         occ = np.zeros(len(e), dtype=np.uint8)
-    return [[round(float(u[i]), 5), round(float(v[i]), 5), int(occ[i]), int(d_u16[i])] for i in range(len(e))]
+    return [
+        [round(float(u[i]), 5), round(float(v[i]), 5), int(occ[i]), int(d_u16[i])]
+        for i in range(len(e))
+    ]
+
+
+def _extract_double_track_rail(
+    rail_lines: list[LineString],
+    step_m: float = 3.0,
+) -> tuple[tuple[np.ndarray, np.ndarray, float], tuple[np.ndarray, np.ndarray, float]] | None:
+    """Extract true West (Gleis 2, SB) and East (Gleis 1, NB) SBB tracks via ±8 m perpendicular cross-sections."""
+    spine0 = _stitch_exact_path(
+        rail_lines,
+        (2683345.0, 1243350.0),
+        (2684250.0, 1240950.0),
+        subdiv_m=4.0,
+        snap_m=6.0,
+        bridge_m=12.0,
+    )
+    if spine0 is None or spine0.length < 200.0:
+        return None
+
+    e0, n0, _ = _resample_smooth_line(spine0, step_m=step_m, offset_right_m=0.0)
+    de = np.gradient(e0)
+    dn = np.gradient(n0)
+    nm = np.maximum(1e-6, np.hypot(de, dn))
+    # Right-hand unit normal for southbound (NE -> SW) points West / landward (Gleis 2)
+    rx0 = dn / nm
+    ry0 = -de / nm
+
+    rail_u = unary_union(rail_lines)
+    n_pts = len(e0)
+    ew = np.empty(n_pts, dtype=np.float64)
+    nw = np.empty(n_pts, dtype=np.float64)
+    ee = np.empty(n_pts, dtype=np.float64)
+    ne = np.empty(n_pts, dtype=np.float64)
+
+    def _collect_xy(geom) -> list[tuple[float, float]]:
+        if geom.is_empty:
+            return []
+        gt = geom.geom_type
+        if gt == "Point":
+            return [(float(geom.x), float(geom.y))]
+        if gt == "LineString":
+            mid = geom.interpolate(0.5, normalized=True)
+            return [(float(mid.x), float(mid.y))]
+        if hasattr(geom, "geoms"):
+            res: list[tuple[float, float]] = []
+            for sub in geom.geoms:
+                res.extend(_collect_xy(sub))
+            return res
+        return []
+
+    for i in range(n_pts):
+        seg = LineString([
+            (float(e0[i] - 8.0 * rx0[i]), float(n0[i] - 8.0 * ry0[i])),
+            (float(e0[i] + 8.0 * rx0[i]), float(n0[i] + 8.0 * ry0[i])),
+        ])
+        hits = _collect_xy(rail_u.intersection(seg))
+        best_pair: tuple[float, tuple[float, float], tuple[float, float]] | None = None
+        if len(hits) >= 2:
+            scored = [
+                ((hx - e0[i]) * rx0[i] + (hy - n0[i]) * ry0[i], (hx, hy))
+                for hx, hy in hits
+            ]
+            scored.sort(key=lambda x: x[0])
+            for a in range(len(scored)):
+                for b in range(a + 1, len(scored)):
+                    sep = scored[b][0] - scored[a][0]
+                    if 2.8 <= sep <= 6.0:
+                        mid_err = abs(0.5 * (scored[a][0] + scored[b][0]))
+                        if best_pair is None or mid_err < best_pair[0]:
+                            best_pair = (mid_err, scored[a][1], scored[b][1])
+        if best_pair is not None:
+            east_pt, west_pt = best_pair[1], best_pair[2]
+            ee[i], ne[i] = east_pt
+            ew[i], nw[i] = west_pt
+        else:
+            ew[i] = e0[i] + 2.05 * rx0[i]
+            nw[i] = n0[i] + 2.05 * ry0[i]
+            ee[i] = e0[i] - 2.05 * rx0[i]
+            ne[i] = n0[i] - 2.05 * ry0[i]
+
+    # Small sigma=0.7 keeps tracks cleanly on narrow Paradiesstrasse rail bridges with 0 platform hits;
+    # uniform linear arc-length resampling guarantees exact alignment between stop_frac and app.js index interpolation.
+    ew = ndimage.gaussian_filter1d(ew, sigma=0.7, mode="nearest")
+    nw = ndimage.gaussian_filter1d(nw, sigma=0.7, mode="nearest")
+    ee = ndimage.gaussian_filter1d(ee, sigma=0.7, mode="nearest")[::-1].copy()
+    ne = ndimage.gaussian_filter1d(ne, sigma=0.7, mode="nearest")[::-1].copy()
+
+    def _uniform_resample(e_arr: np.ndarray, n_arr: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
+        ls = LineString(list(zip(e_arr.tolist(), n_arr.tolist())))
+        total_len = float(ls.length)
+        n_u = max(4, int(round(total_len / step_m)) + 1)
+        ss = np.linspace(0.0, total_len, n_u)
+        u_pts = np.asarray([ls.interpolate(float(s)).coords[0] for s in ss], dtype=np.float64)
+        return u_pts[:, 0], u_pts[:, 1], total_len
+
+    return _uniform_resample(ew, nw), _uniform_resample(ee, ne)
+
+
+def project_bus_stops(
+    route_e: np.ndarray,
+    route_n: np.ndarray,
+    max_perp_m: float = 12.0,
+    min_edge_frac: float = 0.06,
+    min_gap_frac: float = 0.075,
+) -> tuple[list[float], list[str]]:
+    """Project official Kilchberg ZVV/DIDOK bus stops onto an LV95 road polyline."""
+    ls = LineString(list(zip(route_e.tolist(), route_n.tolist())))
+    L = float(ls.length)
+    if L < 100.0:
+        return [], []
+    hits: list[tuple[float, str]] = []
+    for name, se, sn in BUS_STOP_CATALOG:
+        pt = Point(se, sn)
+        if ls.distance(pt) <= max_perp_m:
+            frac = float(ls.project(pt) / L)
+            if min_edge_frac <= frac <= (1.0 - min_edge_frac):
+                hits.append((frac, name))
+    hits.sort(key=lambda x: x[0])
+    kept: list[tuple[float, str]] = []
+    for frac, name in hits:
+        if not kept or (frac - kept[-1][0]) >= min_gap_frac:
+            kept.append((frac, name))
+    return [round(f, 4) for f, _ in kept], [nm for _, nm in kept]
+
+
+def _extract_shoreline_uv(
+    scene: _AnimScene,
+    cam: IsometricCamera,
+    shift_x: float,
+    shift_y: float,
+    W_full: int,
+    H_full: int,
+    n_pts: int = 120,
+) -> list[list[float]]:
+    """Deterministically extract ordered SW -> NE Lake Zurich coastal shoreline from lake_mask & diorama_mask."""
+    water = scene.lake_mask.astype(bool) & scene.diorama_mask.astype(bool)
+    lbl, _ = ndimage.label(water)
+    vals, cnts = np.unique(lbl[lbl > 0], return_counts=True)
+    main_lake = lbl == vals[int(np.argmax(cnts))]
+
+    transform = from_bounds(E_MIN, N_MIN, E_MAX, N_MAX, GRID_W, GRID_H)
+    polys = [
+        shape(geom)
+        for geom, val in rio_shapes(main_lake.astype(np.uint8), mask=main_lake.astype(np.uint8), transform=transform)
+        if val == 1
+    ]
+    ring = np.asarray(max(polys, key=lambda p: p.area).exterior.coords[:-1], dtype=np.float64)
+
+    # Coastal vertices border dry land inside diorama_mask; straight aquarium glass cut-edges do not
+    land_dil = ndimage.binary_dilation(
+        scene.diorama_mask.astype(bool) & (~scene.lake_mask.astype(bool)),
+        iterations=4,
+    )
+    rc_c = np.clip(((ring[:, 0] - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
+    rc_r = np.clip(((N_MAX - ring[:, 1]) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
+    is_coast = land_dil[rc_r, rc_c]
+
+    rot = int(np.nonzero(~is_coast)[0][0])
+    is_coast_rot = np.roll(is_coast, -rot)
+    ring_rot = np.roll(ring, -rot, axis=0)
+    idx_t = np.nonzero(is_coast_rot)[0]
+    runs = np.split(idx_t, np.where(np.diff(idx_t) > 1)[0] + 1)
+    coast_xy = ring_rot[max(runs, key=len)]
+
+    # Enforce SW -> NE orientation (N increasing => u increasing, v decreasing => outward SE normal)
+    if coast_xy[0, 1] > coast_xy[-1, 1]:
+        coast_xy = coast_xy[::-1]
+
+    coast_simp = LineString(coast_xy).simplify(7.0, preserve_topology=False)
+    s_vals = np.linspace(0.0, float(coast_simp.length), n_pts)
+    pts = np.asarray([coast_simp.interpolate(float(s)).coords[0] for s in s_vals], dtype=np.float64)
+    e_sh = ndimage.gaussian_filter1d(pts[:, 0], sigma=1.5, mode="nearest")
+    n_sh = ndimage.gaussian_filter1d(pts[:, 1], sigma=1.5, mode="nearest")
+    px, py, _ = cam.project(e_sh, n_sh, np.full(n_pts, LAKE_SURFACE_Z, dtype=np.float64))
+    u_sh = (px + shift_x) / W_full
+    v_sh = (py + shift_y) / H_full
+    return [[round(float(u_sh[i]), 5), round(float(v_sh[i]), 5)] for i in range(n_pts)]
+
+
+def _bldg_ridge_apex(scene: _AnimScene, bidx: int) -> tuple[float, float, float]:
+    """Compute roof ridge apex (E, N, z_roof) from 3D LOD2 roof triangles for building bidx."""
+    b_list = scene.meta.get("buildings", [])
+    b_meta = b_list[bidx] if 0 <= bidx < len(b_list) else None
+    mask = (scene.bldg_idx == bidx) & (scene.surf_type == 1)
+    if np.any(mask):
+        rv = scene.verts[mask].reshape(-1, 3)
+        z_max = float(rv[:, 2].max())
+        top = rv[rv[:, 2] >= (z_max - 0.35)]
+        if len(top) > 0:
+            return float(top[:, 0].mean()), float(top[:, 1].mean()), z_max
+    if b_meta is not None:
+        return float(b_meta["e"]), float(b_meta["n"]), float(b_meta["z_roof"])
+    raise ValueError(f"Building index {bidx} not found in buildings metadata or mesh")
+
+
+def _bldg_roof_anchor(scene: _AnimScene, bidx: int) -> tuple[float, float, float]:
+    """Select a guaranteed on-roof 3D triangle centroid on the highest primary roof facet of building bidx.
+
+    Avoids concave/L-shaped bounding-box centroids that can fall outside the actual roof polygon.
+    """
+    mask = (scene.bldg_idx == bidx) & (scene.surf_type == 1)
+    if np.any(mask):
+        tris = scene.verts[mask]
+        v0 = tris[:, 0, :2]
+        v1 = tris[:, 1, :2]
+        v2 = tris[:, 2, :2]
+        areas = 0.5 * np.abs((v1[:, 0] - v0[:, 0]) * (v2[:, 1] - v0[:, 1]) - (v1[:, 1] - v0[:, 1]) * (v2[:, 0] - v0[:, 0]))
+        centroids = tris.mean(axis=1)
+        valid = np.nonzero(areas >= 5.0)[0]
+        cand = valid if len(valid) > 0 else np.arange(len(tris))
+        best = int(max(cand, key=lambda idx: (float(centroids[idx, 2]), float(areas[idx]))))
+        return float(centroids[best, 0]), float(centroids[best, 1]), float(centroids[best, 2])
+    return _bldg_ridge_apex(scene, bidx)
 
 
 def export_animations(mpp_full: float = 0.25) -> Path:
-    scene = SceneData()
+    scene = _load_anim_scene(RAW_CACHE_DIR)
     cam = IsometricCamera(mpp=mpp_full)
     cam, _, _, W_full, H_full, shift_x, shift_y, *_ = compute_full_canvas_geometry(scene, cam, None, True)
-    obs_z = _build_obstacle_surface(scene)
+
+    def proj_uv(e_pt: float, n_pt: float, z_pt: float) -> list[float]:
+        px, py, _ = cam.project(np.array([e_pt]), np.array([n_pt]), np.array([z_pt]))
+        return [round(float((px[0] + shift_x) / W_full), 5), round(float((py[0] + shift_y) / H_full), 5)]
 
     mvt = _load_mvt_features(RAW_CACHE_DIR)
     b_feat = json.loads((RAW_CACHE_DIR / "kilchberg_boundary_2056.geojson").read_text())
     kpoly = shape(b_feat["geometry"])
     lake_geoms = [g for g, p in mvt.get("water", []) if p.get("class") == "lake"]
-    dpoly = build_diorama_polygon(kpoly, unary_union(lake_geoms)).buffer(-8.0)
+    dpoly_rail = build_diorama_polygon(kpoly, unary_union(lake_geoms)).buffer(-1.0)
 
-    def get_clipped(cls_name: str) -> list[LineString]:
-        raw = [
-            g.intersection(dpoly)
-            for g, p in mvt.get("transportation", [])
-            if p.get("class") == cls_name and p.get("brunnel") != "tunnel"
-        ]
-        raw = [g for g in raw if not g.is_empty]
-        if not raw:
-            return []
-        merged = linemerge(unary_union(raw))
-        return [merged] if merged.geom_type == "LineString" else list(merged.geoms)
+    # 1. SBB Seebahn Double-Track Railway (True Gleis 2 SB & Gleis 1 NB, Flat Rail Bridges, DIDOK 8503200 Stops)
+    obs_z_rail = _build_obstacle_surface(scene, include_bridges=True)
+    raw_rail = [
+        g.intersection(dpoly_rail)
+        for g, p in mvt.get("transportation", [])
+        if p.get("class") == "rail" and p.get("brunnel") != "tunnel" and p.get("service") is None
+    ]
+    raw_rail = [g for g in raw_rail if not g.is_empty]
+    rail_lines: list[LineString] = []
+    if raw_rail:
+        merged_r = linemerge(unary_union(raw_rail))
+        rail_lines = _flatten_lines([merged_r])
 
-    # 1. SBB Seebahn Double-Track Railway (Northbound & Southbound through Bahnhof Kilchberg!)
-    rail_geoms = get_clipped("rail")
-    rail_spine = _stitch_longest_path(rail_geoms, (2683345.0, 1243225.0), (2684192.0, 1241024.0), snap_tol=6.0)
     trains_out = []
-    if rail_spine is not None:
-        # Station stop at Bahnhof Kilchberg (2683868, 1242045)
+    tracks = _extract_double_track_rail(rail_lines, step_m=3.0) if rail_lines else None
+    if tracks is not None:
+        (e_sb, n_sb, len_sb), (e_nb, n_nb, len_nb) = tracks
+        carriages = 4
+        # Canonical Bahnhof Kilchberg platform center (both Gleis 2 SB and Gleis 1 NB project directly here)
         bhf_pt = Point(2683868.0, 1242045.0)
-        stop_frac_south = float(rail_spine.project(bhf_pt) / rail_spine.length)
 
-        # Southbound track (Zürich HB -> Kilchberg -> Thalwil): right-hand Swiss rail = west/landward track
-        e_sb, n_sb, len_sb = _resample_smooth_line(rail_spine, step_m=3.0, offset_right_m=1.85)
-        z_sb = _sample_ground_z(scene.dem, e_sb, n_sb) + 0.55
+        # Southbound track (Gleis 2, West/landward)
+        ls_sb = LineString(list(zip(e_sb.tolist(), n_sb.tolist())))
+        stop_frac_south = float(ls_sb.project(bhf_pt) / ls_sb.length)
+        z_sb = _sample_rail_z(scene, e_sb, n_sb)
         trains_out.append({
             "id": "sbb_s8_south",
             "name": "SBB S-Bahn S8 (Zürich HB → Kilchberg → Pfäffikon SZ)",
             "kind": "sbb_dpz",
-            "carriages": 4,
+            "carriages": carriages,
             "length_m": round(len_sb, 1),
             "speed_mps": 18.5,
             "stop_frac": round(stop_frac_south, 4),
             "dwell_sec": 4.5,
             "phase": 0.12,
-            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, e_sb, n_sb, z_sb, vehicle_h=3.8),
+            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_rail, e_sb, n_sb, z_sb, vehicle_h=3.8),
         })
 
-        # Northbound track (Chur / Thalwil -> Kilchberg -> Zürich HB): reversed spine, right-hand = east/lakeward track
-        rail_north = LineString(list(reversed(list(rail_spine.coords))))
-        stop_frac_north = float(rail_north.project(bhf_pt) / rail_north.length)
-        e_nb, n_nb, len_nb = _resample_smooth_line(rail_north, step_m=3.0, offset_right_m=1.85)
-        z_nb = _sample_ground_z(scene.dem, e_nb, n_nb) + 0.55
+        # Northbound track (Gleis 1, East/lakeward)
+        ls_nb = LineString(list(zip(e_nb.tolist(), n_nb.tolist())))
+        stop_frac_north = float(ls_nb.project(bhf_pt) / ls_nb.length)
+        z_nb = _sample_rail_z(scene, e_nb, n_nb)
         trains_out.append({
             "id": "sbb_ic_north",
             "name": "SBB EuroCity / S24 (Thalwil → Kilchberg → Zürich HB)",
             "kind": "sbb_ic",
-            "carriages": 4,
+            "carriages": carriages,
             "length_m": round(len_nb, 1),
             "speed_mps": 21.0,
             "stop_frac": round(stop_frac_north, 4),
             "dwell_sec": 3.5,
             "phase": 0.58,
-            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z, e_nb, n_nb, z_nb, vehicle_h=3.8),
+            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_rail, e_nb, n_nb, z_nb, vehicle_h=3.8),
         })
+    del obs_z_rail
+    gc.collect()
 
-    # 2. Road Network: Seestrasse (ZVV Route 161 Buses + Cars), Dorfstrasse Viaduct, A3 Motorway, and Village Streets
-    obs_z_road = _build_obstacle_surface(scene, include_bridges=False, include_trees=False)
+    # 2. Road Network: All 8 Edge-to-Edge Corridors (Stitched UNCLIPPED -> Filleted -> Offset-Then-Clipped)
+    obs_z_road = _build_obstacle_surface(scene, include_bridges=False)
+    trans_feats = mvt.get("transportation", [])
+    trans_name_feats = mvt.get("transportation_name", [])
+
     road_tunnel_geoms = [
         g.buffer(5.5)
-        for g, p in mvt.get("transportation", [])
-        if p.get("class") != "rail" and (p.get("brunnel") == "tunnel" or (p.get("layer") is not None and p.get("layer") < 0))
+        for g, p in trans_feats
+        if p.get("class") != "rail"
+        and (p.get("brunnel") == "tunnel" or (p.get("layer") is not None and p.get("layer") < 0))
     ]
     rail_occ_geoms = [
         g.buffer(7.5)
-        for g, p in mvt.get("transportation", [])
+        for g, p in trans_feats
         if p.get("class") == "rail" and p.get("brunnel") != "tunnel"
     ]
     underpass_poly = unary_union(road_tunnel_geoms + rail_occ_geoms) if (road_tunnel_geoms or rail_occ_geoms) else None
 
     roads_out = []
-    prim_geoms = get_clipped("primary")
-    see_spine = _stitch_longest_path(prim_geoms, (2683371.0, 1243254.0), (2684410.0, 1241104.0), snap_tol=6.0)
-    if see_spine is not None:
-        for dir_id, ls_dir, phase0 in [
-            ("seestrasse_sb", see_spine, 0.0),
-            ("seestrasse_nb", LineString(list(reversed(list(see_spine.coords)))), 0.37),
-        ]:
-            er, nr, lr = _resample_smooth_line(ls_dir, step_m=3.2, offset_right_m=1.9)
-            zr, zr_d = _sample_road_z(scene, er, nr, underpass_poly)
-            roads_out.append({
-                "id": dir_id,
-                "kind": "seestrasse",
-                "length_m": round(lr, 1),
-                "speed_mps": 11.5,
-                "has_bus": True,
-                "bus_count": 2,
-                "car_count": 12,
-                "phase": phase0,
-                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, er, nr, zr + 0.35, vehicle_h=2.4, z_depth=zr_d + 0.35),
-            })
 
-    # Dedicated Dorfstrasse Horseshoe Viaduct route (Seestrasse Bendlikon -> up Dorfstrasse viaduct -> Dorf!)
-    minor_all = get_clipped("minor")
-    sec_all = get_clipped("secondary") + get_clipped("tertiary")
-    dorf_pool = prim_geoms + sec_all + minor_all
-    dorf_spine = _stitch_longest_path(dorf_pool, (2684040.0, 1241872.0), (2683620.0, 1241920.0), snap_tol=12.0)
-    if dorf_spine is not None and dorf_spine.length >= 180.0:
-        for dir_id, ls_dir, phase0, has_b in [
-            ("dorfstrasse_viaduct_up", dorf_spine, 0.14, True),
-            ("dorfstrasse_viaduct_dn", LineString(list(reversed(list(dorf_spine.coords)))), 0.62, True),
-        ]:
-            ed, nd, ld = _resample_smooth_line(ls_dir, step_m=2.6, offset_right_m=1.55)
-            zd, zd_d = _sample_road_z(scene, ed, nd, underpass_poly)
-            roads_out.append({
-                "id": dir_id,
-                "kind": "viaduct",
-                "length_m": round(ld, 1),
-                "speed_mps": 8.5,
-                "has_bus": has_b,
-                "bus_count": 1,
-                "car_count": 5,
-                "phase": phase0,
-                "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, ed, nd, zd + 0.35, vehicle_h=2.4, z_depth=zd_d + 0.35),
-            })
+    def _emit_road(
+        route_id: str,
+        kind: str,
+        ls_raw: LineString,
+        step_m: float,
+        offset_right_m: float,
+        sig_m: float,
+        speed_mps: float,
+        has_bus: bool,
+        bus_count: int,
+        car_count: int,
+        phase: float,
+        allowed_bridge_cls: tuple[int, ...] = (),
+        vehicle_h: float = 2.4,
+    ) -> None:
+        clipped = _offset_then_clip(
+            ls_raw,
+            scene.diorama_mask,
+            step_m=step_m,
+            offset_right_m=offset_right_m,
+            sig_m=sig_m,
+            inset_m=0.5,
+        )
+        if clipped is None:
+            return
+        er, nr, lr = clipped
+        zr, zr_d = _sample_road_z(scene, er, nr, underpass_poly, allowed_bridge_cls=allowed_bridge_cls)
+        entry: dict = {
+            "id": route_id,
+            "kind": kind,
+            "length_m": round(lr, 1),
+            "speed_mps": speed_mps,
+            "has_bus": has_bus,
+            "car_count": car_count,
+            "phase": phase,
+        }
+        if has_bus:
+            entry["bus_count"] = bus_count
+            stops, stop_names = project_bus_stops(er, nr)
+            if stops:
+                entry["stops"] = stops
+                entry["stop_names"] = stop_names
+        entry["pts"] = _pack_path(
+            cam,
+            shift_x,
+            shift_y,
+            W_full,
+            H_full,
+            obs_z_road,
+            er,
+            nr,
+            zr + 0.35,
+            vehicle_h=vehicle_h,
+            z_depth=zr_d + 0.35,
+        )
+        roads_out.append(entry)
 
-    mw_geoms = sorted(get_clipped("motorway"), key=lambda g: -g.length)
-    for idx_m, mg in enumerate(mw_geoms[:2]):
-        if mg.length < 300.0:
-            continue
-        em, nm, lm = _resample_smooth_line(mg, step_m=3.5, offset_right_m=0.0)
-        zm, zm_d = _sample_road_z(scene, em, nm, underpass_poly)
-        roads_out.append({
-            "id": f"a3_motorway_{idx_m}",
-            "kind": "motorway",
-            "length_m": round(lm, 1),
-            "speed_mps": 24.0,
-            "has_bus": False,
-            "car_count": 12,
-            "phase": idx_m * 0.41,
-            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, em, nm, zm + 0.35, vehicle_h=2.4, z_depth=zm_d + 0.35),
-        })
+    # Corridor 1: Seestrasse (NE <-> SW)
+    see_geoms = [
+        g for g, p in trans_feats
+        if p.get("class") == "primary" and p.get("is_route") == 5 and p.get("brunnel") != "tunnel"
+    ]
+    see_sb_raw = _stitch_exact_path(
+        see_geoms,
+        (2683200.0, 1243450.0),
+        (2684550.0, 1240800.0),
+        subdiv_m=4.0,
+        snap_m=1.2,
+        bridge_m=3.5,
+    )
+    see_nb_raw = LineString(list(reversed(list(see_sb_raw.coords)))) if see_sb_raw is not None else None
+    if see_sb_raw is not None and see_nb_raw is not None:
+        _emit_road(
+            "seestrasse_sb", "seestrasse", see_sb_raw,
+            step_m=3.0, offset_right_m=1.80, sig_m=3.6,
+            speed_mps=11.5, has_bus=True, bus_count=2, car_count=12, phase=0.0,
+            allowed_bridge_cls=(), vehicle_h=2.4,
+        )
+        _emit_road(
+            "seestrasse_nb", "seestrasse", see_nb_raw,
+            step_m=3.0, offset_right_m=1.80, sig_m=3.6,
+            speed_mps=11.5, has_bus=True, bus_count=2, car_count=12, phase=0.37,
+            allowed_bridge_cls=(), vehicle_h=2.4,
+        )
 
-    # Prefer wider secondary/tertiary collector streets (Alte Landstrasse, Schorenstrasse, Dorfstrasse)
-    # before falling back to longer residential streets; never put buses on narrow residential lanes!
-    collector_geoms = [g for g in sorted(sec_all, key=lambda s: -s.length) if g.length >= 260.0]
-    minor_geoms = [g for g in sorted(minor_all, key=lambda s: -s.length) if g.length >= 370.0]
-    village_pool = (collector_geoms[:3] + minor_geoms)[:5]
-    for idx_v, vg in enumerate(village_pool):
-        is_collector = idx_v < min(3, len(collector_geoms))
-        lane_off = 1.35 if is_collector else 0.75
-        ev, nv, lv = _resample_smooth_line(vg, step_m=3.2, offset_right_m=lane_off)
-        zv, zv_d = _sample_road_z(scene, ev, nv, underpass_poly)
-        has_b = is_collector and idx_v in (0, 1)
-        roads_out.append({
-            "id": f"village_st_{idx_v}",
-            "kind": "village",
-            "length_m": round(lv, 1),
-            "speed_mps": 9.5 if is_collector else 7.5,
-            "has_bus": has_b,
-            "bus_count": 1 if has_b else 0,
-            "car_count": 4 if is_collector else 2,
-            "phase": (idx_v * 0.23) % 1.0,
-            "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, obs_z_road, ev, nv, zv + 0.35, vehicle_h=2.2, z_depth=zv_d + 0.35),
-        })
+    # Corridor 2: Alte Landstrasse / Kilchbergstrasse (SW <-> NE)
+    alte_geoms = [
+        g for g, p in trans_name_feats
+        if p.get("name") in ("Alte Landstrasse", "Kilchbergstrasse")
+    ]
+    alte_eb_stitched = _stitch_exact_path(
+        alte_geoms,
+        (2684180.0, 1240370.0),
+        (2682950.0, 1243680.0),
+        subdiv_m=4.0,
+        snap_m=1.5,
+        bridge_m=10.0,
+    )
+    alte_eb_raw = (
+        _fillet_polyline(list(alte_eb_stitched.coords), corner_deg=20.0, max_trim_m=6.0, n_arc=8)
+        if alte_eb_stitched is not None
+        else None
+    )
+    alte_wb_raw = LineString(list(reversed(list(alte_eb_raw.coords)))) if alte_eb_raw is not None else None
 
-    # 3. Lake Zurich ZSG Passenger Steamer (docking at Bendlikon Pier!) & Leisure Sailboats
+    # Corridor 3: Dorfstrasse Horseshoe Viaduct (SW Seestrasse -> Bendlikon -> Viaduct bid=10 -> Gemeindehaus -> Mönchhof -> NE)
+    dorf_geoms = [
+        g for g, p in trans_feats
+        if p.get("is_route") == 11 and p.get("class") in ("primary", "minor") and p.get("brunnel") != "tunnel"
+    ]
+    bendlikon_junc = (2684040.7, 1241872.4)
+    viaduct_apex = (2683973.1, 1241714.5)
+    gemeindehaus_pt = (2683785.4, 1241907.6)
+    moenchhof_junc = (2683629.4, 1242300.0)
+
+    leg1 = _stitch_exact_path(dorf_geoms, bendlikon_junc, viaduct_apex, subdiv_m=4.0, snap_m=1.2, bridge_m=3.5)
+    leg2 = _stitch_exact_path(dorf_geoms, viaduct_apex, gemeindehaus_pt, subdiv_m=4.0, snap_m=1.2, bridge_m=3.5)
+    leg3 = _stitch_exact_path(dorf_geoms, gemeindehaus_pt, moenchhof_junc, subdiv_m=4.0, snap_m=1.2, bridge_m=3.5)
+    if leg1 is not None and leg2 is not None and leg3 is not None and see_nb_raw is not None and alte_eb_raw is not None:
+        dorf_core_coords = list(leg1.coords) + list(leg2.coords)[1:] + list(leg3.coords)[1:]
+        dorf_core_up = _fillet_polyline(dorf_core_coords, corner_deg=20.0, max_trim_m=6.5, n_arc=10)
+        dorf_up_1 = _join_with_fillet(see_nb_raw, dorf_core_up, bendlikon_junc, trim_m=8.0, n_arc=12)
+        dorf_up_raw = _join_with_fillet(dorf_up_1, alte_eb_raw, moenchhof_junc, trim_m=8.0, n_arc=12)
+        dorf_dn_raw = LineString(list(reversed(list(dorf_up_raw.coords))))
+
+        _emit_road(
+            "dorfstrasse_viaduct_up", "viaduct", dorf_up_raw,
+            step_m=2.0, offset_right_m=1.25, sig_m=3.8,
+            speed_mps=8.5, has_bus=True, bus_count=2, car_count=7, phase=0.14,
+            allowed_bridge_cls=(BR_ROAD_VIADUCT,), vehicle_h=2.4,
+        )
+        _emit_road(
+            "dorfstrasse_viaduct_dn", "viaduct", dorf_dn_raw,
+            step_m=2.0, offset_right_m=1.25, sig_m=3.8,
+            speed_mps=8.5, has_bus=True, bus_count=2, car_count=7, phase=0.62,
+            allowed_bridge_cls=(BR_ROAD_VIADUCT,), vehicle_h=2.4,
+        )
+
+    # Corridor 4: A3 Motorway (NB a3_motorway_0 & SB a3_motorway_1 — rides BR_MOTORWAY only, ignores overhead bid=9!)
+    mw_lines = _flatten_lines([
+        g for g, p in trans_feats
+        if p.get("class") == "motorway" and p.get("brunnel") != "tunnel"
+    ])
+    mw_nb_segs = [ls for ls in mw_lines if ls.coords[-1][1] > ls.coords[0][1]]
+    mw_sb_segs = [ls for ls in mw_lines if ls.coords[-1][1] <= ls.coords[0][1]]
+
+    mw_nb_raw = _stitch_exact_path(
+        mw_nb_segs, (2683540.0, 1240370.0), (2682659.0, 1242040.0),
+        subdiv_m=4.0, snap_m=1.2, bridge_m=3.5,
+    )
+    mw_sb_raw = _stitch_exact_path(
+        mw_sb_segs, (2682650.0, 1242040.0), (2683528.0, 1240370.0),
+        subdiv_m=4.0, snap_m=1.2, bridge_m=3.5,
+    )
+    if mw_nb_raw is not None:
+        _emit_road(
+            "a3_motorway_0", "motorway", mw_nb_raw,
+            step_m=3.2, offset_right_m=0.0, sig_m=3.2,
+            speed_mps=24.0, has_bus=False, bus_count=0, car_count=12, phase=0.0,
+            allowed_bridge_cls=(BR_MOTORWAY,), vehicle_h=2.4,
+        )
+    if mw_sb_raw is not None:
+        _emit_road(
+            "a3_motorway_1", "motorway", mw_sb_raw,
+            step_m=3.2, offset_right_m=0.0, sig_m=3.2,
+            speed_mps=24.0, has_bus=False, bus_count=0, car_count=12, phase=0.41,
+            allowed_bridge_cls=(BR_MOTORWAY,), vehicle_h=2.4,
+        )
+
+    # Emit Corridor 2 (Alte Landstrasse EB/WB) with 1.05 m offset (100% on narrow hw=1.85m mid-section) + full occlusion
+    if alte_eb_raw is not None and alte_wb_raw is not None:
+        _emit_road(
+            "alte_landstrasse_eb", "village", alte_eb_raw,
+            step_m=2.4, offset_right_m=1.05, sig_m=4.2,
+            speed_mps=9.2, has_bus=True, bus_count=1, car_count=6, phase=0.11,
+            allowed_bridge_cls=(), vehicle_h=2.2,
+        )
+        _emit_road(
+            "alte_landstrasse_wb", "village", alte_wb_raw,
+            step_m=2.4, offset_right_m=1.05, sig_m=4.2,
+            speed_mps=9.2, has_bus=True, bus_count=1, car_count=6, phase=0.58,
+            allowed_bridge_cls=(), vehicle_h=2.2,
+        )
+    del obs_z_road
+    gc.collect()
+
+    # 3. Lake Zurich ZSG Passenger Steamer (Edge-to-Edge NE -> SW docking at canonical Badweg 1.1) & Leisure Vessels
     ships_out = []
+    dock_pt = (2684074.4, 1242080.2)  # +8.5 m lakeward along outer pier normal of Badweg 1.1
     steamer_ctrl = [
-        (2683865.0, 1243195.0),
-        (2683965.0, 1242820.0),
-        (2684065.0, 1242410.0),
-        (2684145.0, 1242085.0),
-        (2684178.0, 1241902.0),  # Bendlikon ZSG Steamer Landing!
-        (2684258.0, 1241715.0),
-        (2684388.0, 1241485.0),  # Offshore past Schooren & Lindt Home of Chocolate
-        (2684545.0, 1241250.0),
-        (2684665.0, 1241085.0),
+        (2683825.0, 1243358.0),  # NE Lake Zurich aquarium cut-edge entry
+        (2683910.0, 1243040.0),  # Offshore Mönchhof / Horn
+        (2684015.0, 1242670.0),  # Offshore Paradies / Mönchhof
+        (2684095.0, 1242330.0),  # Wide offshore sweep north of Bendlikon Bay
+        (2684068.0, 1242142.0),  # Aligned berthing approach NNW of Badweg 1.1
+        dock_pt,                 # Bendlikon ZSG Steamer Pier (Badweg 1.1 outer pontoon)
+        (2684116.0, 1242008.0),  # Smooth departure clearing south-side moored boats
+        (2684265.0, 1241830.0),  # Offshore past Bendlikon south jetty
+        (2684405.0, 1241515.0),  # Offshore past Seebad Kilchberg & Lindt HoC
+        (2684545.0, 1241275.0),  # Offshore past Sulzergut
+        (2684670.0, 1241098.0),  # SW Lake Zurich aquarium cut-edge exit
     ]
     es_st, ns_st, len_st = _catmull_rom_closed_or_open(steamer_ctrl, step_m=3.5, closed=False)
     zs_st = np.full(len(es_st), LAKE_SURFACE_Z + 0.25, dtype=np.float64)
-    st_ls = LineString(list(zip(es_st, ns_st)))
-    pier_frac = float(st_ls.project(Point(2684178.0, 1241902.0)) / st_ls.length)
+    st_ls = LineString(list(zip(es_st.tolist(), ns_st.tolist())))
+    pier_frac = float(st_ls.project(Point(dock_pt)) / st_ls.length)
     ships_out.append({
         "id": "zsg_ms_helvetia",
         "name": "ZSG Lake Zurich Steamer (Zürich Bürkliplatz → Kilchberg Bendlikon → Thalwil)",
@@ -487,7 +1206,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         "stop_frac": round(pier_frac, 4),
         "dwell_sec": 5.5,
         "phase": 0.22,
-        "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, None, es_st, ns_st, zs_st),
+        "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, None, es_st, ns_st, zs_st, vehicle_h=2.8),
     })
 
     boat_loops = [
@@ -518,62 +1237,192 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "pts": _pack_path(cam, shift_x, shift_y, W_full, H_full, None, eb, nb, zb),
         })
 
-    # 4. Subtle 90s Pixel-Art Ambient Micro-Animations (Chimney Steam, Swiss Flags, Lake Sparkles & Gliding Gulls)
-    def proj_uv(e_pt: float, n_pt: float, z_pt: float) -> list[float]:
-        px, py, _ = cam.project(np.array([e_pt]), np.array([n_pt]), np.array([z_pt]))
-        return [round(float((px[0] + shift_x) / W_full), 5), round(float((py[0] + shift_y) / H_full), 5)]
+    # 4. Ambient Anchors (Chimney Steam, Village Chimneys, Fountains, Swiss Flags, Gulls, Shoreline, Vignettes)
+    bldgs_meta = scene.meta.get("buildings", [])
 
-    chimney_uv = proj_uv(2684156.7, 1241360.1, 455.0)
+    # Lindt Hochkamin (idx=1773, Pilgerweg 52, 43.6 m brick chimney)
+    if len(bldgs_meta) > 1773 and bldgs_meta[1773].get("objektart") == "Hochkamin":
+        b_chim = bldgs_meta[1773]
+        chimney_uv = proj_uv(float(b_chim["e"]), float(b_chim["n"]), float(b_chim["z_roof"]) + 0.4)
+    else:
+        chimney_uv = proj_uv(2684156.7, 1241360.1, 455.0)
+
+    # 4 Swiss flags (preserve index order so fIdx===3 keeps the Kilchberg municipal crest flag in app.js!)
+    if len(bldgs_meta) > 1390:
+        b_seebad = bldgs_meta[1390]
+        seebad_flag_uv = proj_uv(float(b_seebad["e"]), float(b_seebad["n"]), float(b_seebad["z_roof"]))
+    else:
+        seebad_flag_uv = proj_uv(2684263.1, 1241521.0, 415.1)
+
+    if len(bldgs_meta) > 856:
+        ge, gn, gz = _bldg_roof_anchor(scene, 856)
+        gem_flag_uv = proj_uv(ge, gn, gz)
+    else:
+        gem_flag_uv = proj_uv(2683610.2, 1242084.4, 496.1)
+
     flags_out = [
-        {"name": "Bendlikon Pier", "uv": proj_uv(2684160.0, 1241898.0, 412.2)},
-        {"name": "Seebad Kilchberg", "uv": proj_uv(2684272.0, 1241515.0, 412.2)},
+        {"name": "Bendlikon Pier", "uv": proj_uv(2684061.0, 1242076.0, 410.2)},
+        {"name": "Seebad Kilchberg", "uv": seebad_flag_uv},
         {"name": "Lindt Crest Tower", "uv": proj_uv(2684234.0, 1241352.0, 435.2)},
-        {"name": "Bahnhof / Gemeindehaus", "uv": proj_uv(2683786.0, 1242048.0, 455.8)},
+        {"name": "Bahnhof / Gemeindehaus", "uv": gem_flag_uv},
     ]
 
-    # Gliding white Lake Zurich gulls circling above Bendlikon Bay & Schooren shore
+    # 10 curated pitched-roof residential chimneys projected dynamically from 3D LOD2 ridge vertices
+    village_chimneys_out = []
+    for bidx, ph in VILLAGE_CHIMNEY_SPECS:
+        re, rn, rz = _bldg_ridge_apex(scene, bidx)
+        cuv = proj_uv(re, rn, rz + 0.8)
+        village_chimneys_out.append({"u": cuv[0], "v": cuv[1], "phase": ph})
+
+    # 3 verified Kilchberg Dorfbrunnen fountains projected at bilinear DEM + 0.5 m
+    fountains_out = []
+    for fname, fe, fn in FOUNTAIN_SPECS:
+        fz = float(_sample_bilinear_dem(scene.dem, np.array([fe]), np.array([fn]))[0]) + 0.5
+        fuv = proj_uv(fe, fn, fz)
+        fountains_out.append({"u": fuv[0], "v": fuv[1], "name": fname})
+
+    # 4 open-water Lake Zurich gull orbits (canonical pixel-radii schema)
     gulls_out = [
-        {"uv": proj_uv(2684240.0, 1241920.0, 434.0), "rx": 48, "ry": 22, "spd": 0.42, "ph": 0.1},
-        {"uv": proj_uv(2684360.0, 1241560.0, 438.0), "rx": 54, "ry": 24, "spd": 0.36, "ph": 0.55},
+        {"uv": proj_uv(2684190.0, 1242120.0, 435.0), "rx": 48, "ry": 22, "spd": 0.42, "ph": 0.10},
+        {"uv": proj_uv(2684260.0, 1241880.0, 434.0), "rx": 46, "ry": 21, "spd": 0.39, "ph": 0.35},
+        {"uv": proj_uv(2684380.0, 1241560.0, 438.0), "rx": 54, "ry": 24, "spd": 0.36, "ph": 0.58},
         {"uv": proj_uv(2684050.0, 1242560.0, 436.0), "rx": 42, "ry": 19, "spd": 0.48, "ph": 0.82},
     ]
 
-    open_water = scene.lake_mask & scene.diorama_mask
-    open_water = ndimage.binary_erosion(open_water, iterations=35)
-    wr, wc = np.nonzero(open_water)
-    glints_out = []
-    if len(wr) > 0:
-        rng = np.random.default_rng(1899)
-        pick = rng.choice(len(wr), size=min(72, len(wr)), replace=False)
-        ge = E_MIN + (wc[pick] + 0.5) * GRID_RES
-        gn = N_MAX - (wr[pick] + 0.5) * GRID_RES
-        gz = np.full(len(pick), LAKE_SURFACE_Z, dtype=np.float64)
-        gpx, gpy, _ = cam.project(ge, gn, gz)
-        gu = (gpx + shift_x) / W_full
-        gv = (gpy + shift_y) / H_full
-        for i in range(len(pick)):
-            glints_out.append([round(float(gu[i]), 5), round(float(gv[i]), 5), round(float(rng.random()), 3)])
+    # Deterministic 120-point ordered SW -> NE Lake Zurich coastal shoreline
+    shoreline_out = _extract_shoreline_uv(scene, cam, shift_x, shift_y, W_full, H_full, n_pts=120)
+
+    # LV95-projected landmark vignette anchors (including St. Elisabeth freestanding bell tower fix)
+    if len(bldgs_meta) > 1254:
+        b_st_e = bldgs_meta[1254]
+        st_e_e, st_e_n = float(b_st_e["e"]), float(b_st_e["n"])
+        st_e_apex = float(b_st_e["z_roof"])
+        st_e_belfry = st_e_apex - 6.0
+    else:
+        st_e_e, st_e_n, st_e_belfry, st_e_apex = 2683480.0, 1241656.0, 512.0, 518.0
+
+    sports_fields = scene.meta.get("sports_fields", [])
+
+    def _proj_field_vec(sf: dict, scale_l: float, scale_w: float) -> tuple[list[float], list[float], list[float]]:
+        ce, cn, cz = float(sf["e"]), float(sf["n"]), float(sf["z"])
+        ang = float(sf["angle"])
+        hl = 0.5 * float(sf["length"]) * scale_l
+        hw = 0.5 * float(sf["width"]) * scale_w
+        ca, sa = math.cos(ang), math.sin(ang)
+        uv_c = proj_uv(ce, cn, cz)
+        uv_l = proj_uv(ce + hl * ca, cn + hl * sa, cz)
+        uv_w = proj_uv(ce - hw * sa, cn + hw * ca, cz)
+        return (
+            uv_c,
+            [round(uv_l[0] - uv_c[0], 5), round(uv_l[1] - uv_c[1], 5)],
+            [round(uv_w[0] - uv_c[0], 5), round(uv_w[1] - uv_c[1], 5)],
+        )
+
+    if len(sports_fields) >= 4:
+        sf_hoch = sports_fields[3]
+        hoch_c, hoch_hl_raw, hoch_hw_raw = _proj_field_vec(sf_hoch, scale_l=0.957, scale_w=0.937)
+        # Orient half_l SW -> NE (positive du) and half_w toward lake (positive dv) matching app.js pitch axis
+        hoch_hl = hoch_hl_raw if hoch_hl_raw[0] >= 0.0 else [-hoch_hl_raw[0], -hoch_hl_raw[1]]
+        hoch_hw = hoch_hw_raw if hoch_hw_raw[1] >= 0.0 else [-hoch_hw_raw[0], -hoch_hw_raw[1]]
+        hoch_vignette = {"center": hoch_c, "half_l": hoch_hl, "half_w": hoch_hw}
+    else:
+        hoch_vignette = {
+            "center": [0.31377, 0.22953],
+            "half_l": [0.01364, -0.00936],
+            "half_w": [0.00506, 0.00945],
+        }
+
+    tc_vignettes = []
+    if len(sports_fields) >= 3:
+        for sf_idx in (1, 2, 0):
+            sf_tc = sports_fields[sf_idx]
+            ce, cn, cz = float(sf_tc["e"]), float(sf_tc["n"]), float(sf_tc["z"])
+            ang = float(sf_tc["angle"])
+            hl = 0.5 * float(sf_tc["length"]) * 0.90
+            hw = 0.5 * float(sf_tc["width"]) * 0.75
+            ca, sa = math.cos(ang), math.sin(ang)
+            p_a = proj_uv(ce - hl * ca, cn - hl * sa, cz)
+            p_b = proj_uv(ce + hl * ca, cn + hl * sa, cz)
+            sw_uv, ne_uv = (p_a, p_b) if p_a[0] <= p_b[0] else (p_b, p_a)
+            uv_c = proj_uv(ce, cn, cz)
+            uv_lat = proj_uv(ce - hw * sa, cn + hw * ca, cz)
+            lat_vec = [round(uv_lat[0] - uv_c[0], 5), round(uv_lat[1] - uv_c[1], 5)]
+            if lat_vec[1] < 0.0:
+                lat_vec = [-lat_vec[0], -lat_vec[1]]
+            tc_vignettes.append({"sw": sw_uv, "ne": ne_uv, "lat": lat_vec})
+
+    vignettes_out = {
+        "reformierte_kirche": {
+            "clock": proj_uv(2683413.0, 1241288.0, 529.6),
+            "belfry": proj_uv(2683413.0, 1241288.0, 537.4),
+            "spire": proj_uv(2683413.0, 1241288.0, 546.2),
+        },
+        "st_elisabeth": {
+            "belfry": proj_uv(st_e_e, st_e_n, st_e_belfry),
+            "apex": proj_uv(st_e_e, st_e_n, st_e_apex),
+        },
+        "lindt_hoc": {
+            "atrium": proj_uv(2684128.8, 1241412.7, 420.0),
+            "plaza": proj_uv(2684129.0, 1241412.0, 413.9),
+        },
+        "bendlikon_pier": {
+            "pier": proj_uv(2684061.0, 1242076.0, 410.2),
+            "pax": proj_uv(2684054.3, 1242075.8, 407.2),
+            "beacon": proj_uv(2684057.0, 1242086.0, 407.5),
+        },
+        "bahnhof_kilchberg": {
+            "plat_sw": proj_uv(2683866.6, 1242011.4, 424.6),
+            "plat_ne": proj_uv(2683855.9, 1242057.8, 424.7),
+            "footbridge": [
+                proj_uv(2683841.8, 1242055.5, 424.0),
+                proj_uv(2683860.3, 1242064.1, 424.0),
+            ],
+            "signal": proj_uv(2683851.2, 1242071.4, 425.6),
+        },
+        "seebad_kilchberg": {
+            "pool": proj_uv(2684287.7, 1241476.0, 405.7),
+            "jetty": [
+                proj_uv(2684303.3, 1241484.0, 406.5),
+                proj_uv(2684334.6, 1241505.7, 406.5),
+            ],
+            "beacon": proj_uv(2684337.0, 1241507.1, 407.0),
+        },
+        "sportplatz_hochweid": hoch_vignette,
+        "tc_kilchberg": tc_vignettes,
+        "cf_meyer_haus": {
+            "center": proj_uv(2683690.0, 1241830.0, 465.0),
+        },
+    }
 
     payload = {
         "canvas_width": W_full,
         "canvas_height": H_full,
         "mpp": mpp_full,
+        "depth_min": DEPTH_MIN,
+        "depth_max": DEPTH_MAX,
         "trains": trains_out,
         "roads": roads_out,
         "ships": ships_out,
         "ambient": {
             "chimney_steam": {"name": "Lindt Hochkamin (43.6 m)", "uv": chimney_uv},
+            "village_chimneys": village_chimneys_out,
+            "fountains": fountains_out,
             "swiss_flags": flags_out,
-            "lake_glints": glints_out,
             "gulls": gulls_out,
+            "shoreline": shoreline_out,
+            "vignettes": vignettes_out,
         },
     }
+
     out_p = DOCS_DIR / "data" / "kilchberg_animations.json"
     out_p.parent.mkdir(parents=True, exist_ok=True)
     out_p.write_text(json.dumps(payload, separators=(",", ":")))
     print(
         f"[anim] Exported {len(trains_out)} trains, {len(roads_out)} roads, "
-        f"{len(ships_out)} ships/boats, {len(flags_out)} Swiss flags -> {out_p} ({out_p.stat().st_size // 1024} KB)"
+        f"{len(ships_out)} ships/boats, {len(flags_out)} flags, "
+        f"{len(village_chimneys_out)} chimneys, {len(fountains_out)} fountains, "
+        f"{len(gulls_out)} gulls, {len(shoreline_out)} shoreline pts -> "
+        f"{out_p} ({out_p.stat().st_size // 1024} KB)"
     )
     return out_p
 
