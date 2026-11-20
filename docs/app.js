@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '5.2';
+  const ASSET_VER = '5.3';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -3215,11 +3215,11 @@
         ctx.fillRect(Math.round(sx + dir * 2.0 * px), Math.round(sy - 1.9 * px), Math.max(1, Math.round(0.9 * px)), Math.max(1, Math.round(0.7 * px)));
       }
 
-      // 2 Stand-Up Paddleboarders (SUPs) gliding peacefully parallel to Kilchberg's shore (Day & Alpenglow!)
+      // 2 Stand-Up Paddleboarders (SUPs) gliding peacefully at realistic ~1.2 m/s parallel to Kilchberg's shore (Day & Alpenglow!)
       if (!isNight) {
         const sups = [
-          { u0: 0.562, v0: 0.606, u1: 0.625, v1: 0.562, spd: 0.022, ph: 0.15, board: '#38bdf8', shirt: '#f43f5e' },
-          { u0: 0.435, v0: 0.720, u1: 0.495, v1: 0.665, spd: 0.019, ph: 0.62, board: '#fbbf24', shirt: '#0d9488' },
+          { u0: 0.562, v0: 0.606, u1: 0.625, v1: 0.562, spd: 0.0024, ph: 0.15, board: '#38bdf8', shirt: '#f43f5e' },
+          { u0: 0.435, v0: 0.720, u1: 0.495, v1: 0.665, spd: 0.0021, ph: 0.62, board: '#fbbf24', shirt: '#0d9488' },
         ];
         for (let i = 0; i < sups.length; i++) {
           const sp = sups[i];
@@ -3235,7 +3235,7 @@
           ctx.fillStyle = shadeHex(sp.board, 1.0, currentMode);
           ctx.fillRect(Math.round(sx - 3.6 * px), Math.round(sy - 0.6 * px), Math.max(4, Math.round(7.2 * px)), Math.max(1.5, Math.round(1.8 * px)));
           drawMiniPerson(sx, sy - 0.4 * px, s * 0.88, shadeHex(sp.shirt, 1.0, currentMode), '#1e293b', hairs[i], false, 0);
-          const stroke = Math.sin(tSec * 2.8 + i * 2.1);
+          const stroke = Math.sin(tSec * 1.35 + i * 2.1);
           ctx.strokeStyle = '#334155';
           ctx.lineWidth = Math.max(1.0, 0.9 * s);
           ctx.beginPath();
@@ -3295,57 +3295,7 @@
     }
 
     // =========================================================================
-    // 7. SERENE SWISS HOT-AIR BALLOON OVER LAKE ZURICH & KILCHBERG RIDGE (Day & Alpenglow!)
-    // =========================================================================
-    if (!isNight) {
-      const bProg = ((tSec * 0.0055 + 0.28) % 1.24) - 0.12;
-      const bu = bProg;
-      const bv = 0.27 + Math.sin(tSec * 0.11) * 0.025 + bProg * 0.14;
-      const bx = toX(bu);
-      const by = toY(bv);
-      if (inView(bx, by, 70)) {
-        const r = Math.max(4.5, 11.5 * s);
-        ctx.fillStyle = 'rgba(18, 28, 44, 0.14)';
-        ctx.beginPath();
-        ctx.ellipse(bx + r * 1.8, by + r * 3.8, r * 0.9, r * 0.48, 0, 0, Math.PI * 2);
-        ctx.fill();
-        const basketY = by + r * 1.45;
-        ctx.strokeStyle = 'rgba(60, 48, 38, 0.65)';
-        ctx.lineWidth = Math.max(0.8, 0.8 * s);
-        ctx.beginPath();
-        ctx.moveTo(bx - r * 0.35, by + r * 0.72);
-        ctx.lineTo(bx - r * 0.22, basketY);
-        ctx.moveTo(bx + r * 0.35, by + r * 0.72);
-        ctx.lineTo(bx + r * 0.22, basketY);
-        ctx.stroke();
-        ctx.fillStyle = shadeHex('#8c5a32', 1.0, currentMode);
-        ctx.fillRect(Math.round(bx - r * 0.28), Math.round(basketY), Math.max(2, Math.round(r * 0.56)), Math.max(2, Math.round(r * 0.42)));
-        if (Math.sin(tSec * 0.9) > 0.72) {
-          ctx.fillStyle = '#ffcf48';
-          ctx.fillRect(Math.round(bx - r * 0.12), Math.round(by + r * 0.95), Math.max(2, Math.round(r * 0.24)), Math.max(2, Math.round(r * 0.28)));
-        }
-        ctx.fillStyle = shadeHex('#d62828', 1.02, currentMode);
-        ctx.beginPath();
-        ctx.ellipse(bx, by, r, r * 1.12, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = shadeHex('#f4c430', 1.05, currentMode);
-        ctx.beginPath();
-        ctx.ellipse(bx - r * 0.22, by, r * 0.42, r * 1.06, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = shadeHex('#f8fafc', 1.06, currentMode);
-        ctx.beginPath();
-        ctx.ellipse(bx + r * 0.28, by, r * 0.26, r * 1.0, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(30, 22, 26, 0.72)';
-        ctx.lineWidth = Math.max(0.9, 1.0 * s);
-        ctx.beginPath();
-        ctx.ellipse(bx, by, r, r * 1.12, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-
-    // =========================================================================
-    // 8. COZY NIGHTTIME STREETLAMP GLOWS ALONG SEESTRASSE & DORFSTRASSE VIADUCT
+    // 7. COZY NIGHTTIME STREETLAMP GLOWS ALONG SEESTRASSE & DORFSTRASSE VIADUCT
     // =========================================================================
     if (isNight && animData && animData.roads) {
       const lampRoads = animData.roads.filter((r) => r.id === 'seestrasse_sb' || r.id === 'dorfstrasse_viaduct_up');
@@ -3545,14 +3495,15 @@
   const soundChannels = {};
 
   const SOUND_TRACKS = {
-    lake_waves: { file: 'lake_waves.mp3', baseGain: 0.22, maxHz: 3400 },
-    birds:      { file: 'birds.mp3',      baseGain: 0.11, maxHz: 4600 },
-    crickets:   { file: 'crickets.mp3',   baseGain: 0.10, maxHz: 4800 },
-    train:      { file: 'train.mp3',      baseGain: 0.26, maxHz: 4200 },
-    traffic:    { file: 'traffic.mp3',    baseGain: 0.11, maxHz: 3200 },
-    bus:        { file: 'bus.mp3',        baseGain: 0.14, maxHz: 2400 },
-    boat:       { file: 'boat.mp3',       baseGain: 0.18, maxHz: 3000 },
-    bells:      { file: 'bells.mp3',      baseGain: 0.22, maxHz: 3400 },
+    lake_waves:   { file: 'lake_waves.mp3',   baseGain: 0.22, maxHz: 3400 },
+    birds:        { file: 'birds.mp3',        baseGain: 0.11, maxHz: 4600 },
+    crickets:     { file: 'crickets.mp3',     baseGain: 0.10, maxHz: 4800 },
+    train:        { file: 'train.mp3',        baseGain: 0.26, maxHz: 4200 },
+    traffic:      { file: 'traffic.mp3',      baseGain: 0.12, maxHz: 3200 }, // A3 motorway passing-by traffic
+    town_traffic: { file: 'town_traffic.mp3', baseGain: 0.12, maxHz: 1100 }, // Calm European town car buzz/hum
+    bus:          { file: 'bus.mp3',          baseGain: 0.14, maxHz: 2400 },
+    boat:         { file: 'boat.mp3',         baseGain: 0.18, maxHz: 3000 },
+    bells:        { file: 'bells.mp3',        baseGain: 0.22, maxHz: 3400 },
   };
   const SOUND_MASTER_LEVEL = 0.48;
 
@@ -3712,13 +3663,17 @@
     }
     applyChannelSpatial('train', bestTrain.level, bestTrain.brightness, bestTrain.pan);
 
-    // 2. ZVV Buses & 3. Road Cars (strictly localized to the actual individual cars & buses!)
+    // 2. ZVV Buses, 3a. A3 Motorway Passing-By Traffic & 3b. Town Street Buzzing Cars (per-vehicle spatialized!)
     let bestBus = { level: 0, brightness: 0.08, pan: 0 };
-    let bestCar = { level: 0, brightness: 0.08, pan: 0 };
-    let carSumLvl = 0;
-    let carPanSum = 0;
+    let bestMwCar = { level: 0, brightness: 0.08, pan: 0 };
+    let mwSumLvl = 0;
+    let mwPanSum = 0;
+    let bestTownCar = { level: 0, brightness: 0.08, pan: 0 };
+    let townSumLvl = 0;
+    let townPanSum = 0;
     for (let rIdx = 0; rIdx < (animData.roads || []).length; rIdx++) {
       const rd = animData.roads[rIdx];
+      const isMotorway = rd.kind === 'motorway';
       const busCount = rd.bus_count != null ? rd.bus_count : (rd.has_bus ? 1 : 0);
       const carCount = rd.car_count || 3;
       const totalV = carCount + busCount;
@@ -3734,25 +3689,32 @@
         if (!pos) continue;
         const sp = computeSpatialFactor(
           pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm,
-          isBus ? 0.075 : 0.052, // tight local car/bus pass-by radius!
+          isBus ? 0.075 : (isMotorway ? 0.062 : 0.050),
         );
         if (sp.level <= 0.002) continue;
         if (isBus) {
           if (sp.level > bestBus.level) bestBus = sp;
+        } else if (isMotorway) {
+          const cl = sp.level * 0.90;
+          mwSumLvl += cl * cl;
+          mwPanSum += sp.pan * cl;
+          if (cl > bestMwCar.level) bestMwCar = { level: cl, brightness: sp.brightness, pan: sp.pan };
         } else {
-          const wMul = rd.kind === 'motorway' ? 0.85 : 0.65;
-          const cl = sp.level * wMul;
-          carSumLvl += cl * cl; // RMS sum so multiple visible cars gently thicken without overpowering
-          carPanSum += sp.pan * cl;
-          if (cl > bestCar.level) bestCar = { level: cl, brightness: sp.brightness, pan: sp.pan };
+          const cl = sp.level * 0.68;
+          townSumLvl += cl * cl;
+          townPanSum += sp.pan * cl;
+          if (cl > bestTownCar.level) bestTownCar = { level: cl, brightness: sp.brightness, pan: sp.pan };
         }
       }
     }
     const nightTrafficMul = isNight ? 0.55 : 1.0;
     applyChannelSpatial('bus', bestBus.level * nightTrafficMul, bestBus.brightness, bestBus.pan);
-    const carFinalLvl = Math.min(1.0, Math.sqrt(carSumLvl)) * nightTrafficMul;
-    const carPan = bestCar.level > 0.001 ? (carPanSum / Math.max(0.001, Math.sqrt(carSumLvl))) : 0;
-    applyChannelSpatial('traffic', carFinalLvl, bestCar.brightness, carPan);
+    const mwFinalLvl = Math.min(1.0, Math.sqrt(mwSumLvl)) * nightTrafficMul;
+    const mwPan = bestMwCar.level > 0.001 ? (mwPanSum / Math.max(0.001, Math.sqrt(mwSumLvl))) : 0;
+    applyChannelSpatial('traffic', mwFinalLvl, bestMwCar.brightness, mwPan);
+    const townFinalLvl = Math.min(1.0, Math.sqrt(townSumLvl)) * nightTrafficMul;
+    const townPan = bestTownCar.level > 0.001 ? (townPanSum / Math.max(0.001, Math.sqrt(townSumLvl))) : 0;
+    applyChannelSpatial('town_traffic', townFinalLvl, bestTownCar.brightness, townPan);
 
     // 4. Lake Zurich ZSG Steamer Boat (localized to the boat on the lake)
     let bestBoat = { level: 0, brightness: 0.08, pan: 0 };
