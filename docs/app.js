@@ -19,7 +19,7 @@
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
   ];
 
-  const ASSET_VER = '6.2';
+  const ASSET_VER = '7.0';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Map for pixel-exact partial occlusion
   const overviewImages = {};
@@ -47,6 +47,24 @@
   let wheelMode = 'zoom'; // 'zoom' | 'pan'
   let lastMouse = { x: 0, y: 0 };
   let drawScheduled = false;
+
+  // HiDPI: the canvas backing store is `dpr` x its CSS size (capped at 2 for 60 fps pixel-art rendering).
+  // All camera maths (scale, offsets, hit radii) run in backing-store ("device") pixels; the user-facing
+  // zoom (readout, URL, debug, presets) is expressed in CSS pixels per world pixel = scale / dpr.
+  const DPR_CAP = 2;
+  let dpr = 1;
+  let activeLandmarkId = null;
+  let selectedBuilding = null;
+  let searchResultCount = 0;
+  let camAnim = null;
+  const renderStamps = [];
+
+  function getDeviceRatio() {
+    return Math.max(1, Math.min(DPR_CAP, window.devicePixelRatio || 1));
+  }
+  function cssScale() {
+    return scale / dpr;
+  }
 
   function getWorldSize() {
     const mf = tileManifests[currentMode];
@@ -141,18 +159,136 @@
 
   function resizeViewport() {
     const rect = viewport.getBoundingClientRect();
-    canvas.width = Math.max(1, Math.floor(rect.width));
-    canvas.height = Math.max(1, Math.floor(rect.height));
+    if (rect.width < 2 || rect.height < 2) return;
+    const nd = getDeviceRatio();
+    const newW = Math.max(1, Math.round(rect.width * nd));
+    const newH = Math.max(1, Math.round(rect.height * nd));
+    const sizeChanged = canvas.width !== newW || canvas.height !== newH || nd !== dpr;
+    if (sizeChanged) {
+      // Keep the world point under the viewport centre (and the CSS zoom) stable across resizes / DPR changes.
+      const { width, height } = getWorldSize();
+      const prevW = canvas.width;
+      const prevH = canvas.height;
+      const haveCam = scale > 0 && width > 0 && prevW > 300;
+      const cwx = haveCam ? (prevW * 0.5 - offsetX) / scale : 0;
+      const cwy = haveCam ? (prevH * 0.5 - offsetY) / scale : 0;
+      scale = scale * nd / dpr;
+      dpr = nd;
+      canvas.width = newW;
+      canvas.height = newH;
+      if (haveCam) {
+        offsetX = newW * 0.5 - cwx * scale;
+        offsetY = newH * 0.5 - cwy * scale;
+        clampOffsets();
+      }
+      updateZoomReadout();
+    }
+    const tb = document.getElementById('topbar');
+    if (tb) document.documentElement.style.setProperty('--topbar-h', `${Math.round(tb.getBoundingClientRect().height)}px`);
+    sizeMinimap();
     draw();
   }
 
-  function fitToScreen() {
+  function getCenterUV() {
+    const { width, height } = getWorldSize();
+    const u = (width > 0 && scale > 0) ? (canvas.width * 0.5 - offsetX) / (width * scale) : 0.5;
+    const v = (height > 0 && scale > 0) ? (canvas.height * 0.5 - offsetY) / (height * scale) : 0.5;
+    return { u, v };
+  }
+
+  function clampScale(sc) {
+    const { width } = getWorldSize();
+    const minScale = Math.min(0.06 * dpr, (canvas.width * 0.5) / Math.max(1, width));
+    const maxScale = 8.0 * dpr; // Up to 8x magnification of native 25 cm pixels (CSS px)
+    return Math.min(maxScale, Math.max(minScale, sc));
+  }
+
+  // F24: cubic ease-out camera flight (log-space zoom + linear centre) shared by landmarks, presets & search.
+  function stepCameraAnim(nowMs) {
+    const a = camAnim;
+    if (!a) return;
+    const { width, height } = getWorldSize();
+    const k = Math.min(1, Math.max(0, (nowMs - a.t0) / a.ms));
+    const e = 1 - Math.pow(1 - k, 3);
+    const sc = Math.exp(Math.log(a.s0) + (Math.log(a.s1) - Math.log(a.s0)) * e);
+    if (a.keepCentre) {
+      const wx = (canvas.width * 0.5 - offsetX) / scale;
+      const wy = (canvas.height * 0.5 - offsetY) / scale;
+      scale = sc;
+      offsetX = canvas.width * 0.5 - wx * scale;
+      offsetY = canvas.height * 0.5 - wy * scale;
+    } else {
+      const cu = a.u0 + (a.u1 - a.u0) * e;
+      const cv = a.v0 + (a.v1 - a.v0) * e;
+      scale = sc;
+      offsetX = canvas.width * 0.5 - cu * width * scale;
+      offsetY = canvas.height * 0.5 - cv * height * scale;
+    }
+    clampOffsets();
+    updateZoomReadout();
+    scheduleDraw();
+    if (k < 1) {
+      requestAnimationFrame(stepCameraAnim);
+    } else {
+      camAnim = null;
+    }
+  }
+
+  function animateCamera(targetScale, cu, cv, ms, keepCentre = false) {
     const { width, height } = getWorldSize();
     if (!width || !height) return;
-    const pad = 20;
+    const s1 = clampScale(targetScale);
+    const c0 = getCenterUV();
+    const instant = !(ms > 0) || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (instant) {
+      camAnim = null;
+      scale = s1;
+      offsetX = canvas.width * 0.5 - cu * width * scale;
+      offsetY = canvas.height * 0.5 - cv * height * scale;
+      clampOffsets();
+      updateZoomReadout();
+      scheduleDraw();
+      return;
+    }
+    const wasRunning = !!camAnim;
+    camAnim = { t0: performance.now(), ms, s0: scale, s1, u0: c0.u, v0: c0.v, u1: cu, v1: cv, keepCentre };
+    if (!wasRunning) requestAnimationFrame(stepCameraAnim);
+  }
+
+  function pendingScale() {
+    return camAnim ? camAnim.s1 : scale;
+  }
+
+  function zoomPreset(cssZoom) {
+    if (followTarget) {
+      scale = clampScale(cssZoom * dpr);
+      updateZoomReadout();
+      scheduleDraw();
+      return;
+    }
+    const c = camAnim && !camAnim.keepCentre ? { u: camAnim.u1, v: camAnim.v1 } : getCenterUV();
+    animateCamera(cssZoom * dpr, c.u, c.v, 340);
+  }
+
+  function zoomStep(factor) {
+    const c = camAnim && !camAnim.keepCentre ? { u: camAnim.u1, v: camAnim.v1 } : getCenterUV();
+    animateCamera(pendingScale() * factor, c.u, c.v, followTarget ? 0 : 240, !!followTarget);
+  }
+
+  function fitToScreen(animate = true) {
+    if (followTarget) setFollowMode(null);
+    const { width, height } = getWorldSize();
+    if (!width || !height) return;
+    const pad = 20 * dpr;
     const sx = (canvas.width - pad * 2) / width;
     const sy = (canvas.height - pad * 2) / height;
-    scale = Math.min(sx, sy);
+    const target = Math.min(sx, sy);
+    if (animate && canvas.width > 300) {
+      animateCamera(target, 0.5, 0.5, 340);
+      return;
+    }
+    camAnim = null;
+    scale = target;
     offsetX = Math.round((canvas.width - width * scale) * 0.5);
     offsetY = Math.round((canvas.height - height * scale) * 0.5);
     updateZoomReadout();
@@ -162,12 +298,11 @@
   function zoomAt(factor, cx, cy, exactScale = null) {
     const { width, height } = getWorldSize();
     if (!width || !height) return;
-    const minScale = Math.min(0.06, (canvas.width * 0.5) / width);
-    const maxScale = 8.0; // Up to 8x magnification of native 25 cm pixels!
+    camAnim = null;
     const prevScale = scale;
     scale = exactScale !== null
-      ? Math.min(maxScale, Math.max(minScale, exactScale))
-      : Math.min(maxScale, Math.max(minScale, scale * factor));
+      ? clampScale(exactScale * dpr)
+      : clampScale(scale * factor);
 
     const wx = (cx - offsetX) / prevScale;
     const wy = (cy - offsetY) / prevScale;
@@ -180,6 +315,7 @@
 
   function panBy(dx, dy) {
     if (followTarget) setFollowMode(null);
+    camAnim = null;
     offsetX += dx;
     offsetY += dy;
     clampOffsets();
@@ -188,13 +324,36 @@
 
   function updateZoomReadout() {
     const el = document.getElementById('zoom-readout');
-    if (!el) return;
-    if (scale >= 0.98) {
-      const rounded = Math.abs(scale - Math.round(scale)) < 0.03 ? Math.round(scale) : scale.toFixed(2);
-      el.textContent = `${rounded}× px`;
-    } else {
-      el.textContent = `${Math.round(scale * 100)}%`;
+    if (el) {
+      const cs = cssScale();
+      if (cs >= 0.98) {
+        const rounded = Math.abs(cs - Math.round(cs)) < 0.03 ? Math.round(cs) : cs.toFixed(2);
+        el.textContent = `${rounded}× px`;
+      } else {
+        el.textContent = `${Math.round(cs * 100)}%`;
+      }
     }
+    updateScaleBar();
+  }
+
+  // Dynamic metric scale bar (nice 1-2-5 lengths, 64–150 CSS px wide) from the true ground resolution.
+  function updateScaleBar() {
+    const bar = document.getElementById('scale-bar-line');
+    const label = document.getElementById('scale-bar-label');
+    if (!bar || !label) return;
+    const mf = tileManifests[currentMode];
+    const world = getWorldSize();
+    const mpp = (mf && mf.mpp ? mf.mpp : 0.25) * (mf && mf.width ? 1 : 12331 / Math.max(1, world.width));
+    const metresPerCssPx = mpp / Math.max(1e-6, cssScale());
+    const minM = metresPerCssPx * 64;
+    const pow = Math.pow(10, Math.floor(Math.log10(minM)));
+    let nice = pow;
+    for (const m of [1, 2, 5, 10]) {
+      if (m * pow >= minM) { nice = m * pow; break; }
+    }
+    const px = nice / metresPerCssPx;
+    bar.style.width = `${Math.round(px)}px`;
+    label.textContent = nice >= 1000 ? `${nice / 1000} km` : `${nice} m`;
   }
 
   function draw() {
@@ -264,14 +423,40 @@
       drawAnimations(width, height, animSec);
     }
 
+    drawSelectionMarker(width, height);
     updatePins(width, height);
     drawMinimap(ov, width, height);
     if (showLoupe) drawLoupe(ov, width, height, tiled, mf);
+
+    const nowStamp = performance.now();
+    renderStamps.push(nowStamp);
+    while (renderStamps.length && nowStamp - renderStamps[0] > 1000) renderStamps.shift();
+  }
+
+  // Gold diamond reticle on the inspected building (aspect-correct, scaled for HiDPI).
+  function drawSelectionMarker(worldW, worldH) {
+    if (!selectedBuilding) return;
+    const sx = Math.round(offsetX + selectedBuilding.u * worldW * scale);
+    const sy = Math.round(offsetY + selectedBuilding.v * worldH * scale);
+    if (sx < -20 || sx > canvas.width + 20 || sy < -20 || sy > canvas.height + 20) return;
+    const r = Math.round(7 * dpr);
+    ctx.save();
+    ctx.lineWidth = Math.max(1, Math.round(1.5 * dpr));
+    ctx.strokeStyle = '#0d1420';
+    ctx.beginPath();
+    ctx.moveTo(sx, sy - r - 1); ctx.lineTo(sx + (r + 1) * 1.6, sy); ctx.lineTo(sx, sy + r + 1); ctx.lineTo(sx - (r + 1) * 1.6, sy); ctx.closePath();
+    ctx.stroke();
+    ctx.strokeStyle = '#e2b45b';
+    ctx.lineWidth = Math.max(1, Math.round(dpr));
+    ctx.beginPath();
+    ctx.moveTo(sx, sy - r); ctx.lineTo(sx + r * 1.6, sy); ctx.lineTo(sx, sy + r); ctx.lineTo(sx - r * 1.6, sy); ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
   }
 
   function updatePins(worldW, worldH) {
     if (!meta || !showPins) {
-      pinsLayer.innerHTML = '';
+      if (pinsLayer.children.length) pinsLayer.innerHTML = '';
       return;
     }
     if (pinsLayer.children.length !== meta.landmarks.length) {
@@ -286,22 +471,63 @@
     }
     meta.landmarks.forEach((lm, idx) => {
       const pin = pinsLayer.children[idx];
-      const sx = offsetX + lm.uv[0] * worldW * scale;
-      const sy = offsetY + lm.uv[1] * worldH * scale;
-      pin.style.left = `${sx}px`;
-      pin.style.top = `${sy}px`;
-      pin.style.display = (sx < -100 || sx > canvas.width + 100 || sy < -40 || sy > canvas.height + 50) ? 'none' : 'block';
+      const sx = (offsetX + lm.uv[0] * worldW * scale) / dpr;
+      const sy = (offsetY + lm.uv[1] * worldH * scale) / dpr;
+      const cssW = canvas.width / dpr;
+      const cssH = canvas.height / dpr;
+      const vis = !(sx < -100 || sx > cssW + 100 || sy < -40 || sy > cssH + 50);
+      // Dirty-check so panning/animating never rewrites unchanged pins (avoids layout churn).
+      const key = vis ? `${Math.round(sx * 2)}|${Math.round(sy * 2)}` : 'hidden';
+      if (pin._key !== key) {
+        pin._key = key;
+        if (vis) {
+          pin.style.left = `${sx}px`;
+          pin.style.top = `${sy}px`;
+          pin.style.display = 'block';
+        } else {
+          pin.style.display = 'none';
+        }
+      }
+      const isActive = lm.id === activeLandmarkId;
+      if (pin._active !== isActive) {
+        pin._active = isActive;
+        pin.classList.toggle('active', isActive);
+      }
     });
+  }
+
+  // Minimap: cache the scaled overview once per mode/size; each frame only paints the viewport box.
+  let minimapBase = null;
+  function sizeMinimap() {
+    const rect = minimapCanvas.getBoundingClientRect();
+    const cssW = rect.width || 220;
+    const cssH = rect.height || 106;
+    const w = Math.max(2, Math.round(cssW * dpr));
+    const h = Math.max(2, Math.round(cssH * dpr));
+    if (minimapCanvas.width !== w || minimapCanvas.height !== h) {
+      minimapCanvas.width = w;
+      minimapCanvas.height = h;
+      minimapBase = null;
+    }
   }
 
   function drawMinimap(ov, worldW, worldH) {
     if (!minimapCtx || !ov) return;
     const mw = minimapCanvas.width;
     const mh = minimapCanvas.height;
-    minimapCtx.fillStyle = '#101724';
-    minimapCtx.fillRect(0, 0, mw, mh);
-    minimapCtx.imageSmoothingEnabled = true;
-    minimapCtx.drawImage(ov, 0, 0, mw, mh);
+    if (!minimapBase || minimapBase.mode !== currentMode || minimapBase.w !== mw || minimapBase.h !== mh || minimapBase.ov !== ov) {
+      const off = document.createElement('canvas');
+      off.width = mw;
+      off.height = mh;
+      const octx = off.getContext('2d');
+      octx.fillStyle = '#101724';
+      octx.fillRect(0, 0, mw, mh);
+      octx.imageSmoothingEnabled = true;
+      octx.imageSmoothingQuality = 'high';
+      octx.drawImage(ov, 0, 0, mw, mh);
+      minimapBase = { mode: currentMode, w: mw, h: mh, ov, canvas: off };
+    }
+    minimapCtx.drawImage(minimapBase.canvas, 0, 0);
 
     // Viewport indicator box
     const vx0 = (-offsetX / (worldW * scale)) * mw;
@@ -310,7 +536,7 @@
     const vh = (canvas.height / (worldH * scale)) * mh;
 
     minimapCtx.strokeStyle = '#e2b45b';
-    minimapCtx.lineWidth = 1.6;
+    minimapCtx.lineWidth = 1.6 * dpr;
     minimapCtx.strokeRect(
       Math.max(1, vx0),
       Math.max(1, vy0),
@@ -373,23 +599,31 @@
       loupeCtx.lineTo(lw, p);
       loupeCtx.stroke();
     }
-    const lx = Math.min(canvas.width - lw - 16, Math.max(14, lastMouse.x + 22));
-    const ly = Math.min(canvas.height - lh - 16, Math.max(14, lastMouse.y - lw * 0.5));
+    const lx = Math.min(canvas.width / dpr - lw - 16, Math.max(14, lastMouse.x / dpr + 22));
+    const ly = Math.min(canvas.height / dpr - lh - 16, Math.max(14, lastMouse.y / dpr - lw * 0.5));
     loupeCanvas.style.left = `${lx}px`;
     loupeCanvas.style.top = `${ly}px`;
+  }
+
+  function setActiveLandmark(id) {
+    activeLandmarkId = id;
+    document.querySelectorAll('#landmark-list .lm-item').forEach((el) => {
+      const on = el.dataset.lmId === id;
+      el.classList.toggle('active', on);
+      if (on) el.setAttribute('aria-current', 'true');
+      else el.removeAttribute('aria-current');
+    });
   }
 
   function flyToLandmark(lm, targetZoom = null) {
     if (followTarget) setFollowMode(null);
     const { width, height, tiled } = getWorldSize();
     if (!width || !height) return;
-    // Zoom closely so individual windows, roof tiles, trees & boats are crisp!
-    scale = targetZoom !== null ? targetZoom : (tiled ? 1.5 : 2.2);
-    offsetX = Math.round(canvas.width * 0.5 - lm.uv[0] * width * scale);
-    offsetY = Math.round(canvas.height * 0.5 - lm.uv[1] * height * scale);
-    clampOffsets();
-    updateZoomReadout();
-    scheduleDraw();
+    // Zoom closely so individual windows, roof tiles, trees & boats are crisp (target is CSS px per world px)
+    const zoomCss = targetZoom !== null ? targetZoom : (tiled ? 1.5 : 2.2);
+    selectedBuilding = null;
+    setActiveLandmark(lm.id);
+    animateCamera(zoomCss * dpr, lm.uv[0], lm.uv[1], 640);
     showInspector({
       title: lm.name,
       sub: lm.subtitle,
@@ -411,12 +645,29 @@
       .join('');
   }
 
+  function selectBuilding(best) {
+    selectedBuilding = best;
+    document.getElementById('coord-lv95').textContent = `LV95 E ${best.e.toLocaleString('de-CH')} · N ${best.n.toLocaleString('de-CH')}`;
+    document.getElementById('coord-elev').textContent = `Ground ${best.zg} m · Roof ${best.zr} m`;
+    showInspector({
+      title: best.addr || `${best.type} (${best.nb})`,
+      sub: `Neighbourhood: ${best.nb} · swisstopo LOD2 Class: ${best.type}`,
+      specs: [
+        ['Ground Elev.', `${best.zg.toFixed(1)} m a.s.l.`],
+        ['Roof Ridge', `${best.zr.toFixed(1)} m (+${best.h.toFixed(1)} m)`],
+        ['LV95 Coords', `${best.e}, ${best.n}`],
+        ['SWISSIMAGE RGB', `rgb(${best.rgb.join(', ')})`],
+      ],
+    });
+    scheduleDraw();
+  }
+
   function hitTestBuilding(clientX, clientY) {
     if (!meta) return;
     const { width, height } = getWorldSize();
     const rect = viewport.getBoundingClientRect();
-    const mx = clientX - rect.left;
-    const my = clientY - rect.top;
+    const mx = (clientX - rect.left) * dpr;
+    const my = (clientY - rect.top) * dpr;
     const u = (mx - offsetX) / (width * scale);
     const v = (my - offsetY) / (height * scale);
     if (u < 0 || u > 1 || v < 0 || v > 1) return;
@@ -432,20 +683,7 @@
         best = b;
       }
     }
-    if (best) {
-      document.getElementById('coord-lv95').textContent = `LV95 E ${best.e.toLocaleString('de-CH')} · N ${best.n.toLocaleString('de-CH')}`;
-      document.getElementById('coord-elev').textContent = `Ground ${best.zg} m · Roof ${best.zr} m`;
-      showInspector({
-        title: best.addr || `${best.type} (${best.nb})`,
-        sub: `Neighbourhood: ${best.nb} · swisstopo LOD2 Class: ${best.type}`,
-        specs: [
-          ['Ground Elev.', `${best.zg.toFixed(1)} m a.s.l.`],
-          ['Roof Ridge', `${best.zr.toFixed(1)} m (+${best.h.toFixed(1)} m)`],
-          ['LV95 Coords', `${best.e}, ${best.n}`],
-          ['SWISSIMAGE RGB', `rgb(${best.rgb.join(', ')})`],
-        ],
-      });
-    }
+    if (best) selectBuilding(best);
   }
 
   // ---------------------------------------------------------------------------
@@ -460,6 +698,7 @@
   viewport.addEventListener('pointerdown', (e) => {
     if (e.target.closest('.viewport-ui') || e.target.closest('.exit-cinema-btn')) return;
     if (followTarget) setFollowMode(null);
+    camAnim = null;
     e.preventDefault();
     viewport.focus({ preventScroll: true });
     if (activePointers.size === 0) {
@@ -474,7 +713,7 @@
 
   viewport.addEventListener('pointermove', (e) => {
     const rect = viewport.getBoundingClientRect();
-    lastMouse = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    lastMouse = { x: (e.clientX - rect.left) * dpr, y: (e.clientY - rect.top) * dpr };
 
     if (!activePointers.has(e.pointerId)) {
       if (showLoupe) scheduleDraw();
@@ -492,7 +731,7 @@
       if (gestureMovedDist > 3) {
         viewport.classList.add('is-dragging');
       }
-      panBy(dx, dy);
+      panBy(dx * dpr, dy * dpr);
     } else if (activePointers.size >= 2) {
       const pts = Array.from(activePointers.entries());
       const [idA, pA] = pts[0];
@@ -513,9 +752,9 @@
 
       gestureMovedDist += 20;
       viewport.classList.add('is-dragging');
-      offsetX += newMidX - prevMidX;
-      offsetY += newMidY - prevMidY;
-      zoomAt(newDist / prevDist, newMidX - rect.left, newMidY - rect.top);
+      offsetX += (newMidX - prevMidX) * dpr;
+      offsetY += (newMidY - prevMidY) * dpr;
+      zoomAt(newDist / prevDist, (newMidX - rect.left) * dpr, (newMidY - rect.top) * dpr);
     }
   });
 
@@ -547,8 +786,8 @@
   viewport.addEventListener('wheel', (e) => {
     e.preventDefault();
     const rect = viewport.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
+    const cx = (e.clientX - rect.left) * dpr;
+    const cy = (e.clientY - rect.top) * dpr;
 
     const lineMult = e.deltaMode === 1 ? 18 : (e.deltaMode === 2 ? 240 : 1);
     const dx = e.deltaX * lineMult;
@@ -564,7 +803,7 @@
     // Pan when wheelMode === 'pan', Shift is held, or user swipes horizontally/diagonally on a trackpad
     const isTrackpad2DPan = Math.abs(dx) > 1.5 && Math.abs(dx) > Math.abs(dy) * 0.4;
     if (wheelMode === 'pan' || e.shiftKey || isTrackpad2DPan) {
-      panBy(-dx, -dy);
+      panBy(-dx * dpr, -dy * dpr);
     } else {
       const clampedDy = Math.max(-160, Math.min(160, dy));
       const factor = Math.exp(-clampedDy * 0.0028);
@@ -604,11 +843,22 @@
   });
   minimapBox.addEventListener('pointercancel', () => { minimapDragging = false; });
 
+  // Double-click / double-tap: glide a 2x zoom-in centred on the clicked point
+  viewport.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.viewport-ui') || e.target.closest('.lm-pin')) return;
+    if (followTarget) setFollowMode(null);
+    const { width, height } = getWorldSize();
+    const rect = viewport.getBoundingClientRect();
+    const cu = ((e.clientX - rect.left) * dpr - offsetX) / (width * scale);
+    const cv = ((e.clientY - rect.top) * dpr - offsetY) / (height * scale);
+    animateCamera(pendingScale() * 2, Math.min(1, Math.max(0, cu)), Math.min(1, Math.max(0, cv)), 360);
+  });
+
   // On-screen D-Pad buttons
   document.querySelectorAll('.dpad-btn[data-dx]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      panBy(Number(btn.dataset.dx), Number(btn.dataset.dy));
+      panBy(Number(btn.dataset.dx) * dpr, Number(btn.dataset.dy) * dpr);
     });
   });
   document.getElementById('btn-dpad-fit').addEventListener('click', (e) => {
@@ -623,13 +873,14 @@
       return;
     }
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-    const step = e.shiftKey ? 320 : 140;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const step = (e.shiftKey ? 320 : 140) * dpr;
     if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { e.preventDefault(); panBy(step, 0); }
     else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { e.preventDefault(); panBy(-step, 0); }
     else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { e.preventDefault(); panBy(0, step); }
     else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { e.preventDefault(); panBy(0, -step); }
-    else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomAt(1.35, canvas.width / 2, canvas.height / 2); }
-    else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomAt(1 / 1.35, canvas.width / 2, canvas.height / 2); }
+    else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomStep(1.35); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomStep(1 / 1.35); }
     else if (e.key === '0') { e.preventDefault(); if (followTarget) setFollowMode(null); fitToScreen(); }
     else if (e.key === '1') { const b = document.getElementById('btn-mode-day'); if (b) b.click(); }
     else if (e.key === '2') { const b = document.getElementById('btn-mode-sunset'); if (b) b.click(); }
@@ -638,6 +889,8 @@
     else if (e.key === 'h' || e.key === 'H') { setCinemaMode(!cinemaMode); }
     else if (e.key === 'm' || e.key === 'M') { const b = document.getElementById('btn-toggle-sound'); if (b) b.click(); }
     else if (e.key === ' ') { e.preventDefault(); const b = document.getElementById('btn-toggle-anim'); if (b) b.click(); }
+    else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); setSidebarCollapsed(!sidebarCollapsed); }
+    else if (e.key === '/') { e.preventDefault(); const si = document.getElementById('search-input'); if (si) si.focus(); }
     else if (e.key === 'Escape') {
       if (cinemaMode) setCinemaMode(false);
       else if (followTarget) setFollowMode(null);
@@ -662,10 +915,12 @@
     if (!modalImg) return;
     const rect = modalViewport.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
-    modalCanvas.width = Math.floor(rect.width);
-    modalCanvas.height = Math.floor(rect.height);
+    const mdpr = getDeviceRatio();
+    modalCanvas.width = Math.floor(rect.width * mdpr);
+    modalCanvas.height = Math.floor(rect.height * mdpr);
+    modalCtx.setTransform(mdpr, 0, 0, mdpr, 0, 0);
     modalCtx.fillStyle = '#0f1520';
-    modalCtx.fillRect(0, 0, modalCanvas.width, modalCanvas.height);
+    modalCtx.fillRect(0, 0, rect.width, rect.height);
     modalCtx.imageSmoothingEnabled = mScale < 0.92;
     modalCtx.drawImage(
       modalImg,
@@ -685,7 +940,9 @@
     drawModal();
   }
 
+  let modalCrop = null;
   function openCropModal(c) {
+    modalCrop = c;
     document.getElementById('modal-title').textContent = `${c.label} — Ultra-Fine Isometric Pixel Art (Drag to Pan · Scroll to Zoom)`;
     modalOverlay.classList.remove('hidden');
     const img = new Image();
@@ -731,7 +988,13 @@
 
   document.getElementById('btn-modal-1x').addEventListener('click', () => fitModal(1.0));
   document.getElementById('btn-modal-2x').addEventListener('click', () => fitModal(2.0));
+  document.getElementById('btn-modal-4x').addEventListener('click', () => fitModal(4.0));
   document.getElementById('btn-modal-fit').addEventListener('click', () => fitModal(null));
+  document.getElementById('btn-modal-fly').addEventListener('click', () => {
+    const lm = modalCrop && meta ? meta.landmarks.find((l) => l.id === modalCrop.lmId) : null;
+    modalOverlay.classList.add('hidden');
+    if (lm) flyToLandmark(lm);
+  });
   document.getElementById('btn-close-modal').addEventListener('click', () => modalOverlay.classList.add('hidden'));
   modalOverlay.addEventListener('click', (e) => {
     if (e.target.id === 'modal-overlay') modalOverlay.classList.add('hidden');
@@ -747,6 +1010,7 @@
     meta.landmarks.forEach((lm, idx) => {
       const btn = document.createElement('button');
       btn.className = 'lm-item';
+      btn.dataset.lmId = lm.id;
       btn.innerHTML = `
         <div class="lm-item-title">${idx + 1}. ${lm.name}</div>
         <div class="lm-item-meta">E ${Math.round(lm.e)} · N ${Math.round(lm.n)} · ${lm.z.toFixed(0)} m a.s.l.</div>
@@ -771,12 +1035,22 @@
       const prevWorld = getWorldSize();
       const centerU = (canvas.width * 0.5 - offsetX) / (prevWorld.width * scale);
       const centerV = (canvas.height * 0.5 - offsetY) / (prevWorld.height * scale);
-      const relZoom = (prevWorld.width * scale) / canvas.width;
+      const relZoom = (prevWorld.width * pendingScale()) / canvas.width;
+      camAnim = null;
 
       document.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       currentMode = btn.dataset.mode;
+      document.body.dataset.mode = currentMode;
+      // Recompute audio gain targets immediately (crickets/birds balance) rather than waiting for the throttle
+      lastAudioUpdateMs = 0;
+      if (soundEnabled && soundReady) {
+        const w0 = getWorldSize();
+        updateSoundscape(w0.width, w0.height, getAnimTimeSec());
+      }
+      viewport.classList.add('mode-switching');
       await Promise.all([loadModeOverview(currentMode), loadTileManifest(currentMode)]);
+      viewport.classList.remove('mode-switching');
 
       const nextWorld = getWorldSize();
       scale = (relZoom * canvas.width) / nextWorld.width;
@@ -787,12 +1061,12 @@
     });
   });
 
-  document.getElementById('btn-zoom-in').addEventListener('click', () => zoomAt(1.4, canvas.width / 2, canvas.height / 2));
-  document.getElementById('btn-zoom-out').addEventListener('click', () => zoomAt(1 / 1.4, canvas.width / 2, canvas.height / 2));
-  document.getElementById('btn-zoom-1x').addEventListener('click', () => zoomAt(1, canvas.width / 2, canvas.height / 2, 1.0));
-  document.getElementById('btn-zoom-2x').addEventListener('click', () => zoomAt(1, canvas.width / 2, canvas.height / 2, 2.0));
-  document.getElementById('btn-zoom-4x').addEventListener('click', () => zoomAt(1, canvas.width / 2, canvas.height / 2, 4.0));
-  document.getElementById('btn-zoom-fit').addEventListener('click', fitToScreen);
+  document.getElementById('btn-zoom-in').addEventListener('click', () => zoomStep(1.4));
+  document.getElementById('btn-zoom-out').addEventListener('click', () => zoomStep(1 / 1.4));
+  document.getElementById('btn-zoom-1x').addEventListener('click', () => zoomPreset(1.0));
+  document.getElementById('btn-zoom-2x').addEventListener('click', () => zoomPreset(2.0));
+  document.getElementById('btn-zoom-4x').addEventListener('click', () => zoomPreset(4.0));
+  document.getElementById('btn-zoom-fit').addEventListener('click', () => fitToScreen());
 
   // ---------------------------------------------------------------------------
   // 90s Isometric Pixel-Art Moving Elements Engine (Trains, Cars, Ships, Steam & Flags)
@@ -1317,11 +1591,28 @@
     if (onElevatedDeck && depthPixels && depthW > 0 && depthH > 0) {
       const dx = Math.min(depthW - 1, Math.max(0, Math.floor((wx / Math.max(1, worldW)) * depthW)));
       const dy = Math.min(depthH - 1, Math.max(0, Math.floor((wy / Math.max(1, worldH)) * depthH)));
-      const di = (dy * depthW + dx) * 4;
-      if (depthPixels[di + 2] > 128) {
-        const deckD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
-        d16 = Math.min(d16, deckD16 - 12);
+      // Sample a small neighbourhood (feet, torso, head rows and +/-3 columns) so a passenger
+      // stepping off a deck edge (gangplank over water) is still pinned to the deck behind them.
+      // Only pixels within a depth band of the walker's own deck height count, so overhanging
+      // trees / foreground buildings (much closer) are never pulled behind the walker.
+      const DECK_BAND = 60;
+      const DECK_MARGIN = 28; // > 2 * depthSlopeGround headroom + safety, in u16
+      const ref = d16;
+      let deckMin = Infinity;
+      for (let oy = -8; oy <= 1; oy++) {
+        const yy = dy + oy;
+        if (yy < 0 || yy >= depthH) continue;
+        for (let ox = -3; ox <= 3; ox++) {
+          const xx = dx + ox;
+          if (xx < 0 || xx >= depthW) continue;
+          const di = (yy * depthW + xx) * 4;
+          if (depthPixels[di + 2] > 128) {
+            const deckD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
+            if (Math.abs(deckD16 - ref) <= DECK_BAND && deckD16 < deckMin) deckMin = deckD16;
+          }
+        }
       }
+      if (deckMin !== Infinity) d16 = Math.min(d16, deckMin - DECK_MARGIN);
     }
     return d16;
   }
@@ -1338,9 +1629,11 @@
 
     const cx = offsetX + wx * scale;
     const cy = offsetY + wy * scale;
-    const padX = Math.ceil(ex * scale) + 4;
-    const padUp = Math.ceil(eyUp * scale) + 4;
-    const padDn = Math.ceil(eyDn * scale) + 4;
+    // Screen-pixel safety pad scales with zoom so overview-zoom bboxes don't grow to tens of metres.
+    const padPx = Math.max(1, Math.min(4, Math.ceil(2 * scale)));
+    const padX = Math.ceil(ex * scale) + padPx;
+    const padUp = Math.ceil(eyUp * scale) + padPx;
+    const padDn = Math.ceil(eyDn * scale) + padPx;
     if (cx + padX < 0 || cx - padX > canvas.width || cy + padDn < 0 || cy - padUp > canvas.height) return;
 
     if (!depthPixels || !vehD16 || depthW <= 0 || depthH <= 0) {
@@ -1366,22 +1659,38 @@
     const invWorldScaleY = depthH / (worldH * scale);
 
     // Row-wise conservative 3-way pre-check over depthPixels before touching vehScratch or getImageData()
-    const dx0 = Math.max(0, Math.floor((x0 - offsetX) * invWorldScaleX));
-    const dx1 = Math.min(depthW - 1, Math.floor((x1 - 1 - offsetX) * invWorldScaleX));
-    const dy0 = Math.max(0, Math.floor((y0 - offsetY) * invWorldScaleY));
-    const dy1 = Math.min(depthH - 1, Math.floor((y1 - 1 - offsetY) * invWorldScaleY));
+    // Roof/vertical extrusion moves closer to camera, never farther: do not push upward pixels behind
+    // the base depth (clampUpWorld retained in the signature for call-site compatibility).
+    const upClamp = 0;
+    // Pixel loop samples centres up to x1 - 0.5 / y1 - 0.5, so the pre-check must cover the same range.
+    const rawDx0 = Math.floor((x0 - offsetX) * invWorldScaleX);
+    const rawDx1 = Math.floor((x1 - 0.5 - offsetX) * invWorldScaleX);
+    const rawDy0 = Math.floor((y0 - offsetY) * invWorldScaleY);
+    const rawDy1 = Math.floor((y1 - 0.5 - offsetY) * invWorldScaleY);
+    const dx0 = Math.max(0, rawDx0);
+    const dx1 = Math.min(depthW - 1, rawDx1);
+    const dy0 = Math.max(0, rawDy0);
+    const dy1 = Math.min(depthH - 1, rawDy1);
 
-    if (dx0 <= dx1 && dy0 <= dy1) {
+    if (dx0 > dx1 || dy0 > dy1) {
+      // Bbox entirely outside the depth map: nothing can occlude it.
+      depthFrameStats.direct++;
+      vCtx = ctx;
+      drawFn();
+      return;
+    }
+    {
       let anyFrontOcc = false;
-      let anyClear = false;
+      // Parts of the bbox beyond the depth map are never masked, i.e. "clear".
+      let anyClear = (rawDx0 < 0 || rawDx1 >= depthW || rawDy0 < 0 || rawDy1 >= depthH);
       const invDepthHWorld = worldH / depthH;
       for (let dy = dy0; dy <= dy1; dy++) {
         const wyTop = dy * invDepthHWorld;
         const wyBot = (dy + 1) * invDepthHWorld;
         const rawTop = (wyTop - wy) * wScaleInv;
         const rawBot = (wyBot - wy) * wScaleInv;
-        const effTop = rawTop < -clampUpWorld ? -clampUpWorld : rawTop;
-        const effBot = rawBot < -clampUpWorld ? -clampUpWorld : rawBot;
+        const effTop = rawTop < -upClamp ? -upClamp : rawTop;
+        const effBot = rawBot < -upClamp ? -upClamp : rawBot;
         const rowMaxD16 = vehD16 - effTop * depthSlopeGround;
         const rowMinD16 = vehD16 - effBot * depthSlopeGround;
         const rowOff = dy * depthW;
@@ -1416,8 +1725,8 @@
     depthFrameStats.partial++;
     const MAX_SCRATCH = 2048;
     const scratchScale = Math.min(1.0, MAX_SCRATCH / Math.max(bw, bh));
-    const sw = Math.max(1, Math.ceil(bw * scratchScale));
-    const sh = Math.max(1, Math.ceil(bh * scratchScale));
+    const sw = Math.min(MAX_SCRATCH, Math.max(1, Math.ceil(bw * scratchScale)));
+    const sh = Math.min(MAX_SCRATCH, Math.max(1, Math.ceil(bh * scratchScale)));
     if (sw > vehScratch.width) vehScratch.width = Math.min(MAX_SCRATCH, sw + 32);
     if (sh > vehScratch.height) vehScratch.height = Math.min(MAX_SCRATCH, sh + 32);
 
@@ -1441,7 +1750,7 @@
       const dy = Math.floor((sy - offsetY) * invWorldScaleY);
       const wyPix = (sy - offsetY) * invScale;
       const dyW = (wyPix - wy) * wScaleInv;
-      const effDyW = dyW < -clampUpWorld ? -clampUpWorld : dyW;
+      const effDyW = dyW < -upClamp ? -upClamp : dyW;
       const rowD16 = vehD16 - effDyW * depthSlopeGround;
       const validY = dy >= 0 && dy < depthH;
       const rowOff = dy * depthW;
@@ -3611,10 +3920,7 @@
     drawKilchbergDetails(worldW, worldH, wScale, tSec, isNight, isSunset);
     drawAtmosphereAndLife(worldW, worldH, wScale, tSec, isNight, isSunset);
 
-    // 6. Update Spatial Distance-Attenuated Kilchberg Soundscape
-    if (soundEnabled) {
-      updateSoundscape(worldW, worldH, tSec);
-    }
+    // (Spatial soundscape updates run on their own timer so they keep following the camera while Live is paused.)
   }
 
   // Deterministic pseudo-random helper for sparkling lake glints & fireflies
@@ -4016,11 +4322,12 @@
             drawMiniPerson(toX(ju), toY(jv), s * 0.92, shadeHex(coats[(jb + 2) % coats.length], 1.0, currentMode), '#2b4c7e', hairs[jb], false, tSec * 6.5 + jb);
           }
         }
-        if (boxInView(0.419, 0.721, 0.428, 0.731)) {
+        if (boxInView(0.421, 0.721, 0.432, 0.734)) {
           for (let ls = 0; ls < 2; ls++) {
             const ang = tSec * (0.32 + ls * 0.08) + ls * 3.1;
-            const lsu = 0.4235 + Math.cos(ang) * 0.0022;
-            const lsv = 0.7252 + Math.sin(ang) * 0.0024;
+            // Orbit centre verified to keep 360/360 orbit samples inside the eroded waterMask (clear of the jetty)
+            const lsu = 0.4275 + Math.cos(ang) * 0.0022;
+            const lsv = 0.7272 + Math.sin(ang) * 0.0024;
             if (!isWaterUV(lsu, lsv)) continue;
             const lx = toX(lsu);
             const ly = toY(lsv);
@@ -4821,6 +5128,61 @@
   };
   const SOUND_MASTER_LEVEL = 0.48;
 
+  // Layer mixer: per-group user trim (0..1.5) on top of the spatial engine; master scales the whole mix.
+  const MIX_GROUPS = {
+    lake_waves: 'lake', birds: 'nature', crickets: 'nature',
+    traffic: 'traffic', town_traffic: 'traffic', bus: 'traffic',
+    train: 'rail', boat: 'water', bells: 'bells',
+  };
+  const mixLevels = { master: 1, lake: 1, nature: 1, traffic: 1, rail: 1, water: 1, bells: 1 };
+  // Live per-channel target gains (post spatial engine & mixer) exposed via window.__dioramaDebug.audioGains
+  const audioGainReport = {};
+  Object.keys(SOUND_TRACKS).forEach((k) => { audioGainReport[k] = 0; });
+  let audioSuspendTimer = null;
+
+  function masterTarget() {
+    return soundEnabled ? SOUND_MASTER_LEVEL * mixLevels.master : 0.0001;
+  }
+
+  function suspendAudioSoon() {
+    if (audioSuspendTimer) clearTimeout(audioSuspendTimer);
+    audioSuspendTimer = setTimeout(() => {
+      audioSuspendTimer = null;
+      if (!soundEnabled && audioCtx && audioCtx.state === 'running') {
+        audioCtx.suspend().catch(() => {});
+      }
+    }, 110);
+  }
+
+  function setSoundEnabled(on) {
+    soundEnabled = !!on;
+    const btn = document.getElementById('btn-toggle-sound');
+    if (btn && !soundLoading) {
+      btn.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
+    }
+    if (btn) {
+      btn.classList.toggle('active', soundEnabled);
+      btn.setAttribute('aria-pressed', soundEnabled ? 'true' : 'false');
+    }
+    if (soundEnabled) {
+      if (audioSuspendTimer) { clearTimeout(audioSuspendTimer); audioSuspendTimer = null; }
+      if (!soundReady) {
+        initSoundscape();
+      } else if (audioCtx && audioMasterGain) {
+        audioCtx.resume().catch(() => {});
+        audioMasterGain.gain.cancelScheduledValues(audioCtx.currentTime);
+        audioMasterGain.gain.setTargetAtTime(masterTarget(), audioCtx.currentTime, 0.25);
+        lastAudioUpdateMs = 0;
+        const { width, height } = getWorldSize();
+        updateSoundscape(width, height, getAnimTimeSec());
+      }
+    } else if (audioCtx && audioMasterGain) {
+      audioMasterGain.gain.cancelScheduledValues(audioCtx.currentTime);
+      audioMasterGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.03);
+      suspendAudioSoon();
+    }
+  }
+
   async function initSoundscape() {
     if (soundReady || soundLoading) return;
     soundLoading = true;
@@ -4829,6 +5191,7 @@
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       audioCtx = new AC();
+      if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
       const comp = audioCtx.createDynamicsCompressor();
       comp.threshold.value = -18;
       comp.knee.value = 20;
@@ -4883,10 +5246,17 @@
       if (btn) {
         btn.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
         btn.classList.toggle('active', soundEnabled);
+        btn.setAttribute('aria-pressed', soundEnabled ? 'true' : 'false');
       }
       if (soundReady && audioMasterGain) {
         const now = audioCtx.currentTime;
-        audioMasterGain.gain.setTargetAtTime(soundEnabled ? SOUND_MASTER_LEVEL : 0.0001, now, 0.25);
+        audioMasterGain.gain.setTargetAtTime(masterTarget(), now, soundEnabled ? 0.25 : 0.03);
+        if (soundEnabled) {
+          if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+          lastAudioUpdateMs = 0;
+        } else {
+          suspendAudioSoon();
+        }
       }
     }
   }
@@ -4927,9 +5297,12 @@
 
   function applyChannelSpatial(key, level, brightness, pan) {
     const ch = soundChannels[key];
+    const cfg = SOUND_TRACKS[key];
+    const trim = mixLevels[MIX_GROUPS[key]] != null ? mixLevels[MIX_GROUPS[key]] : 1;
+    const targetGain = Math.max(0.0001, level * cfg.baseGain * trim);
+    audioGainReport[key] = targetGain;
     if (!ch || !audioCtx) return;
     const now = audioCtx.currentTime;
-    const targetGain = Math.max(0.0001, level * ch.cfg.baseGain);
     const targetHz = 340 + brightness * (ch.cfg.maxHz - 340);
     ch.gain.gain.setTargetAtTime(targetGain, now, 0.16);
     ch.lpf.frequency.setTargetAtTime(targetHz, now, 0.18);
@@ -4939,9 +5312,9 @@
   }
 
   function updateSoundscape(worldW, worldH, tSec) {
-    if (!soundReady || !audioCtx || !animData) return;
+    if (!soundReady || !audioCtx || !animData || !soundEnabled) return;
     const nowMs = performance.now();
-    if (nowMs - lastAudioUpdateMs < 85) return;
+    if (nowMs - lastAudioUpdateMs < 60) return;
     lastAudioUpdateMs = nowMs;
 
     if (audioCtx.state === 'suspended') {
@@ -4955,7 +5328,7 @@
     const v1 = (canvas.height - offsetY) / (worldH * scale);
     const uC = (u0 + u1) * 0.5;
     const halfVisU = Math.max(0.02, (u1 - u0) * 0.5);
-    const zoomNorm = Math.max(0.15, Math.min(4.0, scale));
+    const zoomNorm = Math.max(0.15, Math.min(4.0, scale / dpr));
     const isNight = currentMode === 'night';
     const isSunset = currentMode === 'sunset';
 
@@ -5066,12 +5439,15 @@
     // 5. Lake Zurich Shoreline Waves (STRICT tight shoreline range: completely silent once you move away from the lake!)
     let bestWave = { level: 0, brightness: 0.08, pan: 0 };
     const shore = (animData.ambient && animData.ambient.shoreline) || [];
-    for (let i = 0; i < shore.length; i += 3) {
+    for (let i = 0; i < shore.length; i++) {
       const sp = computeSpatialFactor(shore[i][0], shore[i][1], u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.042);
       if (sp.level > bestWave.level) bestWave = sp;
     }
+    // Overview hush: from the zoomed-out Fit view the whole lake edge is "in view" but far away, so waves
+    // must stay a barely-there murmur and only swell as the camera comes down to the water's edge.
+    const waveZoomGate = Math.min(1, Math.max(0.04, (zoomNorm - 0.2) / 0.8));
     const wavePulse = 0.85 + 0.15 * Math.sin(tSec * (Math.PI * 2 / 5.6));
-    applyChannelSpatial('lake_waves', bestWave.level * wavePulse, bestWave.brightness, bestWave.pan);
+    applyChannelSpatial('lake_waves', bestWave.level * wavePulse * waveZoomGate, bestWave.brightness, bestWave.pan);
 
     // 6. Virtual Songbird Tree Perches (14 real wooded groves & parks with gentle intermittent singing!)
     const treeBirdPerches = [
@@ -5147,9 +5523,8 @@
         if (ba) { ba.textContent = 'Live: On'; ba.classList.add('active'); }
         requestAnimationFrame(animLoop);
       }
-      if (scale < 1.5) {
-        scale = 2.0;
-        updateZoomReadout();
+      if (cssScale() < 1.5) {
+        animateCamera(2.0 * dpr, getCenterUV().u, getCenterUV().v, 360, true);
       }
       updateFollowCamera(getAnimTimeSec(), true);
       scheduleDraw();
@@ -5271,29 +5646,21 @@
 
   const btnToggleSound = document.getElementById('btn-toggle-sound');
   if (btnToggleSound) {
-    btnToggleSound.addEventListener('click', () => {
-      soundEnabled = !soundEnabled;
-      btnToggleSound.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
-      btnToggleSound.classList.toggle('active', soundEnabled);
-      if (soundEnabled) {
-        if (!soundReady) {
-          initSoundscape();
-        } else if (audioCtx && audioMasterGain) {
-          audioCtx.resume().catch(() => {});
-          audioMasterGain.gain.setTargetAtTime(SOUND_MASTER_LEVEL, audioCtx.currentTime, 0.25);
-          lastAudioUpdateMs = 0;
-          const { width, height } = getWorldSize();
-          updateSoundscape(width, height, getAnimTimeSec());
-        }
-      } else if (audioCtx && audioMasterGain) {
-        audioMasterGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.18);
-      }
-    });
+    btnToggleSound.setAttribute('aria-pressed', 'false');
+    btnToggleSound.addEventListener('click', () => setSoundEnabled(!soundEnabled));
   }
+
+  // Spatial audio follows the camera on its own clock, so panning/zooming/switching presets keeps the
+  // mix alive even while the animation loop is paused (Live: Off).
+  setInterval(() => {
+    if (!soundEnabled || !soundReady || document.hidden) return;
+    const { width, height } = getWorldSize();
+    updateSoundscape(width, height, getAnimTimeSec());
+  }, 90);
 
   document.addEventListener('visibilitychange', () => {
     if (audioCtx && audioMasterGain && soundEnabled) {
-      const target = document.hidden ? 0.0001 : SOUND_MASTER_LEVEL;
+      const target = document.hidden ? 0.0001 : masterTarget();
       audioMasterGain.gain.setTargetAtTime(target, audioCtx.currentTime, 0.15);
     }
     if (!document.hidden && showAnimations && animData) {
@@ -5322,9 +5689,16 @@
   });
 
   window.addEventListener('resize', resizeViewport);
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => resizeViewport()).observe(viewport);
+  }
+  // Moving the window between a Retina and a standard monitor changes devicePixelRatio without a resize
+  try {
+    window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`).addEventListener('change', () => resizeViewport());
+  } catch (_) { /* older browsers */ }
 
   const urlParams = new URLSearchParams(window.location.search);
-  const fixedAnimTime = urlParams.has('t') && !Number.isNaN(parseFloat(urlParams.get('t')))
+  const fixedAnimTime = urlParams.has('t') && Number.isFinite(parseFloat(urlParams.get('t')))
     ? parseFloat(urlParams.get('t'))
     : null;
   if (urlParams.get('pins') === '0') {
@@ -5336,10 +5710,11 @@
     setCinemaMode(true);
   }
   const initMode = ['day', 'sunset', 'night'].includes(urlParams.get('mode')) ? urlParams.get('mode') : 'day';
-  if (initMode !== 'day') {
-    currentMode = initMode;
-    document.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === currentMode));
-  }
+  // Always normalise the preset (malformed ?mode= falls back to day) & expose it for atmospheric theming
+  currentMode = initMode;
+  document.body.dataset.mode = currentMode;
+  document.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === currentMode));
+  resizeViewport();
 
   function loadDepthMap() {
     return new Promise((resolve) => {
@@ -5421,6 +5796,308 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Swiss cartographic chrome: collapsible inspector, address search, mixer, share & postcard
+  // ---------------------------------------------------------------------------
+  let sidebarCollapsed = false;
+  const btnSidebar = document.getElementById('btn-toggle-sidebar');
+  const narrowQuery = window.matchMedia('(max-width: 760px)');
+
+  function setSidebarCollapsed(collapsed) {
+    sidebarCollapsed = !!collapsed;
+    document.body.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+    if (btnSidebar) {
+      btnSidebar.classList.toggle('active', !sidebarCollapsed);
+      btnSidebar.setAttribute('aria-expanded', sidebarCollapsed ? 'false' : 'true');
+    }
+    resizeViewport();
+  }
+  if (btnSidebar) btnSidebar.addEventListener('click', () => setSidebarCollapsed(!sidebarCollapsed));
+  // Phones start with the inspector as a closed drawer so the map gets the whole screen
+  setSidebarCollapsed(narrowQuery.matches && urlParams.get('sidebar') !== '1');
+
+  const toastEl = document.getElementById('toast');
+  let toastTimer = null;
+  function showToast(msg) {
+    if (!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+  }
+
+  // ---- Instant address & landmark search (1,887 swisstopo addresses + 10 landmarks)
+  const searchInput = document.getElementById('search-input');
+  const searchList = document.getElementById('search-results');
+  let searchIndex = null;
+  let searchHits = [];
+  let searchCursor = -1;
+
+  function buildSearchIndex() {
+    if (searchIndex || !meta) return;
+    searchIndex = [];
+    (meta.landmarks || []).forEach((lm) => {
+      searchIndex.push({ kind: 'landmark', ref: lm, text: `${lm.name} ${lm.subtitle || ''} ${lm.category || ''}`.toLowerCase(), label: lm.name });
+    });
+    (meta.buildings || []).forEach((b) => {
+      if (!b.addr) return;
+      searchIndex.push({ kind: 'building', ref: b, text: `${b.addr} ${b.nb || ''}`.toLowerCase(), label: b.addr });
+    });
+  }
+
+  function rankSearch(entry, query) {
+    if (entry.text.startsWith(query)) return 0;
+    if (entry.text.includes(` ${query}`)) return 1;
+    return 2;
+  }
+
+  function runSearch(raw) {
+    const query = (raw || '').trim().toLowerCase();
+    searchHits = [];
+    searchCursor = -1;
+    if (query && meta) {
+      buildSearchIndex();
+      const tokens = query.split(/\s+/);
+      const hits = [];
+      for (const entry of searchIndex) {
+        if (tokens.every((t) => entry.text.includes(t))) hits.push(entry);
+      }
+      hits.sort((a, b) => (rankSearch(a, query) - rankSearch(b, query))
+        || ((a.kind === 'landmark' ? 0 : 1) - (b.kind === 'landmark' ? 0 : 1))
+        || (a.label.length - b.label.length)
+        || a.label.localeCompare(b.label, 'de'));
+      searchHits = hits;
+    }
+    searchResultCount = searchHits.length;
+    renderSearchResults(query);
+  }
+
+  function renderSearchResults(query) {
+    if (!searchList) return;
+    searchList.innerHTML = '';
+    if (!query) {
+      searchList.classList.add('hidden');
+      return;
+    }
+    if (!searchHits.length) {
+      const li = document.createElement('li');
+      li.className = 'search-empty';
+      li.textContent = 'No matching address or landmark';
+      searchList.appendChild(li);
+    }
+    searchHits.slice(0, 8).forEach((h, i) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.className = 'search-item';
+      li.dataset.idx = String(i);
+      const title = document.createElement('span');
+      title.className = 'search-item-title';
+      title.textContent = h.label;
+      const sub = document.createElement('span');
+      sub.className = 'search-item-sub';
+      sub.textContent = h.kind === 'landmark' ? 'Landmark' : `${h.ref.nb || 'Kilchberg'} · ${h.ref.type || 'Building'}`;
+      li.append(title, sub);
+      searchList.appendChild(li);
+    });
+    if (searchHits.length > 8) {
+      const li = document.createElement('li');
+      li.className = 'search-empty';
+      li.textContent = `+${searchHits.length - 8} more — keep typing to narrow`;
+      searchList.appendChild(li);
+    }
+    searchList.classList.remove('hidden');
+  }
+
+  function chooseSearchHit(hit) {
+    if (!hit) return;
+    if (followTarget) setFollowMode(null);
+    if (hit.kind === 'landmark') {
+      flyToLandmark(hit.ref);
+    } else {
+      setActiveLandmark(null);
+      selectBuilding(hit.ref);
+      animateCamera(3.0 * dpr, hit.ref.u, hit.ref.v, 640);
+    }
+    if (searchInput) searchInput.value = hit.label;
+    if (searchList) searchList.classList.add('hidden');
+    if (narrowQuery.matches) setSidebarCollapsed(true);
+  }
+
+  function highlightSearchCursor() {
+    if (!searchList) return;
+    [...searchList.querySelectorAll('.search-item')].forEach((el, i) => el.classList.toggle('active', i === searchCursor));
+  }
+
+  if (searchInput && searchList) {
+    searchInput.addEventListener('input', () => runSearch(searchInput.value));
+    searchInput.addEventListener('focus', () => { if (searchInput.value.trim()) renderSearchResults(searchInput.value.trim().toLowerCase()); });
+    searchInput.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      const shown = Math.min(8, searchHits.length);
+      if (e.key === 'ArrowDown') { e.preventDefault(); searchCursor = Math.min(shown - 1, searchCursor + 1); highlightSearchCursor(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); searchCursor = Math.max(0, searchCursor - 1); highlightSearchCursor(); }
+      else if (e.key === 'Enter') { e.preventDefault(); chooseSearchHit(searchHits[Math.max(0, searchCursor)]); }
+      else if (e.key === 'Escape') {
+        e.preventDefault();
+        searchInput.value = '';
+        runSearch('');
+        searchInput.blur();
+      }
+    });
+    searchList.addEventListener('mousedown', (e) => e.preventDefault());
+    searchList.addEventListener('click', (e) => {
+      const li = e.target.closest('.search-item');
+      if (li) chooseSearchHit(searchHits[Number(li.dataset.idx)]);
+    });
+    document.addEventListener('pointerdown', (e) => {
+      if (!e.target.closest('.search-wrap')) searchList.classList.add('hidden');
+    });
+  }
+
+  // ---- Audio layer mixer popover (Master + 6 layer trims)
+  const btnMixer = document.getElementById('btn-audio-mixer');
+  const mixerPop = document.getElementById('mixer-popover');
+  if (btnMixer && mixerPop) {
+    btnMixer.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = mixerPop.classList.toggle('hidden') === false;
+      btnMixer.classList.toggle('active', open);
+      btnMixer.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    mixerPop.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => {
+      if (!mixerPop.classList.contains('hidden')) {
+        mixerPop.classList.add('hidden');
+        btnMixer.classList.remove('active');
+        btnMixer.setAttribute('aria-expanded', 'false');
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !mixerPop.classList.contains('hidden')) {
+        mixerPop.classList.add('hidden');
+        btnMixer.classList.remove('active');
+        btnMixer.setAttribute('aria-expanded', 'false');
+        btnMixer.focus();
+      }
+    });
+    mixerPop.querySelectorAll('input[type="range"][data-mix]').forEach((slider) => {
+      slider.addEventListener('input', () => {
+        const key = slider.dataset.mix;
+        mixLevels[key] = Math.max(0, Math.min(1.5, Number(slider.value) / 100));
+        const out = slider.parentElement && slider.parentElement.querySelector('output');
+        if (out) out.textContent = `${Math.round(mixLevels[key] * 100)}%`;
+        if (key === 'master' && audioCtx && audioMasterGain) {
+          audioMasterGain.gain.setTargetAtTime(masterTarget(), audioCtx.currentTime, 0.08);
+        }
+        lastAudioUpdateMs = 0;
+        if (soundEnabled && soundReady) {
+          const { width, height } = getWorldSize();
+          updateSoundscape(width, height, getAnimTimeSec());
+        }
+      });
+    });
+  }
+
+  // ---- Share permalink & postcard PNG
+  function buildPermalink() {
+    const c = getCenterUV();
+    const p = new URLSearchParams();
+    p.set('mode', currentMode);
+    p.set('zoom', cssScale().toFixed(3));
+    p.set('u', c.u.toFixed(5));
+    p.set('v', c.v.toFixed(5));
+    if (!showPins) p.set('pins', '0');
+    if (followTarget) p.set('follow', followTarget);
+    return `${window.location.href.split('#')[0].split('?')[0]}?${p.toString()}`;
+  }
+
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) { /* fall through to legacy path */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand && document.execCommand('copy');
+      ta.remove();
+      return !!ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  const btnShare = document.getElementById('btn-share');
+  if (btnShare) {
+    btnShare.addEventListener('click', async () => {
+      const link = buildPermalink();
+      const copied = await copyText(link);
+      try { window.history.replaceState(null, '', link); } catch (_) { /* sandboxed */ }
+      showToast(copied ? 'Permalink copied to clipboard' : 'Permalink set in the address bar');
+    });
+  }
+
+  const btnPostcard = document.getElementById('btn-postcard');
+  if (btnPostcard) {
+    btnPostcard.addEventListener('click', () => {
+      const border = Math.round(26 * dpr);
+      const foot = Math.round(52 * dpr);
+      const out = document.createElement('canvas');
+      out.width = canvas.width + border * 2;
+      out.height = canvas.height + border + foot;
+      const o = out.getContext('2d');
+      o.fillStyle = '#f2ede2';
+      o.fillRect(0, 0, out.width, out.height);
+      o.drawImage(canvas, border, border);
+      o.strokeStyle = '#1a2230';
+      o.lineWidth = Math.max(1, dpr);
+      o.strokeRect(border - 0.5, border - 0.5, canvas.width + 1, canvas.height + 1);
+      // Swiss cross + cartographic caption
+      const cx = border;
+      const cy = canvas.height + border + Math.round(10 * dpr);
+      const cs = Math.round(26 * dpr);
+      o.fillStyle = '#d62828';
+      o.fillRect(cx, cy, cs, cs);
+      o.fillStyle = '#faf9f6';
+      o.fillRect(cx + cs * 0.42, cy + cs * 0.17, cs * 0.16, cs * 0.66);
+      o.fillRect(cx + cs * 0.17, cy + cs * 0.42, cs * 0.66, cs * 0.16);
+      o.fillStyle = '#1a2230';
+      o.textBaseline = 'middle';
+      o.font = `600 ${Math.round(14 * dpr)}px 'IBM Plex Mono', monospace`;
+      o.fillText('KILCHBERG ZH · BFS #0135', cx + cs + Math.round(12 * dpr), cy + cs * 0.32);
+      o.font = `${Math.round(11 * dpr)}px 'IBM Plex Mono', monospace`;
+      const modeName = { day: 'Midday', sunset: 'Alpenglow', night: 'Night' }[currentMode] || currentMode;
+      o.fillText(`swisstopo · ${modeName} · ${document.getElementById('scale-bar-label')?.textContent || ''} scale bar`, cx + cs + Math.round(12 * dpr), cy + cs * 0.78);
+      out.toBlob((blob) => {
+        if (!blob) { showToast('Postcard export unavailable'); return; }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `kilchberg-${currentMode}-postcard.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        showToast('Postcard saved');
+      }, 'image/png');
+    });
+  }
+
+  // Compass rose: the camera looks from azimuth 102°, so true north is rotated off screen-up
+  (function initCompass() {
+    const rose = document.getElementById('compass-rose');
+    if (!rose) return;
+    const az = 102;
+    // screen-up looks toward bearing (az+180); north is therefore (360 - (az+180)) clockwise from up
+    rose.style.transform = `rotate(${(540 - az) % 360}deg)`;
+  })();
+
   // Boot
   Promise.all([
     loadModeOverview(currentMode),
@@ -5438,17 +6115,18 @@
     const qZoom = parseFloat(urlParams.get('zoom'));
     const qU = parseFloat(urlParams.get('u'));
     const qV = parseFloat(urlParams.get('v'));
-    if (!Number.isNaN(qZoom) && qZoom > 0) {
+    if (Number.isFinite(qZoom) && qZoom > 0) {
       const { width, height } = getWorldSize();
-      const cu = !Number.isNaN(qU) ? qU : 0.5;
-      const cv = !Number.isNaN(qV) ? qV : 0.5;
-      scale = qZoom;
+      const cu = Number.isFinite(qU) ? Math.min(1, Math.max(0, qU)) : 0.5;
+      const cv = Number.isFinite(qV) ? Math.min(1, Math.max(0, qV)) : 0.5;
+      scale = clampScale(qZoom * dpr);
       offsetX = canvas.width * 0.5 - cu * width * scale;
       offsetY = canvas.height * 0.5 - cv * height * scale;
+      clampOffsets();
       updateZoomReadout();
       draw();
     } else {
-      fitToScreen();
+      fitToScreen(false);
     }
     const qFollow = (urlParams.get('follow') || '').toLowerCase();
     if (qFollow === 'train' || qFollow === 'boat' || qFollow === 'bus') {
@@ -5473,14 +6151,20 @@
     enumerable: false,
     get() {
       const { width, height } = getWorldSize();
-      const cu = (width > 0 && scale > 0) ? (canvas.width * 0.5 - offsetX) / (width * scale) : 0.5;
-      const cv = (height > 0 && scale > 0) ? (canvas.height * 0.5 - offsetY) / (height * scale) : 0.5;
+      const { u: cu, v: cv } = getCenterUV();
       return {
         mode: currentMode,
-        scale,
+        scale: scale / dpr,
         u: cu,
         v: cv,
-        dpr: window.devicePixelRatio || 1,
+        dpr,
+        fps: renderStamps.length,
+        audioEnabled: soundEnabled,
+        audioState: audioCtx ? audioCtx.state : 'uninitialized',
+        audioGains: { ...audioGainReport },
+        activeLandmark: activeLandmarkId,
+        selectedBuilding: selectedBuilding ? selectedBuilding.id : null,
+        searchResultCount,
         animTime: getAnimTimeSec(),
         followTarget,
         showAnimations,

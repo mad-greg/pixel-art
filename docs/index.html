@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#131924" />
   <title>Kilchberg ZH — 90s 3D Isometric Pixel Art Diorama</title>
   <meta name="description" content="Ultra-high-fidelity 90s 3D isometric pixel-art diorama of Kilchberg (ZH), Switzerland, built from official swisstopo 0.5m LiDAR, 1,890 LOD2 3D buildings, and 10cm SWISSIMAGE aerial textures." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=5.0" />
+  <link rel="stylesheet" href="styles.css?v=7.0" />
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -18,6 +19,11 @@
         <h1>Kilchberg ZH — 90s 3D Isometric Pixel Art Diorama</h1>
         <p class="subtitle" id="header-subtitle">256-Color SVGA · 1,890 LOD2 3D Buildings · 16,046 Sculpted 3D Trees · 3D Sports Fields &amp; Live SBB Trains</p>
       </div>
+    </div>
+
+    <div class="search-wrap">
+      <input id="search-input" type="search" placeholder="Search address or landmark…" aria-label="Search addresses and landmarks" autocomplete="off" spellcheck="false" />
+      <ul id="search-results" class="search-results hidden" role="listbox" aria-label="Search results"></ul>
     </div>
 
     <div class="controls-bar">
@@ -44,6 +50,21 @@
       <button id="btn-toggle-pins" class="toggle-btn active" title="Toggle landmark pins">Pins</button>
       <button id="btn-toggle-loupe" class="toggle-btn" title="Toggle 6x pixel-grid magnifier">6× Loupe</button>
       <button id="btn-cinema" class="toggle-btn" title="Full-screen Cinema Mode — hide UI chrome (H)">Cinema</button>
+      <button id="btn-audio-mixer" class="toggle-btn" aria-label="Audio layer mixer" aria-expanded="false" title="Audio layer mixer — Master and per-layer levels">Mixer</button>
+      <button id="btn-share" class="toggle-btn" title="Copy a permalink to this exact view">Share</button>
+      <button id="btn-postcard" class="toggle-btn" title="Save the current view as a Swiss cartographic postcard">Postcard</button>
+      <button id="btn-toggle-sidebar" class="toggle-btn active" aria-label="Toggle inspector sidebar" aria-expanded="true" title="Show / hide the inspector sidebar (I)">Inspector</button>
+    </div>
+
+    <div id="mixer-popover" class="mixer-popover hidden" role="group" aria-label="Audio layers">
+      <div class="eyebrow">SOUNDSCAPE LAYERS</div>
+      <label class="mix-row"><span>Master</span><input type="range" min="0" max="150" value="100" data-mix="master" aria-label="Master volume" /><output>100%</output></label>
+      <label class="mix-row"><span>Lake waves</span><input type="range" min="0" max="150" value="100" data-mix="lake" aria-label="Lake waves level" /><output>100%</output></label>
+      <label class="mix-row"><span>Birds &amp; crickets</span><input type="range" min="0" max="150" value="100" data-mix="nature" aria-label="Birds and crickets level" /><output>100%</output></label>
+      <label class="mix-row"><span>Road traffic</span><input type="range" min="0" max="150" value="100" data-mix="traffic" aria-label="Road traffic level" /><output>100%</output></label>
+      <label class="mix-row"><span>SBB trains</span><input type="range" min="0" max="150" value="100" data-mix="rail" aria-label="Train level" /><output>100%</output></label>
+      <label class="mix-row"><span>Lake boats</span><input type="range" min="0" max="150" value="100" data-mix="water" aria-label="Boat level" /><output>100%</output></label>
+      <label class="mix-row"><span>Church bells</span><input type="range" min="0" max="150" value="100" data-mix="bells" aria-label="Bell level" /><output>100%</output></label>
     </div>
   </header>
 
@@ -53,6 +74,21 @@
       <div id="pins-layer" class="pins-layer"></div>
       <canvas id="loupe-canvas" class="loupe-canvas hidden" width="228" height="228"></canvas>
       <button id="btn-exit-cinema" class="exit-cinema-btn" title="Exit Cinema Mode (H / Esc)">Exit Cinema</button>
+
+      <div id="compass" class="compass viewport-ui" role="img" aria-label="Compass rose — north bearing for the 102° isometric view">
+        <svg id="compass-rose" viewBox="-30 -30 60 60" width="56" height="56" aria-hidden="true">
+          <circle r="27" fill="rgba(19,25,36,0.88)" stroke="#8c7d62" stroke-width="1.2" />
+          <circle r="21" fill="none" stroke="#2e3b52" stroke-width="0.8" />
+          <path d="M0,-24 L5,0 L0,4 L-5,0 Z" fill="#d62828" />
+          <path d="M0,24 L5,0 L0,-4 L-5,0 Z" fill="#aebacc" />
+          <text x="0" y="-12.5" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9" font-weight="700" fill="#faf9f6">N</text>
+        </svg>
+      </div>
+
+      <div id="scale-bar" class="scale-bar viewport-ui" aria-label="Metric scale bar">
+        <span id="scale-bar-label" class="scale-bar-label">100 m</span>
+        <span id="scale-bar-line" class="scale-bar-line"></span>
+      </div>
 
       <div class="hud-coords viewport-ui" id="hud-coords">
         <span id="coord-lv95">LV95 E 2'683'780 · N 1'241'890</span>
@@ -83,7 +119,7 @@
         <p id="insp-sub" class="insp-sub">Drag anywhere to pan, scroll or pinch to zoom right down to individual roof tiles, windows, trees &amp; boats. Click any 3D building to inspect its swisstopo GIS data.</p>
         <dl class="spec-grid" id="insp-specs">
           <div><dt>BFS Number</dt><dd>0135 (Kanton Zürich)</dd></div>
-          <div><dt>Elevation Range</dt><dd>406.0 m – 545.0 m</dd></div>
+          <div><dt>Elevation Range</dt><dd>406.0 m – 550.5 m (church spire)</dd></div>
           <div><dt>3D Buildings</dt><dd>1,890 (124,155 tris)</dd></div>
           <div><dt>Pixel Fidelity</dt><dd id="spec-fidelity">25 cm/px · 256 Colors</dd></div>
         </dl>
@@ -113,8 +149,10 @@
         <div class="modal-actions">
           <button id="btn-modal-1x" class="icon-btn text-btn">1:1 px</button>
           <button id="btn-modal-2x" class="icon-btn text-btn">2× px</button>
+          <button id="btn-modal-4x" class="icon-btn text-btn">4× px</button>
           <button id="btn-modal-fit" class="icon-btn text-btn">Fit</button>
-          <button id="btn-close-modal" class="icon-btn">✕</button>
+          <button id="btn-modal-fly" class="icon-btn text-btn">Fly Here</button>
+          <button id="btn-close-modal" class="icon-btn" aria-label="Close detail plate">✕</button>
         </div>
       </div>
       <div class="modal-body" id="modal-viewport">
@@ -123,6 +161,8 @@
     </div>
   </div>
 
-  <script src="app.js?v=6.2"></script>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js?v=7.0"></script>
 </body>
 </html>

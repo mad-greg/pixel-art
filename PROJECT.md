@@ -79,11 +79,11 @@ Every feature identified during Step 0 Survey (Explorers 1, 2, 3) is assigned to
 | # | Name | Scope | Dependencies | Status | Sub-Orch Conv ID |
 |---|------|-------|-------------|--------|------------------|
 | M1 | Environment Bootstrap, Cache Rebuild & Hygiene | F1, F2, F3 | none | DONE (`.venv`, `/tmp/kilchberg-cache/`, `.gitignore`, `config.py`, `extract_scene.py` steps) | `02e6956a8b765dd2b696db39761e082c` |
-| M2 | Pixel-Art Shader, Lighting, Water, Architecture, Landmarks & Re-Render | F4–F14 | M1 | IN_PROGRESS | `a2e8d2e166f39f4e838a4dff6ad62147` |
+| M2 | Pixel-Art Shader, Lighting, Water, Architecture, Landmarks & Re-Render | F4–F14 | M1 | DONE (`pixel_shader.py` + `day`/`sunset`/`night` + 6 plates synced, `verify_quality` 11/11 `[ok]`) | `a2e8d2e166f39f4e838a4dff6ad62147` |
 | M3 | Unified Living-World Data Pipeline & Edge-to-Edge Path Engineering | F15–F17 | M1 | DONE (`export_animations.py`, `kilchberg_animations.json`, 5/5 Gate PASS, T1.FA2 8/8 PASS) | `11c494f168e5d3a0c02a72254c0dc5a2` |
-| M4 | Living-World Engine, Depth Occlusion & Diurnal Choreography | F18–F21 | M3 | IN_PROGRESS | `e99d266e85758be1dea6f2418a368b0c` |
-| M5 | Swiss Cartographic UI/UX, HiDPI/Perf, Camera & Spatial Audio Overhaul | F22–F26 | M2, M4 | PLANNED | — |
-| M6 | Final Milestone: Phase 1 (Tiers 1–4 E2E Pass) & Phase 2 (Tier 5 Hardening) | F27 | M5, TEST_READY.md | PLANNED | — |
+| M4 | Living-World Engine, Depth Occlusion & Diurnal Choreography | F18–F21 | M3 | DONE (5/5 Gate PASS, APPROVE/CLEAN) | `e99d266e85758be1dea6f2418a368b0c` |
+| M5 | Swiss Cartographic UI/UX, HiDPI/Perf, Camera & Spatial Audio Overhaul | F22–F26 | M2, M4 | DONE (APPROVE/CLEAN + flakiness fix) | `orchestrator_2` |
+| M6 | Final Milestone: Full 70-Test E2E Pass, Verification & Publish | F27 | M5, TEST_READY.md | IN_PROGRESS (70/70 E2E PASS, 11/11 `[ok]`, `reviewer_final` APPROVE; publishing to `origin main`) | `orchestrator_3` |
 | E2E | E2E Testing Track (Parallel Opaque-Box 4-Tier Test Suite) | `TEST_INFRA.md`, `tests/**`, `TEST_READY.md` | none | DONE (70 tests across Tiers 1–4, 63.1s, 5/5 Gate PASS, `TEST_READY.md` published) | `c60b80fb237dc68df8008099f1e2d6e3` |
 
 ---

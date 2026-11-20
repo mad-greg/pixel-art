@@ -850,6 +850,20 @@ class SceneData:
         for r, c in zip(sr[::2], sc[::2]):
             _try_add(E_MIN + (c + 0.5) * GRID_RES, N_MAX - (r + 0.5) * GRID_RES, float(self.dem[r, c]), 0, 19.0)
 
+        # Source 1b: Quartierstrassen / Alte Landstrasse village lanes (G_STREET_MINOR) get sparser lantern posts on the verge
+        minor_band = (
+            self.diorama_mask
+            & (self.sem == G_STREET_MINOR)
+            & (~self.bldg_roof_mask)
+            & (~self.lake_mask)
+            & (self.bridge_cls == 0)
+            & (self.road_dist >= 1.35)
+            & (self.road_dist <= 2.6)
+        )
+        mr, mc = np.nonzero(minor_band)
+        for r, c in zip(mr[::2], mc[::2]):
+            _try_add(E_MIN + (c + 0.5) * GRID_RES, N_MAX - (r + 0.5) * GRID_RES, float(self.dem[r, c]), 0, 24.0)
+
         # Source 2: Elevated Road Viaduct outer edges
         br_m = (
             self.diorama_mask
@@ -1807,9 +1821,10 @@ def _shade_drawn_ground_90s(
             depth_m = np.clip(LAKE_SURFACE_Z - gbathy[wi], 0.0, 65.0)
             t_sh = np.clip(depth_m / 6.0, 0.0, 1.0)[:, None]
             t_dp = np.clip((depth_m - 6.0) / 30.0, 0.0, 1.0)[:, None]
+            mid_w = np.array([38.0, 96.0, 110.0], dtype=np.float32) if preset_key == "day" else np.array([34.0, 86.0, 100.0], dtype=np.float32)
+            deep_w = np.array([32.0, 84.0, 108.0], dtype=np.float32) if preset_key == "day" else np.array([18.0, 52.0, 80.0], dtype=np.float32)
             w_col = (1.0 - t_sh) * np.array([64.0, 126.0, 112.0], dtype=np.float32) + t_sh * (
-                (1.0 - t_dp) * np.array([34.0, 86.0, 100.0], dtype=np.float32)
-                + t_dp * np.array([18.0, 52.0, 80.0], dtype=np.float32)
+                (1.0 - t_dp) * mid_w + t_dp * deep_w
             )
             # Clamp shallow ortho redness so zero winter shoreline reed tint ever leaks into shallow water!
             shallow_tint = np.clip((4.5 - depth_m) / 4.5, 0.0, 1.0)[:, None] * 0.14
@@ -1844,8 +1859,16 @@ def _shade_drawn_ground_90s(
             in_dash = v_frac < 0.26
             crest = in_dash & (w_hash < 28) & (dash_u >= 0.15) & (dash_u <= 0.72) & (depth_m >= 0.65)
             trough = (v_frac >= 0.26) & (v_frac < 0.46) & (w_hash < 28) & (dash_u >= 0.20) & (dash_u <= 0.68) & (depth_m >= 0.65)
-            w_col[crest] += np.array([22.0, 32.0, 34.0], dtype=np.float32)
-            w_col[trough] *= 0.87
+            # Ripple crests mirror a hint of the overcast-blue sky (Fresnel) and troughs sit slightly deeper;
+            # both stay close to the lake body colour so open water reads as one calm surface with
+            # no detached bright/dark speckle islands.
+            crest_sky = (
+                np.array([22.0, 34.0, 56.0], dtype=np.float32)
+                if preset_key == "night"
+                else (np.array([52.0, 96.0, 122.0], dtype=np.float32) if preset_key == "day" else np.array([40.0, 60.0, 82.0], dtype=np.float32))
+            )
+            w_col[crest] = 0.72 * w_col[crest] + 0.28 * crest_sky
+            w_col[trough] *= 0.94
 
             # Crisp 1-2px organic broken shore & pier foam curls
             r05_w = r05[wi]
@@ -5918,7 +5941,7 @@ def render_diorama(
         in_lvp = (sx_lb >= -28.0) & (sx_lb <= W + 28.0) & (sy_lb >= -28.0) & (sy_lb <= H + 28.0)
         if in_lvp.any():
             li_vp = np.nonzero(in_lvp)[0]
-            pool_tint = np.array([174.0, 108.0, 36.0], dtype=np.float32) * pool_scale
+            pool_tint = np.array([174.0, 108.0, 36.0], dtype=np.float32) * pool_scale * (1.15 if preset.is_night else 1.0)
             bloom_tint = np.array([166.0, 112.0, 42.0], dtype=np.float32) * pool_scale
             for idx_l in li_vp:
                 le_i = float(scene.lamp_e[idx_l])
@@ -5937,7 +5960,7 @@ def render_diorama(
                 cx_l = float(sx_lb[idx_l])
                 cy_l = float(sy_lb[idx_l])
                 d_l = float(pd_lb[idx_l])
-                rx_p = 20.0 if lk_i in (0, 1) else 16.0
+                rx_p = (26.0 if lk_i in (0, 1) else 21.0) if preset.is_night else (20.0 if lk_i in (0, 1) else 16.0)
                 ry_p = rx_p * 0.52
                 x0_p = max(0, int(math.floor(cx_l - rx_p)))
                 x1_p = min(W, int(math.ceil(cx_l + rx_p)) + 1)
@@ -6076,14 +6099,8 @@ def render_diorama(
                     0.0,
                     255.0,
                 )
-        else:
-            spk = (corridor > 0.28) & (s_hash < 15) & ((gx_w & 1) == 0)
-            if spk.any():
-                rgb_buf[wy_s[spk], wx_s[spk]] = np.clip(
-                    rgb_buf[wy_s[spk], wx_s[spk]] + corridor[spk, None] * np.array([58.0, 68.0, 64.0], dtype=np.float32),
-                    0.0,
-                    255.0,
-                )
+        # Day: no static specular speckle on the lake; the live app.js lake-glint layer animates sun glitter,
+        # and baked bright pixels read as floating islands in open water.
 
     _apply_pixel_art_outlines_float(rgb_buf, zbuf, obj_buf, mat_buf, norm_buf, preset.is_night)
 
