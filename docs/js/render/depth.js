@@ -345,6 +345,16 @@ export function createDepthManager() {
     }
   }
 
+  function isOccludedAt(wx, wy, d16, worldW, worldH) {
+    if (!depthPixels || depthW <= 0 || depthH <= 0 || !Number.isFinite(d16)) return false;
+    const dx = Math.min(depthW - 1, Math.max(0, Math.floor((wx / Math.max(1, worldW)) * depthW)));
+    const dy = Math.min(depthH - 1, Math.max(0, Math.floor((wy / Math.max(1, worldH)) * depthH)));
+    const di = (dy * depthW + dx) * 4;
+    if (depthPixels[di + 2] <= 128) return false;
+    const sceneD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
+    return d16 > sceneD16 + 8;
+  }
+
   return {
     setAnimData,
     loadDepthMap,
@@ -354,6 +364,7 @@ export function createDepthManager() {
     isWaterUV,
     getDepthConstants,
     evalWalkerD16,
+    isOccludedAt,
     resetDepthStats,
     getDepthStats,
     drawDepthMasked,

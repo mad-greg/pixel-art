@@ -1031,14 +1031,24 @@ export function drawKilchbergDetails(
       const latB = Math.cos(tSec * 0.85 + ci * 1.7) * 0.68;
       const ballLat = latA * (1 - ballF) + latB * ballF;
 
-      const pAx = toX(c.sw[0] + c.lat[0] * latA);
-      const pAy = toY(c.sw[1] + c.lat[1] * latA);
-      const pBx = toX(c.ne[0] + c.lat[0] * latB);
-      const pBy = toY(c.ne[1] + c.lat[1] * latB);
+      const uA = c.sw[0] + c.lat[0] * latA;
+      const vA = c.sw[1] + c.lat[1] * latA;
+      const uB = c.ne[0] + c.lat[0] * latB;
+      const vB = c.ne[1] + c.lat[1] * latB;
+      const pAx = toX(uA);
+      const pAy = toY(vA);
+      const pBx = toX(uB);
+      const pBy = toY(vB);
       const whiteKit = isSunset ? '#ffe8d4' : '#f4f7fa';
       const shortCol = ci === 0 ? '#1e3a5f' : (ci === 1 ? '#991b1b' : '#166534');
-      drawMiniPerson(ctx, pBx, pBy, s * 0.90, whiteKit, shortCol, hairs[ci % hairs.length], false, tSec * 10.0 + 1.0, null, canvasW, canvasH);
-      drawMiniPerson(ctx, pAx, pAy, s * 0.90, whiteKit, '#1e3a5f', hairs[(ci + 2) % hairs.length], false, tSec * 10.0, null, canvasW, canvasH);
+      const d16B = depthMgr.evalWalkerD16(uB * worldW, vB * worldH, 476.0, worldW, worldH, false);
+      depthMgr.drawDepthMasked(ctx, cam, uB * worldW, vB * worldH, walkerBounds, d16B, worldW, worldH, (targetCtx) => {
+        drawMiniPerson(targetCtx, pBx, pBy, s * 0.90, whiteKit, shortCol, hairs[ci % hairs.length], false, tSec * 10.0 + 1.0, null, canvasW, canvasH);
+      }, 2.0);
+      const d16A = depthMgr.evalWalkerD16(uA * worldW, vA * worldH, 476.0, worldW, worldH, false);
+      depthMgr.drawDepthMasked(ctx, cam, uA * worldW, vA * worldH, walkerBounds, d16A, worldW, worldH, (targetCtx) => {
+        drawMiniPerson(targetCtx, pAx, pAy, s * 0.90, whiteKit, '#1e3a5f', hairs[(ci + 2) % hairs.length], false, tSec * 10.0, null, canvasW, canvasH);
+      }, 2.0);
 
       const bu = c.sw[0] + (c.ne[0] - c.sw[0]) * ballF + c.lat[0] * ballLat;
       const bv = c.sw[1] + (c.ne[1] - c.sw[1]) * ballF + c.lat[1] * ballLat;
@@ -2528,18 +2538,23 @@ export function drawKilchbergDetails(
           const ang = tSec * (0.48 + r * 0.08) + r * Math.PI;
           const ru = hhTrack[0] + Math.cos(ang) * 0.0022;
           const rv = hhTrack[1] + Math.sin(ang) * 0.0014;
-          drawMiniPerson(
-            ctx,
-            toX(ru), toY(rv), s * 0.84,
-            shadeHex(r === 0 ? '#ef4444' : '#38bdf8', 1.0, mode),
-            '#1e293b',
-            hairs[r],
-            false,
-            tSec * 10.5 + r * 2.1,
-            null,
-            canvasW,
-            canvasH,
-          );
+          const wx = ru * worldW;
+          const wy = rv * worldH;
+          const d16 = depthMgr.evalWalkerD16(wx, wy, 498.0, worldW, worldH, false);
+          depthMgr.drawDepthMasked(ctx, cam, wx, wy, walkerBounds, d16, worldW, worldH, (targetCtx) => {
+            drawMiniPerson(
+              targetCtx,
+              toX(ru), toY(rv), s * 0.84,
+              shadeHex(r === 0 ? '#ef4444' : '#38bdf8', 1.0, mode),
+              '#1e293b',
+              hairs[r],
+              false,
+              tSec * 10.5 + r * 2.1,
+              null,
+              canvasW,
+              canvasH,
+            );
+          }, 2.0);
         }
       }
     }

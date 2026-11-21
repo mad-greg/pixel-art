@@ -199,6 +199,10 @@ export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, _tSec) 
 export function createPedestrianSim(animData) {
   const masterW = (animData && animData.canvas_width) || 12331;
   const masterH = (animData && animData.canvas_height) || 5444;
+  const depthMin = (animData && typeof animData.depth_min === 'number') ? animData.depth_min : -2400.0;
+  const depthMax = (animData && typeof animData.depth_max === 'number') ? animData.depth_max : 2400.0;
+  const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+  const depthSlopeGround = mppMaster * Math.sqrt(3) * (65535.0 / Math.max(1.0, depthMax - depthMin));
   const network = (animData && animData.network) || {};
   const vig = (animData && animData.ambient && animData.ambient.vignettes) || {};
   const roads = (animData && animData.roads) || [];
@@ -491,11 +495,11 @@ export function createPedestrianSim(animData) {
       rx = -gy / gm;
       ry = (gx / gm) * isoY;
     }
-    const latPx = isMain ? 7.0 : 4.5;
+    const latPx = isMain ? 6.2 : 2.8;
     const wx = pos.wx + rx * latPx;
     const wy = pos.wy + ry * latPx;
     const baseD16 = pos.d16 || 30000;
-    const swD16 = isMain ? clamp(baseD16 + (isLakeLane ? -38 : 38), 1, 65534) : baseD16;
+    const swD16 = clamp(Math.round(baseD16 - (wy - pos.wy) * depthSlopeGround), 1, 65534);
     return {
       u: clamp(wx / masterW, 0.002, 0.998),
       v: clamp(wy / masterH, 0.002, 0.998),
@@ -640,25 +644,35 @@ export function createPedestrianSim(animData) {
     }
   }
 
+  const u16PerM = 65535.0 / Math.max(1.0, depthMax - depthMin);
+  const depthC0 = (0 - depthMin) * u16PerM + depthSlopeGround * 2927.412592;
+  const depthSlopeZ = 2.0 * 1.16 * u16PerM;
+  function evalEstD16(u, v, zGnd) {
+    const wyM = v * masterH;
+    return clamp(Math.round(depthC0 - depthSlopeGround * wyM - depthSlopeZ * ((zGnd != null ? zGnd : 413.9) - 348.0) - 10), 1, 65534);
+  }
+
   function startConnectorWalk(ag, targetU, targetV, targetD16, targetZGnd, onElevated, nextAction, tripLabel) {
     const distPx = Math.hypot((targetU - ag.u) * masterW, (targetV - ag.v) * masterH);
+    const resolvedEndD16 = targetD16 != null ? targetD16 : evalEstD16(targetU, targetV, targetZGnd);
     ag.connNext = nextAction;
     if (distPx < 3.0) {
       ag.u = targetU;
       ag.v = targetV;
-      if (targetD16 != null) ag.d16 = targetD16;
+      ag.d16 = resolvedEndD16;
       ag.zGnd = targetZGnd;
       ag.onElevatedDeck = !!onElevated;
       finishConnector(ag);
       return;
     }
+    const startD16 = ag.zGnd != null ? evalEstD16(ag.u, ag.v, ag.zGnd) : (ag.d16 || evalEstD16(ag.u, ag.v, null));
     ag.state = 'walk_connector';
     ag.connStartU = ag.u;
     ag.connStartV = ag.v;
     ag.connEndU = targetU;
     ag.connEndV = targetV;
-    ag.connStartD16 = ag.d16;
-    ag.connEndD16 = targetD16 != null ? targetD16 : ag.d16;
+    ag.connStartD16 = startD16;
+    ag.connEndD16 = resolvedEndD16;
     ag.connStartZGnd = ag.zGnd;
     ag.connEndZGnd = targetZGnd;
     ag.connProgress = 0;
@@ -676,6 +690,16 @@ export function createPedestrianSim(animData) {
     if (!p0) return false;
     const distPx = Math.hypot((p0.u - ag.u) * masterW, (p0.v - ag.v) * masterH);
     if (distPx < 8.0) {
+      return assignFootpathTrip(ag, fromPoi, toPoi, labelPrefix);
+    }
+    // Snap directly to footpath start if separated across a station building (> 22 px)
+    // so commuters never walk through building roofs on a straight-line connector.
+    if (distPx > 22.0 && fromPoi === 'poi_bahnhof') {
+      ag.u = p0.u;
+      ag.v = p0.v;
+      ag.d16 = p0.d16;
+      ag.zGnd = null;
+      ag.onElevatedDeck = false;
       return assignFootpathTrip(ag, fromPoi, toPoi, labelPrefix);
     }
     startConnectorWalk(
@@ -778,27 +802,29 @@ export function createPedestrianSim(animData) {
   function updateCrosswalkPosition(ag, cw) {
     const p = ag.state === 'crossing_cw' ? ag.cwProgress : 0;
     const isSeestrasse = typeof cw.road_id === 'string' && cw.road_id.startsWith('seestrasse');
+    const baseWx = cw.u * masterW;
+    const baseWy = cw.v * masterH;
     let wx;
     let wy;
     if (isSeestrasse) {
       const nMag = Math.hypot(cw.nx, cw.ny) || 1;
       const ux = cw.nx / nMag;
       const uy = cw.ny / nMag;
-      const spanPx = (p - 0.5) * 23.0 * ag.cwDir;
-      wx = cw.u * masterW + ux * spanPx;
-      wy = cw.v * masterH + uy * spanPx;
+      const spanPx = (p - 0.5) * 18.0 * ag.cwDir;
+      wx = baseWx + ux * spanPx;
+      wy = baseWy + uy * spanPx;
       ag.tx = ux * ag.cwDir;
       ag.ty = uy * ag.cwDir;
     } else {
-      const spanPx = (p - 0.5) * 15.0 * ag.cwDir;
-      wx = cw.u * masterW + cw.nx * spanPx;
-      wy = cw.v * masterH + cw.ny * spanPx * 0.55;
+      const spanPx = (p - 0.5) * 11.5 * ag.cwDir;
+      wx = baseWx + cw.nx * spanPx;
+      wy = baseWy + cw.ny * spanPx * 0.55;
       ag.tx = cw.nx * ag.cwDir;
       ag.ty = cw.ny * 0.55 * ag.cwDir;
     }
     ag.u = clamp(wx / masterW, 0.002, 0.998);
     ag.v = clamp(wy / masterH, 0.002, 0.998);
-    ag.d16 = cw.d16 || 30000;
+    ag.d16 = clamp(Math.round((cw.d16 || 30000) - (wy - baseWy) * depthSlopeGround), 1, 65534);
   }
 
   function resetState(mode, tStart) {
@@ -1243,7 +1269,7 @@ export function createPedestrianSim(animData) {
         if (ag.connStartZGnd != null && ag.connEndZGnd != null) {
           ag.zGnd = ag.connStartZGnd + (ag.connEndZGnd - ag.connStartZGnd) * f;
         } else {
-          ag.zGnd = f < 0.5 ? ag.connStartZGnd : ag.connEndZGnd;
+          ag.zGnd = null;
         }
         if (ag.connProgress >= 1.0) {
           finishConnector(ag);
@@ -1318,7 +1344,7 @@ export function createPedestrianSim(animData) {
                 ag,
                 fbStart.u,
                 fbStart.v,
-                ag.d16,
+                null,
                 fbStart.zGnd,
                 false,
                 { type: 'walk_footbridge', fbFrac: 0.0, fbDir: 1, tripLabel: 'Alighting S24 → Bahnhof Footbridge' },
@@ -1377,7 +1403,7 @@ export function createPedestrianSim(animData) {
             ag,
             platTarget.u,
             platTarget.v,
-            ag.d16,
+            null,
             platTarget.zGnd,
             false,
             { type: 'queue_rail', tripLabel: 'Commuter → Bahnhof Kilchberg (S24)' },
@@ -1588,7 +1614,7 @@ export function createPedestrianSim(animData) {
                 ag,
                 fbEnd.u,
                 fbEnd.v,
-                ag.d16,
+                null,
                 fbEnd.zGnd,
                 false,
                 { type: 'walk_footbridge', fbFrac: 1.0, fbDir: -1, tripLabel: 'Commuter → Bahnhof Footbridge' },
@@ -1600,7 +1626,7 @@ export function createPedestrianSim(animData) {
                 ag,
                 platTarget.u,
                 platTarget.v,
-                ag.d16,
+                null,
                 platTarget.zGnd,
                 false,
                 { type: 'queue_rail', tripLabel: 'Commuter → Bahnhof Kilchberg (S8)' },
@@ -1611,17 +1637,18 @@ export function createPedestrianSim(animData) {
           }
           if (ag.role === 'bus_rider' && curPoi === ag.targetStopPoiId && poiCurbGeo.has(curPoi)) {
             const geo = poiCurbGeo.get(curPoi);
-            const lat = geo.isMain ? 6.2 : 5.0;
+            const lat = geo.isMain ? 6.2 : 3.2;
             const targetU = clamp(geo.u + (geo.rx * lat) / masterW, 0.002, 0.998);
             const targetV = clamp(geo.v + (geo.ry * lat) / masterH, 0.002, 0.998);
+            const curbD16 = clamp(Math.round(geo.d16 - geo.ry * lat * depthSlopeGround), 1, 65534);
             startConnectorWalk(
               ag,
               targetU,
               targetV,
-              geo.d16,
+              curbD16,
               null,
               false,
-              { type: 'queue_bus', d16: geo.d16, tripLabel: `Rider → ${geo.routeLabel} (${geo.stopName})` },
+              { type: 'queue_bus', d16: curbD16, tripLabel: `Rider → ${geo.routeLabel} (${geo.stopName})` },
               `Rider → ${geo.routeLabel} (${geo.stopName})`,
             );
             continue;
@@ -1632,7 +1659,7 @@ export function createPedestrianSim(animData) {
               ag,
               dp.u,
               dp.v,
-              ag.d16,
+              null,
               dp.zGnd,
               false,
               { type: 'walk_pier_deck', pierFrac: 0.0, pierDir: 1, tripLabel: 'Passenger → Bendlikon ZSG Pier' },
@@ -1647,7 +1674,7 @@ export function createPedestrianSim(animData) {
               ag,
               targetU,
               targetV,
-              ag.d16,
+              null,
               413.9,
               false,
               { type: 'plaza_admire', stateTimer: rng.range(3.5, 6.0), tripLabel: 'Admiring Lindt Chocolate Fountain' },
