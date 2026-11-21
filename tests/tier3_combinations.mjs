@@ -1,5 +1,5 @@
 /**
- * Tier 3 (Node CDP): 10 Pairwise Cross-Feature Combination Suites (T3.01 - T3.10).
+ * Tier 3 (Node CDP): 11 Pairwise Cross-Feature Combination Suites (T3.01 - T3.11).
  */
 
 import {
@@ -646,6 +646,104 @@ async function runTests(harness, test) {
         `Spatial audio did not update while Live: Off (birds ${birdsDay.toFixed(4)}->${birdsNight.toFixed(4)}, crickets ${cricketsDay.toFixed(4)}->${cricketsNight.toFixed(4)})`,
       );
       assert(tab.exceptions.length === 0, `Exceptions during bell sync test: ${tab.exceptions.join('; ')}`);
+    } finally {
+      await harness.closeTab(tab);
+    }
+  });
+
+  // ── T3.11: URL ?landmark= Deep-Link Boot x [ / ] Keyboard Landmark Cycling (v9.0) ──
+  await test('T3.11', 'URL ?landmark= deep-link boot & [ / ] keyboard landmark cycling', async () => {
+    const tab = await harness.openTab('/?landmark=gemeindehaus_alte_landstr&t=10', {
+      width: 1280,
+      height: 800,
+      dpr: 1,
+      waitReady: true,
+    });
+    try {
+      await tab.waitForCameraSettled();
+      await sleep(140);
+
+      const dbg1 = await tab.getDebug();
+      const insp1 = await tab.evaluate(`(document.getElementById('insp-title')?.textContent || '').trim()`);
+      assert(
+        dbg1 && dbg1.activeLandmark === 'gemeindehaus_alte_landstr',
+        `Expected ?landmark=gemeindehaus_alte_landstr to set activeLandmark='gemeindehaus_alte_landstr', got '${dbg1?.activeLandmark}'`,
+      );
+      assert(
+        insp1.length > 0 && /gemeindehaus|alte landstrasse/i.test(insp1),
+        `Expected #insp-title populated for Gemeindehaus, got '${insp1}'`,
+      );
+      assert(
+        typeof dbg1.scale === 'number' && dbg1.scale >= 1.0,
+        `Expected ?landmark= boot to zoom in (scale >= 1.0), got ${dbg1?.scale}`,
+      );
+
+      const landmarks = await tab.evaluate(
+        `(async () => (await (await fetch('data/kilchberg_interactive.json')).json()).landmarks || [])()`,
+      );
+      assert(Array.isArray(landmarks) && landmarks.length >= 16, `Expected >=16 landmarks in interactive JSON, got ${landmarks?.length}`);
+
+      const lm1 = landmarks.find((l) => l.id === 'gemeindehaus_alte_landstr');
+      assert(Boolean(lm1), 'gemeindehaus_alte_landstr missing from kilchberg_interactive.json');
+      const dist1 = Math.hypot(dbg1.u - lm1.uv[0], dbg1.v - lm1.uv[1]);
+      assert(dist1 < 0.06, `Camera UV (${dbg1.u.toFixed(4)}, ${dbg1.v.toFixed(4)}) too far from gemeindehaus_alte_landstr (${lm1.uv[0].toFixed(4)}, ${lm1.uv[1].toFixed(4)}), dist=${dist1.toFixed(4)}`);
+
+      // Navigate to ?landmark=cf_meyer_haus
+      await tab.navigate('/?landmark=cf_meyer_haus&t=10', { waitReady: true });
+      await tab.waitForCameraSettled();
+      await sleep(140);
+
+      const dbg2 = await tab.getDebug();
+      const insp2 = await tab.evaluate(`(document.getElementById('insp-title')?.textContent || '').trim()`);
+      assert(
+        dbg2 && dbg2.activeLandmark === 'cf_meyer_haus',
+        `Expected ?landmark=cf_meyer_haus to set activeLandmark='cf_meyer_haus', got '${dbg2?.activeLandmark}'`,
+      );
+      assert(insp2.length > 0 && /meyer/i.test(insp2), `Expected #insp-title populated for C.F. Meyer-Haus, got '${insp2}'`);
+
+      const idx2 = landmarks.findIndex((l) => l.id === 'cf_meyer_haus');
+      assert(idx2 >= 0, 'cf_meyer_haus missing from kilchberg_interactive.json');
+      const lm2 = landmarks[idx2];
+      const dist2 = Math.hypot(dbg2.u - lm2.uv[0], dbg2.v - lm2.uv[1]);
+      assert(dist2 < 0.06, `Camera UV too far from cf_meyer_haus (dist=${dist2.toFixed(4)})`);
+
+      // Focus #viewport so keyboard shortcuts are not captured by any input
+      await tab.evaluate(`document.getElementById('viewport')?.focus()`);
+
+      // Press ']' -> next landmark
+      await tab.pressKey(']', 'BracketRight', 221);
+      await tab.waitForCameraSettled();
+      const dbgNext = await tab.getDebug();
+      const expectedNextId = landmarks[(idx2 + 1) % landmarks.length].id;
+      assert(
+        dbgNext && dbgNext.activeLandmark === expectedNextId,
+        `Pressing ']' from cf_meyer_haus expected '${expectedNextId}', got '${dbgNext?.activeLandmark}'`,
+      );
+
+      // Press '[' -> back to cf_meyer_haus
+      await tab.pressKey('[', 'BracketLeft', 219);
+      await tab.waitForCameraSettled();
+      const dbgBack = await tab.getDebug();
+      assert(
+        dbgBack && dbgBack.activeLandmark === 'cf_meyer_haus',
+        `Pressing '[' expected return to 'cf_meyer_haus', got '${dbgBack?.activeLandmark}'`,
+      );
+
+      // Press '[' again -> previous landmark
+      await tab.pressKey('[', 'BracketLeft', 219);
+      await tab.waitForCameraSettled();
+      const dbgPrev = await tab.getDebug();
+      const inspPrev = await tab.evaluate(`(document.getElementById('insp-title')?.textContent || '').trim()`);
+      const expectedPrevId = landmarks[(idx2 - 1 + landmarks.length) % landmarks.length].id;
+      assert(
+        dbgPrev && dbgPrev.activeLandmark === expectedPrevId,
+        `Second '[' from cf_meyer_haus expected '${expectedPrevId}', got '${dbgPrev?.activeLandmark}'`,
+      );
+      assert(inspPrev.length > 0 && inspPrev !== insp2, `Expected #insp-title to update on '[' navigation, got '${inspPrev}'`);
+
+      assert(tab.exceptions.length === 0, `T3.11 JS exceptions: ${tab.exceptions.join('; ')}`);
+      assert(tab.consoleErrors.length === 0, `T3.11 console errors: ${tab.consoleErrors.join('; ')}`);
+      assert(tab.localHttpErrors.length === 0, `T3.11 local HTTP errors: ${tab.localHttpErrors.map((e) => `${e.status} ${e.url}`).join('; ')}`);
     } finally {
       await harness.closeTab(tab);
     }

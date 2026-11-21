@@ -90,7 +90,7 @@ VILLAGE_CHIMNEY_SPECS: list[tuple[int, float]] = [
 # Verified village Dorfbrunnen (name, E, N) — clear of all buildings, bridges, and road lanes
 FOUNTAIN_SPECS: list[tuple[str, float, float]] = [
     ("Dorfplatz (Reformierte Kirche)",     2683429.0, 1241314.0),
-    ("C.F. Meyer-Haus (Alte Landstrasse)", 2683691.0, 1241858.0),
+    ("C.F. Meyer-Haus (Alte Landstrasse)", 2683720.0, 1241434.0),
     ("Bahnhofplatz Kilchberg",             2683888.0, 1242049.0),
 ]
 
@@ -2080,6 +2080,29 @@ def export_animations(mpp_full: float = 0.25) -> Path:
                 lat_vec = [-lat_vec[0], -lat_vec[1]]
             tc_vignettes.append({"sw": sw_uv, "ne": ne_uv, "lat": lat_vec})
 
+    def _dem_z(e_pt: float, n_pt: float) -> float:
+        return float(_sample_bilinear_dem(scene.dem, np.array([e_pt]), np.array([n_pt]))[0])
+
+    def _vig_land_uv(label: str, e_pt: float, n_pt: float, dz: float = 0.5) -> list[float]:
+        assert _is_valid_land(scene, e_pt, n_pt), f"vignette {label} ({e_pt}, {n_pt}) not on dry land"
+        z_pt = _dem_z(e_pt, n_pt) + dz
+        u, v, d16 = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, e_pt, n_pt, z_pt, vehicle_h=1.7)
+        assert 0.0 <= u <= 1.0 and 0.0 <= v <= 1.0, f"vignette {label} UV out of [0,1]: {(u, v)}"
+        assert 1 <= d16 <= 65534, f"vignette {label} d16 out of range: {d16}"
+        return [u, v]
+
+    def _vig_water_uv(label: str, e_pt: float, n_pt: float, dz: float = 0.05) -> list[float]:
+        col = int(math.floor((e_pt - E_MIN) / GRID_RES))
+        row = int(math.floor((N_MAX - n_pt) / GRID_RES))
+        assert 0 <= col < GRID_W and 0 <= row < GRID_H, f"vignette {label} out of grid bounds"
+        assert bool(scene.diorama_mask[row, col]) and bool(scene.lake_mask[row, col]), (
+            f"vignette {label} ({e_pt}, {n_pt}) not on Lake Zurich water"
+        )
+        u, v, d16 = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, e_pt, n_pt, LAKE_SURFACE_Z + dz, vehicle_h=1.0)
+        assert 0.0 <= u <= 1.0 and 0.0 <= v <= 1.0, f"vignette {label} UV out of [0,1]: {(u, v)}"
+        assert 1 <= d16 <= 65534, f"vignette {label} d16 out of range: {d16}"
+        return [u, v]
+
     vignettes_out = {
         "reformierte_kirche": {
             "clock": proj_uv(2683413.0, 1241288.0, 529.6),
@@ -2119,7 +2142,68 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         "sportplatz_hochweid": hoch_vignette,
         "tc_kilchberg": tc_vignettes,
         "cf_meyer_haus": {
-            "center": proj_uv(2683690.0, 1241830.0, 465.0),
+            "center": _vig_land_uv("cf_meyer_haus.center", 2683714.0, 1241442.0, dz=2.5),
+            "fountain": _vig_land_uv("cf_meyer_haus.fountain", 2683720.0, 1241434.0, dz=0.5),
+            "pergola": _vig_land_uv("cf_meyer_haus.pergola", 2683702.0, 1241426.0, dz=1.5),
+            "gate": _vig_land_uv("cf_meyer_haus.gate", 2683727.1, 1241440.9, dz=1.0),
+        },
+        "sanatorium_ridge": {
+            "pavilion": _vig_land_uv("sanatorium_ridge.pavilion", 2683535.3, 1242471.8, dz=4.0),
+            "pergola": _vig_land_uv("sanatorium_ridge.pergola", 2683514.0, 1242442.0, dz=1.5),
+            "greenhouses": [
+                _vig_land_uv("sanatorium_ridge.gh1", 2683466.0, 1242355.0, dz=2.0),
+                _vig_land_uv("sanatorium_ridge.gh2", 2683497.0, 1242332.0, dz=2.0),
+            ],
+        },
+        "moenchhof_horn": {
+            "hafenbeiz": _vig_land_uv("moenchhof_horn.hafenbeiz", 2683570.0, 1243005.0, dz=3.0),
+            "terrace": _vig_land_uv("moenchhof_horn.terrace", 2683578.0, 1243008.0, dz=1.2),
+            "boathouse": _vig_land_uv("moenchhof_horn.boathouse", 2683590.0, 1243016.0, dz=1.2),
+            "water": _vig_water_uv("moenchhof_horn.water", 2683612.0, 1243025.0, dz=0.05),
+        },
+        "sulzergut_park": {
+            "villa": _vig_land_uv("sulzergut_park.villa", 2684458.0, 1241153.0, dz=4.0),
+            "boathouses": [
+                _vig_land_uv("sulzergut_park.bh1", 2684432.0, 1241178.0, dz=1.2),
+                _vig_land_uv("sulzergut_park.bh2", 2684410.0, 1241174.0, dz=1.2),
+            ],
+            "water": _vig_water_uv("sulzergut_park.water", 2684470.0, 1241205.0, dz=0.05),
+        },
+        "gemeindehaus_alte_landstr": {
+            "center": _vig_land_uv("gemeindehaus.center", 2683628.9, 1242100.7, dz=4.0),
+            "cupola": _vig_land_uv("gemeindehaus.cupola", 2683628.9, 1242100.7, dz=12.0),
+            "flag_swiss": _vig_land_uv("gemeindehaus.flag_swiss", 2683646.0, 1242086.0, dz=1.0),
+            "flag_muni": _vig_land_uv("gemeindehaus.flag_muni", 2683648.5, 1242091.0, dz=1.0),
+            "schulhaus": _vig_land_uv("gemeindehaus.schulhaus", 2683635.0, 1242018.0, dz=3.0),
+        },
+        "stockengut_farm": {
+            "barn": _vig_land_uv("stockengut_farm.barn", 2683207.0, 1242037.0, dz=4.0),
+            "hofladen": _vig_land_uv("stockengut_farm.hofladen", 2683222.0, 1242024.0, dz=1.0),
+            "silos": _vig_land_uv("stockengut_farm.silos", 2683187.0, 1241975.0, dz=8.0),
+            "greenhouse": _vig_land_uv("stockengut_farm.greenhouse", 2683252.0, 1241998.0, dz=2.0),
+        },
+        "hallenbad_hochweid": {
+            "pool_hall": _vig_land_uv("hallenbad_hochweid.pool_hall", 2683112.0, 1241399.0, dz=4.0),
+            "entry": _vig_land_uv("hallenbad_hochweid.entry", 2683080.0, 1241431.0, dz=2.0),
+            "track": _vig_land_uv("hallenbad_hochweid.track", 2683165.0, 1241435.0, dz=0.5),
+        },
+        "broelberggut_estate": {
+            "manor": _vig_land_uv("broelberggut_estate.manor", 2683775.0, 1241245.0, dz=4.0),
+            "tempelchen": _vig_land_uv("broelberggut_estate.tempelchen", 2683733.0, 1241261.0, dz=3.0),
+            "terrace": _vig_land_uv("broelberggut_estate.terrace", 2683786.0, 1241244.0, dz=1.0),
+        },
+        "villa_spinnergut_tc": {
+            "villa": _vig_land_uv("villa_spinnergut_tc.villa", 2683473.0, 1240852.0, dz=4.0),
+            "pavilion": _vig_land_uv("villa_spinnergut_tc.pavilion", 2683471.0, 1240828.0, dz=2.0),
+            "clubhouse": _vig_land_uv("villa_spinnergut_tc.clubhouse", 2683393.0, 1240918.0, dz=2.5),
+        },
+        "morfanlage_promenade": {
+            "promenade": _vig_land_uv("morfanlage_promenade.promenade", 2683885.0, 1242360.0, dz=0.8),
+            "boathouses": [
+                _vig_land_uv("morfanlage_promenade.bh1", 2683867.0, 1242417.0, dz=1.2),
+                _vig_land_uv("morfanlage_promenade.bh2", 2683867.0, 1242409.0, dz=1.2),
+            ],
+            "water": _vig_water_uv("morfanlage_promenade.water", 2683910.0, 1242375.0, dz=0.05),
         },
     }
 

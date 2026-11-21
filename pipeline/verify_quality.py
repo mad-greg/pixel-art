@@ -221,7 +221,7 @@ def verify_all() -> None:
     meta_p = DOCS_DIR / "data" / "kilchberg_interactive.json"
     assert meta_p.exists(), "Missing interactive metadata JSON"
     meta = json.loads(meta_p.read_text())
-    assert len(meta["landmarks"]) == 10, "Expected 10 landmarks"
+    assert len(meta["landmarks"]) >= 16, f"Expected >=16 landmarks, got {len(meta['landmarks'])}"
     assert len(meta["buildings"]) >= 1800, f"Expected >=1800 interactive buildings, got {len(meta['buildings'])}"
     print(f"[ok] interactive metadata: {len(meta['landmarks'])} landmarks, {len(meta['buildings'])} clickable 3D buildings")
 

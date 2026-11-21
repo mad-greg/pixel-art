@@ -6,13 +6,17 @@ Generates:
    - renders/kilchberg_diorama_day.png      (90s SVGA Crisp Midday)
    - renders/kilchberg_diorama_sunset.png   (Alpenglow Golden Sunset)
    - renders/kilchberg_diorama_night.png    (Zürichsee Lantern & Window-Lit Night)
-2. Six Ultra-Fine 0.22 m/px 3D Isometric Landmark Detail Plates:
+2. Ten Ultra-Fine 0.22 m/px 3D Isometric Landmark Detail Plates:
    - renders/crops/01_lindt_home_of_chocolate.png
    - renders/crops/02_reformierte_kirche_dorf.png
    - renders/crops/03_bendlikon_harbor_pier.png
    - renders/crops/04_bahnhof_kilchberg_weinberg.png
    - renders/crops/05_schooren_seebad.png
    - renders/crops/06_sanatorium_ridge.png
+   - renders/crops/07_st_elisabeth_church.png
+   - renders/crops/08_cf_meyer_haus.png
+   - renders/crops/09_gemeindehaus_alte_landstrasse.png
+   - renders/crops/10_stockengut_ridge_farm.png
 3. Interactive GIS Metadata in docs/data/kilchberg_interactive.json
 """
 
@@ -33,6 +37,10 @@ CROP_SPECS = [
     ("bahnhof_stockengut", "04_bahnhof_kilchberg_weinberg.png"),
     ("schooren_seebad", "05_schooren_seebad.png"),
     ("sanatorium_ridge", "06_sanatorium_ridge.png"),
+    ("st_elisabeth", "07_st_elisabeth_church.png"),
+    ("cf_meyer_haus", "08_cf_meyer_haus.png"),
+    ("gemeindehaus_alte_landstr", "09_gemeindehaus_alte_landstrasse.png"),
+    ("stockengut_farm", "10_stockengut_ridge_farm.png"),
 ]
 
 
@@ -50,8 +58,8 @@ PLATE_CARTOUCHE_META: dict[str, tuple[str, str]] = {
         "LAKE ZURICH PROMENADE · MOORED FLEET · TIMBER JETTIES",
     ),
     "bahnhof_stockengut": (
-        "PLATE IV  —  BAHNHOF KILCHBERG, WEINBERG & GEMEINDEHAUS",
-        "SBB SEEBAHN CATENARY · PLATFORM CANOPIES · TERRACED VINEYARDS",
+        "PLATE IV  —  BAHNHOF KILCHBERG, VIADUCT & WEINBERG",
+        "SBB SEEBAHN CATENARY · PLATFORM CANOPIES · SCHULHAUS DORFSTRASSE",
     ),
     "schooren_seebad": (
         "PLATE V  —  SEEBAD KILCHBERG & SCHOOREN LAKESIDE VILLAS",
@@ -60,6 +68,22 @@ PLATE_CARTOUCHE_META: dict[str, tuple[str, str]] = {
     "sanatorium_ridge": (
         "PLATE VI  —  SANATORIUM KILCHBERG & STOCKEN RIDGE",
         "1906 HISTORIC PAVILIONS · ALPINE MEADOWS · UPLAND FORESTS",
+    ),
+    "st_elisabeth": (
+        "PLATE VII  —  KATHOLISCHE KIRCHE ST. ELISABETH & BRUNNENMOOS",
+        "30.1m FREESTANDING CAMPANILE · STAINED-GLASS CLERESTORY · KGS-NR. 12594",
+    ),
+    "cf_meyer_haus": (
+        "PLATE VIII  —  CONRAD FERDINAND MEYER-HAUS (KGS-NR. 7525)",
+        "ALTE LANDSTRASSE 170 · POET'S COUNTRY ESTATE · LITERARY MUSEUM & GARDEN",
+    ),
+    "gemeindehaus_alte_landstr": (
+        "PLATE IX  —  GEMEINDEHAUS & SCHULHAUS ALTE LANDSTRASSE",
+        "1930s HEIMATSTIL CIVIC CORE · BELL CUPOLA · TOWN HALL FORECOURT",
+    ),
+    "stockengut_farm": (
+        "PLATE X  —  STOCKENGUT (GUTSBETRIEB UF-STOCKEN)",
+        "507m MUNICIPAL HILLTOP FARMSTEAD · TWIN SILOS · GLASSHOUSE & PASTURES",
     ),
 }
 

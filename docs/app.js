@@ -49,9 +49,13 @@ import { createTrafficSim } from './js/sim/traffic.js';
     { file: '04_bahnhof_kilchberg_weinberg.webp', label: 'Bahnhof & Dorfstrasse Viaduct', lmId: 'bahnhof_stockengut' },
     { file: '05_schooren_seebad.webp', label: 'Schooren & Seebad', lmId: 'schooren_seebad' },
     { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
+    { file: '07_st_elisabeth_church.webp', label: 'Kath. Kirche St. Elisabeth', lmId: 'st_elisabeth' },
+    { file: '08_cf_meyer_haus.webp', label: 'C.F. Meyer-Haus', lmId: 'cf_meyer_haus' },
+    { file: '09_gemeindehaus_alte_landstrasse.webp', label: 'Gemeindehaus & Schulhaus', lmId: 'gemeindehaus_alte_landstr' },
+    { file: '10_stockengut_ridge_farm.webp', label: 'Stockengut Ridge Farm', lmId: 'stockengut_farm' },
   ];
 
-  const ASSET_VER = '8.0';
+  const ASSET_VER = '9.0';
 
   // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Manager
   const overviewImages = {};
@@ -520,30 +524,115 @@ import { createTrafficSim } from './js/sim/traffic.js';
     }
   }
 
+  let pinFontsHooked = false;
   function updatePins(worldW, worldH) {
     if (!meta || !showPins) {
       if (pinsLayer.children.length) pinsLayer.innerHTML = '';
       return;
     }
-    if (pinsLayer.children.length !== meta.landmarks.length) {
+    const n = meta.landmarks.length;
+    if (pinsLayer.children.length !== n) {
       pinsLayer.innerHTML = '';
-      meta.landmarks.forEach((lm, idx) => {
+      for (let idx = 0; idx < n; idx++) {
+        const lm = meta.landmarks[idx];
         const btn = document.createElement('button');
         btn.className = 'lm-pin';
         btn.dataset.lmIdx = String(idx);
         btn.textContent = `${idx + 1}. ${lm.name.split('&')[0].trim()}`;
         pinsLayer.appendChild(btn);
-      });
+      }
+      // Single batched intrinsic measurement pass (zero per-frame layout thrash)
+      for (let i = 0; i < pinsLayer.children.length; i++) {
+        const btn = pinsLayer.children[i];
+        if (btn.offsetWidth > 0 && btn.offsetHeight > 0) {
+          btn._w = btn.offsetWidth;
+          btn._h = btn.offsetHeight;
+          btn._measured = true;
+        } else {
+          btn._w = Math.max(76, Math.ceil(btn.textContent.length * 7.2 + 18));
+          btn._h = 24;
+          btn._measured = false;
+        }
+      }
+      if (!pinFontsHooked && document.fonts && document.fonts.ready) {
+        pinFontsHooked = true;
+        document.fonts.ready.then(() => {
+          for (let i = 0; i < pinsLayer.children.length; i++) {
+            pinsLayer.children[i]._measured = false;
+          }
+          scheduleDraw();
+        });
+      }
     }
-    meta.landmarks.forEach((lm, idx) => {
+
+    const cssW = canvas.width / dpr;
+    const cssH = canvas.height / dpr;
+    const declutter = cssScale() < 0.7;
+    const coords = new Array(n);
+    let activeIdx = -1;
+    for (let idx = 0; idx < n; idx++) {
+      const lm = meta.landmarks[idx];
       const pin = pinsLayer.children[idx];
+      if (!pin._measured && pin.style.display === 'block' && pin.offsetWidth > 0 && pin.offsetHeight > 0) {
+        pin._w = pin.offsetWidth;
+        pin._h = pin.offsetHeight;
+        pin._measured = true;
+      }
+      if (lm.id === activeLandmarkId) activeIdx = idx;
       const sx = (offsetX + lm.uv[0] * worldW * scale) / dpr;
       const sy = (offsetY + lm.uv[1] * worldH * scale) / dpr;
-      const cssW = canvas.width / dpr;
-      const cssH = canvas.height / dpr;
-      const vis = !(sx < -100 || sx > cssW + 100 || sy < -40 || sy > cssH + 50);
+      const onScreen = !(sx < -100 || sx > cssW + 100 || sy < -40 || sy > cssH + 50);
+      coords[idx] = { sx, sy, onScreen };
+    }
+
+    const hiddenByDeclutter = new Uint8Array(n);
+    if (declutter) {
+      const PAD_X = 6;
+      const PAD_Y = 6;
+      const order = [];
+      if (activeIdx >= 0) order.push(activeIdx);
+      for (let i = 0; i < n; i++) {
+        if (i !== activeIdx) order.push(i);
+      }
+      const placed = [];
+      for (let oi = 0; oi < order.length; oi++) {
+        const idx = order[oi];
+        const c = coords[idx];
+        if (!c.onScreen) continue;
+        const pin = pinsLayer.children[idx];
+        const w = pin._w || 120;
+        const h = pin._h || 24;
+        const box = {
+          left: c.sx - w * 0.5 - PAD_X,
+          right: c.sx + w * 0.5 + PAD_X,
+          top: c.sy - h - PAD_Y,
+          bottom: c.sy + PAD_Y,
+        };
+        if (idx === activeIdx) {
+          placed.push(box);
+          continue;
+        }
+        let hit = false;
+        for (let pi = 0; pi < placed.length; pi++) {
+          const b = placed[pi];
+          if (box.left < b.right && box.right > b.left && box.top < b.bottom && box.bottom > b.top) {
+            hit = true;
+            break;
+          }
+        }
+        if (hit) hiddenByDeclutter[idx] = 1;
+        else placed.push(box);
+      }
+    }
+
+    for (let idx = 0; idx < n; idx++) {
+      const pin = pinsLayer.children[idx];
+      const lm = meta.landmarks[idx];
+      const { sx, sy, onScreen } = coords[idx];
+      const isDecluttered = declutter && hiddenByDeclutter[idx] === 1;
+      const vis = onScreen && !isDecluttered;
       // Dirty-check so panning/animating never rewrites unchanged pins (avoids layout churn).
-      const key = vis ? `${Math.round(sx * 2)}|${Math.round(sy * 2)}` : 'hidden';
+      const key = vis ? `${Math.round(sx * 2)}|${Math.round(sy * 2)}` : (isDecluttered ? 'decluttered' : 'hidden');
       if (pin._key !== key) {
         pin._key = key;
         if (vis) {
@@ -554,12 +643,16 @@ import { createTrafficSim } from './js/sim/traffic.js';
           pin.style.display = 'none';
         }
       }
+      if (pin._decluttered !== isDecluttered) {
+        pin._decluttered = isDecluttered;
+        pin.classList.toggle('decluttered', isDecluttered);
+      }
       const isActive = lm.id === activeLandmarkId;
       if (pin._active !== isActive) {
         pin._active = isActive;
         pin.classList.toggle('active', isActive);
       }
-    });
+    }
   }
 
   // Minimap: cache the scaled overview once per mode/size; each frame only paints the viewport box.
@@ -681,7 +774,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     });
   }
 
-  function flyToLandmark(lm, targetZoom = null) {
+  function flyToLandmark(lm, targetZoom = null, instant = false) {
     if (followTarget) setFollowMode(null);
     const { width, height, tiled } = getWorldSize();
     if (!width || !height) return;
@@ -690,7 +783,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     selectedBuilding = null;
     selectedEntity = null;
     setActiveLandmark(lm.id);
-    animateCamera(zoomCss * dpr, lm.uv[0], lm.uv[1], 640);
+    animateCamera(zoomCss * dpr, lm.uv[0], lm.uv[1], instant ? 0 : 640);
     showInspector({
       title: lm.name,
       sub: lm.subtitle,
@@ -701,6 +794,17 @@ import { createTrafficSim } from './js/sim/traffic.js';
         ['Crest Elevation', `${lm.z.toFixed(1)} m a.s.l.`],
       ],
     });
+    if (instant) draw();
+  }
+
+  function cycleLandmark(delta) {
+    if (!meta || !Array.isArray(meta.landmarks) || meta.landmarks.length === 0) return;
+    const len = meta.landmarks.length;
+    const curIdx = activeLandmarkId ? meta.landmarks.findIndex((l) => l.id === activeLandmarkId) : -1;
+    const nextIdx = curIdx < 0
+      ? (delta > 0 ? 0 : len - 1)
+      : (curIdx + delta + len) % len;
+    flyToLandmark(meta.landmarks[nextIdx]);
   }
 
   function showInspector({ title, sub, specs }) {
@@ -977,7 +1081,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
       if (e.key === 'Escape') document.getElementById('modal-overlay').classList.add('hidden');
       return;
     }
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const step = (e.shiftKey ? 320 : 140) * dpr;
     if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { e.preventDefault(); panBy(step, 0); }
@@ -996,6 +1100,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
     else if (e.key === ' ') { e.preventDefault(); const b = document.getElementById('btn-toggle-anim'); if (b) b.click(); }
     else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); setSidebarCollapsed(!sidebarCollapsed); }
     else if (e.key === '/') { e.preventDefault(); const si = document.getElementById('search-input'); if (si) si.focus(); }
+    else if (e.key === '[') { e.preventDefault(); cycleLandmark(-1); }
+    else if (e.key === ']') { e.preventDefault(); cycleLandmark(1); }
     else if (e.key === 'Escape') {
       if (cinemaMode) setCinemaMode(false);
       else if (followTarget) setFollowMode(null);
@@ -1110,6 +1216,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
   // ---------------------------------------------------------------------------
   function populateSidebar() {
     if (!meta) return;
+    const stopCountEl = document.getElementById('landmark-count') || document.querySelector('.tour-section .mono-tag');
+    if (stopCountEl) stopCountEl.textContent = `${meta.landmarks.length} STOPS`;
     const list = document.getElementById('landmark-list');
     list.innerHTML = '';
     meta.landmarks.forEach((lm, idx) => {
@@ -2051,10 +2159,16 @@ import { createTrafficSim } from './js/sim/traffic.js';
     }
     populateSidebar();
     resizeViewport();
+    const qLandmarkId = (urlParams.get('landmark') || '').trim();
+    const qLandmark = (qLandmarkId && meta && Array.isArray(meta.landmarks))
+      ? meta.landmarks.find((l) => l.id === qLandmarkId)
+      : null;
     const qZoom = parseFloat(urlParams.get('zoom'));
     const qU = parseFloat(urlParams.get('u'));
     const qV = parseFloat(urlParams.get('v'));
-    if (Number.isFinite(qZoom) && qZoom > 0) {
+    if (qLandmark) {
+      flyToLandmark(qLandmark, (Number.isFinite(qZoom) && qZoom > 0) ? qZoom : null, true);
+    } else if (Number.isFinite(qZoom) && qZoom > 0) {
       const { width, height } = getWorldSize();
       const cu = Number.isFinite(qU) ? Math.min(1, Math.max(0, qU)) : 0.5;
       const cv = Number.isFinite(qV) ? Math.min(1, Math.max(0, qV)) : 0.5;

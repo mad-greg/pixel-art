@@ -187,6 +187,60 @@ LANDMARK_SPECS: dict[str, tuple[float, float, float, str | None]] = {
     "villa_naville_1695":(2684245.7, 1241450.9, 10.0, "Gebaeude"),
     "schooren_981":      (2684240.5, 1241504.6, 12.0, "Gebaeude"),
     "schooren_1823":     (2684261.0, 1241495.3, 12.0, "Gebaeude"),
+    # v9.0 Existing-landmark heritage additions
+    "gotisch_hus":              (2683454.0, 1241352.0,  6.0, "Gebaeude"),
+    "schulhaus_dorfstr":        (2683828.0, 1241891.0, 12.0, "Gebaeude"),
+    "chez_fritz":               (2684224.0, 1241531.0,  6.0, "Gebaeude"),
+    "sanatorium_gh_225":        (2683466.0, 1242355.0, 10.0, "Treibhaus"),
+    "sanatorium_gh_886":        (2683497.0, 1242332.0, 10.0, "Treibhaus"),
+    # Landmark 9: Mönchhof & Horn
+    "moenchhof_hafenbeiz_243":  (2683570.0, 1243005.0,  3.5, "Gebaeude"),
+    "moenchhof_hafenbeiz_843":  (2683567.0, 1242998.0,  3.5, "Gebaeude"),
+    "moenchhof_villa_727":      (2683533.0, 1243050.0,  7.0, "Gebaeude"),
+    "moenchhof_villa_303":      (2683553.0, 1243022.0,  3.0, "Gebaeude"),
+    "moenchhof_villa_527":      (2683557.0, 1243017.0,  3.0, "Gebaeude"),
+    "moenchhof_villa_890":      (2683520.0, 1243062.0,  7.0, "Gebaeude"),
+    "moenchhof_villa_781":      (2683514.0, 1243078.0,  7.0, "Gebaeude"),
+    "moenchhof_boat_25":        (2683590.0, 1243016.0,  3.2, "Gebaeude"),
+    "moenchhof_boat_825":       (2683596.0, 1243012.0,  3.2, "Gebaeude"),
+    # Landmark 10: Sulzergut Park
+    "sulzergut_villa_1617":     (2684458.0, 1241153.0, 12.0, "Gebaeude"),
+    "sulzergut_villa_1338":     (2684388.0, 1241118.0, 10.0, "Gebaeude"),
+    "sulzergut_boat_1169":      (2684432.0, 1241178.0,  6.0, "Gebaeude"),
+    "sulzergut_boat_1550":      (2684420.0, 1241186.0,  6.0, "Gebaeude"),
+    "sulzergut_boat_1706":      (2684410.0, 1241174.0,  3.0, "Gebaeude"),
+    "sulzergut_boat_984":       (2684408.0, 1241180.0,  3.0, "Gebaeude"),
+    # Landmark 11: Gemeindehaus & Schulhaus Alte Landstrasse
+    "schulhaus_alteland_868":   (2683635.0, 1242018.0, 12.0, "Gebaeude"),
+    "schulhaus_alteland_437":   (2683598.0, 1242028.0, 12.0, "Gebaeude"),
+    # Landmark 12: Stockengut Farm
+    "stockengut_barn_807":      (2683207.0, 1242037.0, 12.0, "Gebaeude"),
+    "stockengut_barn_77":       (2683273.0, 1242006.0,  9.0, "Gebaeude"),
+    "stockengut_house_279":     (2683269.0, 1242046.0,  8.0, "Gebaeude"),
+    "stockengut_house_574":     (2683267.0, 1242027.0,  8.0, "Gebaeude"),
+    "stockengut_outb_473":      (2683192.0, 1242076.0, 10.0, "Gebaeude"),
+    "stockengut_outb_1037":     (2683190.0, 1241995.0, 10.0, "Gebaeude"),
+    "stockengut_silo_1135":     (2683187.0, 1241976.0,  1.5, "Lagertank"),
+    "stockengut_silo_1174":     (2683187.0, 1241974.0,  1.5, "Lagertank"),
+    "stockengut_gh_1587":       (2683252.0, 1241998.0, 10.0, "Treibhaus"),
+    "stockengut_wall_653":      (2683274.0, 1242016.0, 10.0, "Mauer"),
+    # Landmark 13: Hallenbad & Sportanlage Hochweid
+    "hallenbad_pool_1448":      (2683112.0, 1241399.0, 12.0, "Gebaeude"),
+    "hallenbad_entry_1628":     (2683080.0, 1241431.0, 12.0, "Gebaeude"),
+    # Landmark 14: Broelberggut & Tempelchen
+    "broelberg_manor_979":      (2683775.0, 1241245.0,  9.0, "Gebaeude"),
+    "broelberg_gardener_1678":  (2683756.0, 1241236.0,  6.5, "Gebaeude"),
+    "broelberg_outb_1332":      (2683744.0, 1241227.0,  6.5, "Gebaeude"),
+    "broelberg_tempelchen_1074":(2683733.0, 1241261.0,  7.0, "Gebaeude"),
+    # Landmark 15: Villa Spinnergut & TC Kilchberg
+    "spinnergut_villa_1601":    (2683473.0, 1240852.0, 10.0, "Gebaeude"),
+    "spinnergut_pav_1132":      (2683471.0, 1240828.0,  8.0, "Gebaeude"),
+    "tc_clubhouse_1287":        (2683393.0, 1240918.0, 12.0, "Gebaeude"),
+    # Landmark 16: Morfanlage & Lakeside Park
+    "morfanlage_boat_42":       (2683867.0, 1242409.0,  3.5, "Gebaeude"),
+    "morfanlage_boat_379":      (2683867.0, 1242417.0,  3.5, "Gebaeude"),
+    "morfanlage_villa_771":     (2683898.0, 1242314.0,  6.0, "Gebaeude"),
+    "morfanlage_villa_423":     (2683902.0, 1242297.0,  7.0, "Gebaeude"),
 }
 
 
@@ -1109,9 +1163,44 @@ def _compute_building_facade_styles(
         lm.get("seebad_kiosk", -1),
         lm.get("seebad_south", -1),
     } - {-1}
-    gemeindehaus_ids = {lm.get("gemeindehaus_main", -1), lm.get("gemeindehaus_wing", -1)} - {-1}
-    cf_meyer_ids = {lm.get("cf_meyer_haus", -1), lm.get("cf_meyer_pin_villa", -1)} - {-1}
+    gemeindehaus_ids = {
+        lm.get("gemeindehaus_main", -1),
+        lm.get("gemeindehaus_wing", -1),
+        lm.get("schulhaus_alteland_868", -1),
+        lm.get("schulhaus_alteland_437", -1),
+    } - {-1}
+    cf_meyer_ids = {lm.get("cf_meyer_haus", -1)} - {-1}
     barn_ids = {lm.get("dorf_barn_1490", -1), lm.get("dorf_barn_1726", -1)} - {-1}
+    hallenbad_ids = {lm.get("hallenbad_pool_1448", -1), lm.get("hallenbad_entry_1628", -1)} - {-1}
+    broelberg_estate_ids = {
+        lm.get("broelberg_manor_979", -1),
+        lm.get("broelberg_gardener_1678", -1),
+        lm.get("broelberg_outb_1332", -1),
+    } - {-1}
+    spinnergut_ids = {lm.get("spinnergut_villa_1601", -1), lm.get("spinnergut_pav_1132", -1)} - {-1}
+    sulzergut_villa_ids = {lm.get("sulzergut_villa_1617", -1), lm.get("sulzergut_villa_1338", -1)} - {-1}
+    stockengut_barn_ids = {lm.get("stockengut_barn_807", -1), lm.get("stockengut_barn_77", -1)} - {-1}
+    stockengut_house_ids = {lm.get("stockengut_house_279", -1), lm.get("stockengut_house_574", -1)} - {-1}
+    stockengut_outb_ids = {lm.get("stockengut_outb_473", -1), lm.get("stockengut_outb_1037", -1)} - {-1}
+    lakeside_boat_ids = {
+        lm.get("sulzergut_boat_1169", -1),
+        lm.get("sulzergut_boat_1550", -1),
+        lm.get("sulzergut_boat_1706", -1),
+        lm.get("sulzergut_boat_984", -1),
+        lm.get("moenchhof_boat_25", -1),
+        lm.get("moenchhof_boat_825", -1),
+        lm.get("morfanlage_boat_42", -1),
+        lm.get("morfanlage_boat_379", -1),
+    } - {-1}
+    hafenbeiz_ids = {lm.get("moenchhof_hafenbeiz_243", -1), lm.get("moenchhof_hafenbeiz_843", -1)} - {-1}
+    moenchhof_villa_ids = {
+        lm.get("moenchhof_villa_727", -1),
+        lm.get("moenchhof_villa_303", -1),
+        lm.get("moenchhof_villa_527", -1),
+        lm.get("moenchhof_villa_890", -1),
+        lm.get("moenchhof_villa_781", -1),
+    } - {-1}
+    morfanlage_villa_ids = {lm.get("morfanlage_villa_771", -1), lm.get("morfanlage_villa_423", -1)} - {-1}
 
     for i, b in enumerate(buildings):
         obj = b["objektart"]
@@ -1163,7 +1252,10 @@ def _compute_building_facade_styles(
             wall_rgb[i] = (208, 206, 198)
             style_code[i] = 3
         elif i == lm.get("bahnhof_station", -1):
-            wall_rgb[i] = (216, 204, 180)
+            wall_rgb[i] = (186, 194, 170)  # Baumgartner Partner authentic pale olive-green stucco
+            style_code[i] = 9
+        elif i == lm.get("schulhaus_dorfstr", -1):
+            wall_rgb[i] = (220, 212, 194)
             style_code[i] = 9
         elif i in gemeindehaus_ids:
             wall_rgb[i] = (224, 218, 204)
@@ -1172,13 +1264,60 @@ def _compute_building_facade_styles(
             wall_rgb[i] = (224, 210, 168)
             style_code[i] = 9
         elif i in sanatorium_ids:
-            wall_rgb[i] = (220, 212, 192) if (i % 2 == 0) else (210, 202, 186)
+            wall_rgb[i] = (226, 216, 194) if (i % 2 == 0) else (216, 208, 190)
             style_code[i] = 9
         elif i in seebad_ids:
             wall_rgb[i] = (184, 148, 108)
             style_code[i] = 9
+        elif i in hallenbad_ids:
+            wall_rgb[i] = (214, 216, 214)
+            style_code[i] = 9
+        elif i == lm.get("broelberg_tempelchen_1074", -1):
+            wall_rgb[i] = (238, 236, 228)
+            style_code[i] = 9
+        elif i in broelberg_estate_ids:
+            wall_rgb[i] = (226, 218, 192)
+            style_code[i] = 9
+        elif i in spinnergut_ids:
+            wall_rgb[i] = (222, 206, 174)
+            style_code[i] = 9
+        elif i == lm.get("tc_clubhouse_1287", -1):
+            wall_rgb[i] = (138, 96, 66)
+            style_code[i] = 9
+        elif i in sulzergut_villa_ids:
+            wall_rgb[i] = (224, 216, 196)
+            style_code[i] = 9
+        elif i in stockengut_barn_ids:
+            wall_rgb[i] = (108, 76, 52)
+            style_code[i] = 9
+        elif i in stockengut_house_ids:
+            wall_rgb[i] = (220, 212, 192)
+            style_code[i] = 0
+        elif i in stockengut_outb_ids:
+            wall_rgb[i] = (114, 82, 56)
+            style_code[i] = 6
+        elif i in lakeside_boat_ids:
+            wall_rgb[i] = (96, 68, 48)
+            style_code[i] = 6
+        elif i == lm.get("gotisch_hus", -1):
+            wall_rgb[i] = (226, 220, 206)
+            style_code[i] = 0
+            is_riegelhaus[i] = True
+        elif i in hafenbeiz_ids:
+            wall_rgb[i] = (230, 224, 212)
+            style_code[i] = 0
+            is_riegelhaus[i] = True
+        elif i == lm.get("chez_fritz", -1):
+            wall_rgb[i] = (222, 212, 188)
+            style_code[i] = 0
+        elif i in moenchhof_villa_ids:
+            wall_rgb[i] = (218, 208, 178)
+            style_code[i] = 0
+        elif i in morfanlage_villa_ids:
+            wall_rgb[i] = (224, 218, 202)
+            style_code[i] = 0
         elif i in (lm.get("villa_naville_1582", -1), lm.get("villa_naville_1695", -1)):
-            wall_rgb[i] = (220, 212, 156)
+            wall_rgb[i] = (224, 206, 148)  # Warm ochre stucco
             style_code[i] = 0
         elif i in (lm.get("schooren_981", -1), lm.get("schooren_1823", -1)):
             wall_rgb[i] = (218, 220, 222)
@@ -1396,6 +1535,69 @@ def _shade_drawn_ground_90s(
     is_lawn = (~is_pave) | is_for | is_park
     gcol[:] = np.where(is_lawn[:, None], lawn_col, yard_col)
 
+    # 1b. v9.0 Landmark Plazas & Formal Gardens (Lindt Jura-stone forecourt & Broelberggut parterre)
+    in_lindt_plaza = (
+        (ge >= 2684114.0) & (ge <= 2684152.0) & (gn >= 1241392.0) & (gn <= 1241436.0)
+        & (~glake) & (~scene.bldg_roof_mask[r05, c05]) & (~scene.hedge_mask[r05, c05])
+        & (gsem != G_STREET_MAIN) & (gsem != G_RAILWAY)
+    )
+    if in_lindt_plaza.any():
+        lpi = np.nonzero(in_lindt_plaza)[0]
+        lp_joint = ((ix25[lpi] % 6) == 0) | ((iy25[lpi] % 6) == 0)
+        lp_col = np.where(lp_joint[:, None], [180.0, 172.0, 156.0], [194.0, 186.0, 170.0]).astype(np.float32)
+        lp_rad = np.hypot(ge[lpi] - 2684129.0, gn[lpi] - 1241412.0)
+        lp_band = ((lp_rad % 3.5) < 0.35) & (lp_rad >= 2.0) & (lp_rad <= 22.0)
+        lp_col[lp_band] = [208.0, 200.0, 184.0]
+        lp_col[p_hash[lpi] < 36] *= 0.96
+        gcol[lpi] = lp_col
+        gz[lpi] += 0.06
+
+    # M3.5 Seebad Kilchberg pebble beach (Kiesstrand) shoreline gravel strip
+    in_seebad_beach = (
+        (ge >= 2684290.0) & (ge <= 2684326.0) & (gn >= 1241448.0) & (gn <= 1241515.0)
+        & (~glake) & (~scene.bldg_roof_mask[r05, c05]) & (gsem == G_TERRAIN) & (gz < 407.6)
+    )
+    if in_seebad_beach.any():
+        sbi = np.nonzero(in_seebad_beach)[0]
+        sb_col = np.full((len(sbi), 3), [186.0, 180.0, 168.0], dtype=np.float32)
+        sb_col[p_hash[sbi] < 72] *= 0.93
+        sb_col[p_hash[sbi] > 184] *= 1.04
+        gcol[sbi] = np.clip(sb_col, 0.0, 240.0)
+
+    in_broel_court = (
+        (ge >= 2683758.0) & (ge <= 2683794.0) & (gn >= 1241226.0) & (gn <= 1241264.0)
+        & (~glake) & (~scene.bldg_roof_mask[r05, c05]) & (~scene.hedge_mask[r05, c05])
+        & ((gsem == G_TERRAIN) | (gsem == G_PARK_CEMETERY))
+    )
+    if in_broel_court.any():
+        bci = np.nonzero(in_broel_court)[0]
+        gcol[bci] = np.where((p_hash[bci] < 96)[:, None], [172.0, 162.0, 146.0], [186.0, 176.0, 158.0]).astype(np.float32)
+
+    in_broel_parterre = (
+        (ge >= 2683738.0) & (ge <= 2683766.0) & (gn >= 1241244.0) & (gn <= 1241268.0)
+        & (~glake) & (~scene.bldg_roof_mask[r05, c05]) & (~scene.hedge_mask[r05, c05])
+        & ((gsem == G_TERRAIN) | (gsem == G_PARK_CEMETERY))
+    )
+    if in_broel_parterre.any():
+        bpi = np.nonzero(in_broel_parterre)[0]
+        ba = math.radians(-18.0)
+        cba, sba = math.cos(ba), math.sin(ba)
+        b_de = ge[bpi] - 2683752.0
+        b_dn = gn[bpi] - 1241256.0
+        bu = b_de * cba + b_dn * sba
+        bv = -b_de * sba + b_dn * cba
+        in_x_path = (np.abs(bu) <= 1.05) | (np.abs(bv) <= 1.05)
+        in_bed_box = (np.abs(bu) >= 1.25) & (np.abs(bu) <= 10.2) & (np.abs(bv) >= 1.25) & (np.abs(bv) <= 7.8)
+        on_boxwood = in_bed_box & (
+            (np.abs(np.abs(bu) - 1.25) <= 0.65) | (np.abs(np.abs(bu) - 10.2) <= 0.65)
+            | (np.abs(np.abs(bv) - 1.25) <= 0.65) | (np.abs(np.abs(bv) - 7.8) <= 0.65)
+        )
+        gcol[bpi[in_x_path]] = [184.0, 174.0, 156.0]
+        if on_boxwood.any():
+            bwi = bpi[on_boxwood]
+            gcol[bwi] = np.where((p_hash[bwi] < 110)[:, None], [30.0, 68.0, 36.0], [40.0, 86.0, 44.0]).astype(np.float32)
+            gz[bwi] += 0.55
+
     # 2. F14b: Terraced Kilchberg Vineyards (G_VINEYARD + verified real Weinberg / Gmeindsrebberg / Stocken / Böndler slopes!)
     not_obs = (~scene.bldg_roof_mask[r05, c05]) & (~scene.hedge_mask[r05, c05]) & (~glake)
     in_gmeindsreb = (
@@ -1487,7 +1689,8 @@ def _shade_drawn_ground_90s(
         L_f, W_f = float(sf["length"]), float(sf["width"])
         ang = float(sf["angle"])
         kind = sf["kind"]
-        rad_max = 0.5 * math.hypot(L_f, W_f) + 6.0
+        is_hochweid_main = (kind == "football" and fe_c < 2683300.0 and fn_c < 1241550.0 and L_f >= 80.0)
+        rad_max = 0.5 * math.hypot(L_f, W_f) + (16.0 if is_hochweid_main else 6.0)
         if fe_c + rad_max < ge_min_b or fe_c - rad_max > ge_max_b or fn_c + rad_max < gn_min_b or fn_c - rad_max > gn_max_b:
             continue
 
@@ -1508,6 +1711,32 @@ def _shade_drawn_ground_90s(
             # Playing field inset cleanly inside MVT polygon (apron ~2.0m)
             hl = max(28.0, 0.5 * L_f - 2.2)
             hw = max(18.0, 0.5 * W_f - 2.0)
+
+            # v9.0 Sportanlage Hochweid Red-Ochre 400m Athletics Track surrounding main pitch
+            if is_hochweid_main:
+                r_in_t = hw + 2.4
+                r_out_t = hw + 8.6
+                in_straight = (au <= hl) & (av >= r_in_t) & (av <= r_out_t)
+                r_curve = np.hypot(au - hl, av)
+                in_curve = (au > hl) & (r_curve >= r_in_t) & (r_curve <= r_out_t)
+                d_track = np.where(au <= hl, av - r_in_t, r_curve - r_in_t)
+                in_track = (
+                    (in_straight | in_curve)
+                    & (~glake[ni])
+                    & (~scene.bldg_roof_mask[r05[ni], c05[ni]])
+                    & (gsem[ni] != G_STREET_MAIN)
+                    & (gsem[ni] != G_STREET_MINOR)
+                )
+                if in_track.any():
+                    ti_t = ni[in_track]
+                    dt_t = d_track[in_track]
+                    tcol = np.full((len(ti_t), 3), [172.0, 74.0, 54.0], dtype=np.float32)
+                    tcol[p_hash[ti_t] < 50] += [6.0, 4.0, 3.0]
+                    tcol[dt_t < 0.35] = [196.0, 194.0, 188.0]  # Inner concrete track curb
+                    on_lane = (dt_t >= 0.95) & (((dt_t - 0.15) % 1.22) <= 0.22)
+                    tcol[on_lane] = [238.0, 240.0, 236.0]
+                    gcol[ti_t] = tcol
+
             in_apron = (au <= hl + 2.8) & (av <= hw + 2.6) & (~glake[ni])
             if not in_apron.any():
                 continue
@@ -1581,6 +1810,9 @@ def _shade_drawn_ground_90s(
             # Rich Roland-Garros terracotta clay (deeper burnt-clay runoff apron + warm vibrant red-clay court!)
             ccol = np.full((len(ai), 3), [158.0, 74.0, 48.0], dtype=np.float32)
             ccol[in_court] = [188.0, 92.0, 56.0]
+            # Subtle swept dusty-clay baseline wear zone
+            base_wear = (aua >= (hl_c - 1.5)) & (aua <= (hl_c + 1.2)) & (ava <= hw_d + 0.5)
+            ccol[base_wear] = [198.0, 106.0, 68.0]
             # Fine 2-tone pixel-art rolled red-clay grain
             ccol[p_hash[ai] < 52] += [8.0, 5.0, 3.0]
             ccol[(p_hash[ai] >= 52) & (p_hash[ai] < 96)] -= [7.0, 4.0, 3.0]
@@ -1598,10 +1830,10 @@ def _shade_drawn_ground_90s(
                 | ((np.abs(ava - hw_s) <= lw) & (aua <= hl_c))
                 # Service lines
                 | ((np.abs(aua - u_srv) <= lw) & (ava <= hw_s))
-                # Center service line
-                | ((ava <= lw * 0.85) & (aua <= u_srv))
+                # Center service line + crisp T-tick
+                | ((ava <= lw * 0.90) & (aua <= u_srv + lw))
                 # Center baseline hash marks
-                | ((ava <= lw * 0.8) & (aua >= hl_c - 0.65) & (aua <= hl_c))
+                | ((ava <= lw * 0.85) & (aua >= hl_c - 0.65) & (aua <= hl_c))
             )
             ccol[on_line] = [242.0, 242.0, 238.0]
             # Subtle dark shadow directly beneath the center tennis net (u ≈ 0)
@@ -1652,6 +1884,39 @@ def _shade_drawn_ground_90s(
         fi = np.nonzero(is_fp)[0]
         fcol = np.where((p_hash[fi] < 95)[:, None], [174.0, 166.0, 150.0], [158.0, 150.0, 136.0]).astype(np.float32)
         gcol[fi] = fcol
+
+    # 5a. v9.0 Morfanlage Dressed Jura Limestone Quay Wall & Lakeside Gravel Promenade
+    in_morf = (
+        (ge >= 2683862.0) & (ge <= 2683952.0) & (gn >= 1242288.0) & (gn <= 1242428.0)
+        & (~glake) & (~scene.bldg_roof_mask[r05, c05]) & (~scene.hedge_mask[r05, c05])
+        & ((gsem == G_TERRAIN) | (gsem == G_PARK_CEMETERY) | (gsem == G_FOOTPATH))
+    )
+    if in_morf.any():
+        mfi = np.nonzero(in_morf)[0]
+        mr, mc = r05[mfi], c05[mfi]
+        near_l1 = (
+            scene.lake_mask[np.clip(mr, 0, GRID_H - 1), np.clip(mc + 2, 0, GRID_W - 1)]
+            | scene.lake_mask[np.clip(mr, 0, GRID_H - 1), np.clip(mc + 3, 0, GRID_W - 1)]
+            | scene.lake_mask[np.clip(mr - 2, 0, GRID_H - 1), np.clip(mc + 2, 0, GRID_W - 1)]
+            | scene.lake_mask[np.clip(mr + 2, 0, GRID_H - 1), np.clip(mc + 2, 0, GRID_W - 1)]
+        )
+        near_l2 = (
+            (~near_l1)
+            & (
+                scene.lake_mask[np.clip(mr, 0, GRID_H - 1), np.clip(mc + 6, 0, GRID_W - 1)]
+                | scene.lake_mask[np.clip(mr, 0, GRID_H - 1), np.clip(mc + 9, 0, GRID_W - 1)]
+                | scene.lake_mask[np.clip(mr - 4, 0, GRID_H - 1), np.clip(mc + 6, 0, GRID_W - 1)]
+                | scene.lake_mask[np.clip(mr + 4, 0, GRID_H - 1), np.clip(mc + 6, 0, GRID_W - 1)]
+            )
+        )
+        if near_l1.any():
+            qi = mfi[near_l1]
+            q_joint = ((gn[qi] % 1.25) < 0.16)
+            gcol[qi] = np.where(q_joint[:, None], [162.0, 156.0, 146.0], [196.0, 190.0, 178.0]).astype(np.float32)
+            gz[qi] += 0.35
+        if near_l2.any():
+            pi_m = mfi[near_l2]
+            gcol[pi_m] = np.where((p_hash[pi_m] < 96)[:, None], [168.0, 160.0, 144.0], [182.0, 174.0, 158.0]).astype(np.float32)
 
     # 5b. F14c: Hillside Stone Staircases (M1 steps_mask strictly on G_FOOTPATH & ~glake)
     is_st = scene.steps_mask[r05, c05] & (gsem == G_FOOTPATH) & (~glake)
@@ -2343,13 +2608,52 @@ def _render_elevated_bridges_and_rail_portals(
         if crop_box_lv95[2] < 2683820.0 or crop_box_lv95[0] > 2683880.0 or crop_box_lv95[3] < 1242050.0 or crop_box_lv95[1] > 1242160.0:
             bhf_in_crop = False
     if bhf_in_crop:
-        def _pt_ok_bhf(ep: float, np_: float) -> bool:
+        def _pt_ok_bhf(ep: float, np_: float, ins: float = 2.0) -> bool:
             if crop_box_lv95 is not None:
-                if not (crop_box_lv95[0] + 1.5 <= ep <= crop_box_lv95[2] - 1.5 and crop_box_lv95[1] + 1.5 <= np_ <= crop_box_lv95[3] - 1.5):
+                if not (crop_box_lv95[0] + ins <= ep <= crop_box_lv95[2] - ins and crop_box_lv95[1] + ins <= np_ <= crop_box_lv95[3] - ins):
                     return False
             rr_b = int(np.clip((N_MAX - np_) / GRID_RES, 0, GRID_H - 1))
             cc_b = int(np.clip((ep - E_MIN) / GRID_RES, 0, GRID_W - 1))
             return bool(amask[rr_b, cc_b])
+
+        def _draw_bhf_seg(e0, n0, z0, e1, n1, z1, col, mat_c=M_BRIDGE, oid=312004, thick=False):
+            step_b = max(0.18, camera.mpp * 0.65)
+            dist = math.sqrt((e1 - e0) ** 2 + (n1 - n0) ** 2 + (z1 - z0) ** 2)
+            ns = max(2, int(math.ceil(dist / step_b)) + 1)
+            t = np.linspace(0.0, 1.0, ns, dtype=np.float64)
+            es = e0 + (e1 - e0) * t
+            ns_a = n0 + (n1 - n0) * t
+            zs = z0 + (z1 - z0) * t
+            cc_s = np.floor((es - E_MIN) / GRID_RES).astype(np.int32)
+            rr_s = np.floor((N_MAX - ns_a) / GRID_RES).astype(np.int32)
+            ok_s = (cc_s >= 0) & (cc_s < GRID_W) & (rr_s >= 0) & (rr_s < GRID_H)
+            if crop_box_lv95 is not None:
+                ok_s &= (es >= crop_box_lv95[0] + 2.0) & (es <= crop_box_lv95[2] - 2.0) & (ns_a >= crop_box_lv95[1] + 2.0) & (ns_a <= crop_box_lv95[3] - 2.0)
+            if not ok_s.any():
+                return
+            in_a = np.zeros(ns, dtype=np.bool_)
+            in_a[ok_s] = amask[rr_s[ok_s], cc_s[ok_s]]
+            if not in_a.any():
+                return
+            px, py, pd = camera.project(es[in_a], ns_a[in_a], zs[in_a])
+            ix = np.round(px + shift_x).astype(np.int32)
+            iy = np.round(py + shift_y).astype(np.int32)
+            vm = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
+            if not vm.any():
+                return
+            ix, iy, pd = ix[vm], iy[vm], pd[vm]
+            for ox, oy in (((0, 0), (1, 0)) if thick else ((0, 0),)):
+                tx = np.clip(ix + ox, 0, W - 1)
+                ty = np.clip(iy + oy, 0, H - 1)
+                win = pd < zbuf[ty, tx]
+                if win.any():
+                    wy, wx = ty[win], tx[win]
+                    zbuf[wy, wx] = pd[win]
+                    rgb_buf[wy, wx] = col
+                    mat_buf[wy, wx] = mat_c
+                    obj_buf[wy, wx] = oid
+                    norm_buf[wy, wx] = [0.25, -0.25, 0.93]
+                    shadow_buf[wy, wx] = False
 
         # 4a. West Platform Canopy (idx=17): 9 pairs of crisp galvanized steel H-columns descending from 428.5m to DEM!
         we0, wn0 = 2683853.6, 1242065.1
@@ -2467,22 +2771,32 @@ def _render_elevated_bridges_and_rail_portals(
                         norm_buf[iy[win], ix[win]] = [0.3, -0.3, 0.9]
                         shadow_buf[iy[win], ix[win]] = False
 
-        # 4d. Iconic White Round Swiss SBB Railway Station Clock with bright red second-hand paddle dot!
-        #     Placed on unobstructed open South East platform apron (clear of idx=670, overpass & trees)
-        ck_e, ck_n, ck_z = 2683861.2, 1242085.2, 427.65
-        if _pt_ok_bhf(ck_e, ck_n):
+        # 4d. Iconic White Round Swiss SBB Railway Station Clocks (1944 Hans Hilfiker, oid in 310192..310193 EXCLUDED from occ_m!)
+        #     1) Open South East platform apron + 2) Suspended directly beneath West bahnhof_canopy (id=17)
+        for ck_e, ck_n, ck_z, ck_oid, is_susp in (
+            (2683861.2, 1242085.2, 427.65, 310192, False),
+            (2683850.0, 1242102.0, 427.60, 310193, True),
+        ):
+            if not _pt_ok_bhf(ck_e, ck_n, ins=2.0):
+                continue
             rr_ck = int(np.clip((N_MAX - ck_n) / GRID_RES, 0, GRID_H - 1))
             cc_ck = int(np.clip((ck_e - E_MIN) / GRID_RES, 0, GRID_W - 1))
-            z_pl_ck = float(scene.dem[rr_ck, cc_ck]) + 0.55
-            _draw_3d_box_column(
-                camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
-                ck_e, ck_n, z_pl_ck, ck_z - 0.55, 0.09, (94.0, 100.0, 108.0), 312003, M_BRIDGE,
-            )
+            if is_susp:
+                _draw_3d_box_column(
+                    camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                    ck_e, ck_n, ck_z + 0.35, 428.50, 0.07, (84.0, 90.0, 98.0), ck_oid, M_BRIDGE,
+                )
+            else:
+                z_pl_ck = float(scene.dem[rr_ck, cc_ck]) + 0.55
+                _draw_3d_box_column(
+                    camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                    ck_e, ck_n, z_pl_ck, ck_z - 0.55, 0.09, (94.0, 100.0, 108.0), ck_oid, M_BRIDGE,
+                )
             px_ck, py_ck, pd_ck = camera.project(np.array([ck_e + 0.18]), np.array([ck_n]), np.array([ck_z]))
             cx_k = int(round(float(px_ck[0] + shift_x)))
             cy_k = int(round(float(py_ck[0] + shift_y)))
             d_k = float(pd_ck[0]) - 0.40
-            r_k = max(3, int(round(0.68 / camera.mpp)))
+            r_k = max(3, int(round((0.58 if is_susp else 0.68) / camera.mpp)))
             for dy_k in range(-r_k, r_k + 1):
                 for dx_k in range(-r_k, r_k + 1):
                     tx_k, ty_k = cx_k + dx_k, cy_k + dy_k
@@ -2504,9 +2818,136 @@ def _render_elevated_bridges_and_rail_portals(
                     else:
                         rgb_buf[ty_k, tx_k] = [248.0, 248.0, 244.0]
                         mat_buf[ty_k, tx_k] = M_WINDOW_LIT if is_night else M_BRIDGE
-                    obj_buf[ty_k, tx_k] = 312003
+                    obj_buf[ty_k, tx_k] = ck_oid
                     norm_buf[ty_k, tx_k] = [0.25, -0.25, 0.93]
                     shadow_buf[ty_k, tx_k] = False
+
+        # 4d-ii. M3.5 Modern SBB steel-and-glass platform wind shelter along bahnhof_canopy (oid=310194 EXCLUDED from occ_m!)
+        if _pt_ok_bhf(2683844.5, 1242104.0, ins=2.0):
+            ws_n = np.linspace(1242096.0, 1242112.0, 48)
+            ws_z = np.linspace(422.1, 425.2, 12)
+            wn_g, wz_g = np.meshgrid(ws_n, ws_z, indexing="ij")
+            we_f = np.full(wn_g.size, 2683844.5, dtype=np.float64)
+            wn_f = wn_g.ravel()
+            wz_f = wz_g.ravel()
+            px_w, py_w, pd_w = camera.project(we_f, wn_f, wz_f)
+            ix_w = np.round(px_w + shift_x).astype(np.int32)
+            iy_w = np.round(py_w + shift_y).astype(np.int32)
+            vm_w = (ix_w >= 0) & (ix_w < W) & (iy_w >= 0) & (iy_w < H)
+            if vm_w.any():
+                ix_w, iy_w, pd_w = ix_w[vm_w], iy_w[vm_w], pd_w[vm_w] - 0.15
+                wn_v, wz_v = wn_f[vm_w], wz_f[vm_w]
+                win_w = pd_w < zbuf[iy_w, ix_w]
+                if win_w.any():
+                    iy_g, ix_g = iy_w[win_w], ix_w[win_w]
+                    is_mull_w = (((wn_v[win_w] - 1242096.0) % 2.65) < 0.22) | (wz_v[win_w] < 422.4) | (wz_v[win_w] > 424.95)
+                    zbuf[iy_g, ix_g] = pd_w[win_w]
+                    rgb_buf[iy_g, ix_g] = np.where(is_mull_w[:, None], [86.0, 92.0, 100.0], [148.0, 188.0, 210.0])
+                    mat_buf[iy_g, ix_g] = M_BRIDGE
+                    obj_buf[iy_g, ix_g] = 310194
+                    norm_buf[iy_g, ix_g] = [0.7, 0.0, 0.7]
+                    shadow_buf[iy_g, ix_g] = False
+
+        # 4e. v9.0 Bahnhof Kilchberg Fine Platform Furniture, Ticket Machine, Perronanzeiger, Velounterstand & SBB Signals
+        wux, wuy = w_dx / w_len, w_dy / w_len
+        for b_axis, fracs in (
+            ((we0, wn0, w_dx, w_dy, wux, wuy, wnx, wny), (0.30, 0.72)),
+            ((ee0, en0, edx, edy, eux, euy, enx, eny), (0.28, 0.72)),
+        ):
+            a0, b0, adx, ady, aux, auy, anx, any_ = b_axis
+            for frac_b in fracs:
+                be_p = a0 + adx * frac_b
+                bn_p = b0 + ady * frac_b
+                if not _pt_ok_bhf(be_p, bn_p, ins=2.0):
+                    continue
+                rr_b = int(np.clip((N_MAX - bn_p) / GRID_RES, 0, GRID_H - 1))
+                cc_b = int(np.clip((be_p - E_MIN) / GRID_RES, 0, GRID_W - 1))
+                if scene.bldg_roof_mask[rr_b, cc_b]:
+                    continue
+                zp_b = float(scene.dem[rr_b, cc_b]) + 0.55
+                e0_b, n0_b = be_p - 0.95 * aux, bn_p - 0.95 * auy
+                e1_b, n1_b = be_p + 0.95 * aux, bn_p + 0.95 * auy
+                _draw_bhf_seg(e0_b, n0_b, zp_b, e0_b, n0_b, zp_b + 0.48, [46.0, 50.0, 58.0], oid=312004)
+                _draw_bhf_seg(e1_b, n1_b, zp_b, e1_b, n1_b, zp_b + 0.48, [46.0, 50.0, 58.0], oid=312004)
+                _draw_bhf_seg(e0_b, n0_b, zp_b + 0.48, e1_b, n1_b, zp_b + 0.48, [166.0, 118.0, 72.0], oid=312004, thick=True)
+                _draw_bhf_seg(e0_b - 0.25 * anx, n0_b - 0.25 * any_, zp_b + 0.88, e1_b - 0.25 * anx, n1_b - 0.25 * any_, zp_b + 0.88, [148.0, 102.0, 62.0], oid=312004)
+
+        # Red SBB Ticket Vending Machine on open station east apron
+        tm_e, tm_n = 2683862.5, 1242093.0
+        if _pt_ok_bhf(tm_e, tm_n, ins=2.0):
+            rr_tm = int(np.clip((N_MAX - tm_n) / GRID_RES, 0, GRID_H - 1))
+            cc_tm = int(np.clip((tm_e - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            if not scene.bldg_roof_mask[rr_tm, cc_tm]:
+                z_tm = float(scene.dem[rr_tm, cc_tm]) + 0.55
+                _draw_3d_box_column(
+                    camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                    tm_e, tm_n, z_tm, z_tm + 1.85, 0.35, (214.0, 38.0, 38.0), 312005, M_BRIDGE,
+                )
+                _draw_bhf_seg(
+                    tm_e + 0.36, tm_n - 0.16, z_tm + 1.25, tm_e + 0.36, tm_n + 0.16, z_tm + 1.25,
+                    [128.0, 192.0, 236.0] if is_night else [36.0, 52.0, 74.0],
+                    mat_c=M_WINDOW_LIT if is_night else M_BRIDGE, oid=312005, thick=True,
+                )
+
+        # 2 Suspended Blue-White SBB Departure Indicators (Perronanzeiger)
+        for pa_e, pa_n, pa_z, pa_top in (
+            (2683847.2, 1242094.0, 427.30, 428.50),
+            (2683849.2, 1242138.0, 426.90, 427.85),
+        ):
+            if not _pt_ok_bhf(pa_e, pa_n, ins=2.0):
+                continue
+            _draw_bhf_seg(pa_e - 0.55 * enx, pa_n - 0.55 * eny, pa_z + 0.25, pa_e - 0.55 * enx, pa_n - 0.55 * eny, pa_top, [124.0, 130.0, 138.0], oid=312006)
+            _draw_bhf_seg(pa_e + 0.55 * enx, pa_n + 0.55 * eny, pa_z + 0.25, pa_e + 0.55 * enx, pa_n + 0.55 * eny, pa_top, [124.0, 130.0, 138.0], oid=312006)
+            _draw_bhf_seg(pa_e - 0.75 * enx, pa_n - 0.75 * eny, pa_z + 0.18, pa_e + 0.75 * enx, pa_n + 0.75 * eny, pa_z + 0.18, [24.0, 52.0, 118.0], oid=312006, thick=True)
+            _draw_bhf_seg(
+                pa_e - 0.65 * enx, pa_n - 0.65 * eny, pa_z, pa_e + 0.65 * enx, pa_n + 0.65 * eny, pa_z,
+                [255.0, 224.0, 140.0] if is_night else [242.0, 244.0, 246.0],
+                mat_c=M_WINDOW_LIT if is_night else M_BRIDGE, oid=312006,
+            )
+
+        # Covered Bicycle Rack (Velounterstand) on Bahnhofplatz SE of station
+        ve0, vn0, ve1, vn1 = 2683873.5, 1242086.0, 2683876.5, 1242075.5
+        if _pt_ok_bhf(0.5 * (ve0 + ve1), 0.5 * (vn0 + vn1), ins=2.0):
+            rr_v = int(np.clip((N_MAX - 0.5 * (vn0 + vn1)) / GRID_RES, 0, GRID_H - 1))
+            cc_v = int(np.clip((0.5 * (ve0 + ve1) - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            if (not scene.bldg_roof_mask[rr_v, cc_v]) and scene.sem[rr_v, cc_v] != G_STREET_MAIN:
+                zv_g = float(scene.dem[rr_v, cc_v])
+                vdx, vdy = ve1 - ve0, vn1 - vn0
+                vlen = max(1.0, math.hypot(vdx, vdy))
+                vnx, vny = -vdy / vlen, vdx / vlen
+                for vf in (0.08, 0.36, 0.64, 0.92):
+                    pe_v, pn_v = ve0 + vdx * vf, vn0 + vdy * vf
+                    if _pt_ok_bhf(pe_v, pn_v, ins=2.0):
+                        _draw_3d_box_column(
+                            camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                            pe_v, pn_v, zv_g, zv_g + 2.35, 0.10, (142.0, 148.0, 156.0), 312007, M_BRIDGE,
+                        )
+                for roff in (-0.85, -0.35, 0.15, 0.65):
+                    _draw_bhf_seg(ve0 + roff * vnx, vn0 + roff * vny, zv_g + 2.38, ve1 + roff * vnx, vn1 + roff * vny, zv_g + 2.38, [120.0, 152.0, 174.0], oid=312007, thick=True)
+                _draw_bhf_seg(ve0 - 0.95 * vnx, vn0 - 0.95 * vny, zv_g + 2.40, ve1 - 0.95 * vnx, vn1 - 0.95 * vny, zv_g + 2.40, [164.0, 170.0, 178.0], oid=312007)
+                _draw_bhf_seg(ve0 + 0.75 * vnx, vn0 + 0.75 * vny, zv_g + 2.40, ve1 + 0.75 * vnx, vn1 + 0.75 * vny, zv_g + 2.40, [164.0, 170.0, 178.0], oid=312007)
+                bike_cols = ([186.0, 56.0, 52.0], [52.0, 116.0, 176.0], [62.0, 68.0, 76.0], [186.0, 56.0, 52.0], [52.0, 116.0, 176.0])
+                for bi_k, bf in enumerate((0.16, 0.32, 0.50, 0.68, 0.84)):
+                    be_k, bn_k = ve0 + vdx * bf, vn0 + vdy * bf
+                    _draw_bhf_seg(be_k - 0.45 * vnx, bn_k - 0.45 * vny, zv_g + 0.55, be_k + 0.45 * vnx, bn_k + 0.45 * vny, zv_g + 0.55, bike_cols[bi_k], oid=312007)
+
+        # 3D SBB Trackside Signal Masts (oid=310190, 310191 — strictly inside 310000..310199 so EXCLUDED from occ_m!)
+        for sig_i, (sge, sgn, s_col) in enumerate((
+            (2683851.2, 1242071.4, [56.0, 226.0, 98.0]),   # South platform green aspect
+            (2683838.5, 1242148.5, [234.0, 48.0, 48.0]),   # North platform red aspect
+        )):
+            if not _pt_ok_bhf(sge, sgn, ins=2.0):
+                continue
+            rr_sg = int(np.clip((N_MAX - sgn) / GRID_RES, 0, GRID_H - 1))
+            cc_sg = int(np.clip((sge - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            z_sg = float(scene.dem[rr_sg, cc_sg]) + 0.45
+            oid_sg = 310190 + sig_i
+            _draw_bhf_seg(sge, sgn, z_sg, sge, sgn, z_sg + 5.4, [118.0, 124.0, 132.0], oid=oid_sg)
+            _draw_bhf_seg(sge, sgn, z_sg + 4.4, sge, sgn, z_sg + 5.4, [28.0, 32.0, 38.0], oid=oid_sg, thick=True)
+            _draw_bhf_seg(
+                sge + 0.16, sgn, z_sg + 4.85, sge + 0.16, sgn, z_sg + 5.15,
+                s_col, mat_c=M_WINDOW_LIT if is_night else M_BRIDGE, oid=oid_sg, thick=True,
+            )
 
 
 # Verified Reformierte Kirche Cemetery perimeter polygon (12 vertices, MVT)
@@ -2741,6 +3182,14 @@ def _render_3d_sports_details(
                 _draw_3d_seg(e_fl, n_fl, zg + goal_h, e_fr, n_fr, zg + goal_h, white_p, oid=232000 + sf_i, thick=True)
                 _draw_3d_seg(e_fl, n_fl, zg + goal_h, e_bl, n_bl, zg + goal_h * 0.85, white_p, oid=232000 + sf_i)
                 _draw_3d_seg(e_fr, n_fr, zg + goal_h, e_br, n_br, zg + goal_h * 0.85, white_p, oid=232000 + sf_i)
+                # v9.0 Top roof net cords so football goals read sharply from high isometric angle
+                for f_rn in (0.35, 0.70):
+                    erl = e_fl + (e_bl - e_fl) * f_rn
+                    nrl = n_fl + (n_bl - n_fl) * f_rn
+                    err = e_fr + (e_br - e_fr) * f_rn
+                    nrr = n_fr + (n_br - n_fr) * f_rn
+                    zrn = zg + goal_h * (1.0 - 0.15 * f_rn)
+                    _draw_3d_seg(erl, nrl, zrn, err, nrr, zrn, net_c, oid=232000 + sf_i, dither_mesh=True)
 
             for sgn_u in (-1.0, 1.0):
                 for sgn_v in (-1.0, 1.0):
@@ -2759,16 +3208,17 @@ def _render_3d_sports_details(
                     oid=232200 + sf_i,
                 )
 
-            if L_f >= 92.0:
+            if L_f >= 82.0 or (fe_c < 2683300.0 and fn_c < 1241550.0 and L_f >= 70.0):
                 lamp_mat = M_WINDOW_LIT if is_night else M_BRIDGE
                 lamp_col = [255.0, 240.0, 182.0] if is_night else [228.0, 232.0, 236.0]
                 for sgn_u in (-0.62, 0.62):
                     for sgn_v in (-1.0, 1.0):
                         em, nm, zm = to_world(sgn_u * hl, sgn_v * (hw + 3.2))
                         _draw_3d_seg(em, nm, zm, em, nm, zm + 14.5, [138.0, 144.0, 152.0], oid=232300 + sf_i, thick=True)
-                        el0, nl0, _ = to_world(sgn_u * hl - 1.1, sgn_v * (hw + 3.2))
-                        el1, nl1, _ = to_world(sgn_u * hl + 1.1, sgn_v * (hw + 3.2))
+                        el0, nl0, _ = to_world(sgn_u * hl - 1.2, sgn_v * (hw + 3.2))
+                        el1, nl1, _ = to_world(sgn_u * hl + 1.2, sgn_v * (hw + 3.2))
                         _draw_3d_seg(el0, nl0, zm + 14.5, el1, nl1, zm + 14.5, lamp_col, mat_c=lamp_mat, oid=232300 + sf_i, thick=True)
+                        _draw_3d_seg(el0, nl0, zm + 13.8, el1, nl1, zm + 13.8, lamp_col, mat_c=lamp_mat, oid=232300 + sf_i)
 
         elif kind == "multisport":
             hl = max(10.0, 0.5 * L_f - 1.4)
@@ -3021,17 +3471,19 @@ def _render_3d_sports_details(
         if is_night:
             _draw_3d_seg(e_l + 0.35 * vx_z + 0.25 * ux_z, n_l + 0.35 * vy_z + 0.25 * uy_z, bz_z + 2.18, e_r + 0.35 * vx_z - 0.25 * ux_z, n_r + 0.35 * vy_z - 0.25 * uy_z, bz_z + 2.18, [255.0, 224.0, 152.0], mat_c=M_WINDOW_LIT, oid=oid_z, thick=True)
 
-    # 9b. 15 Lakeside Promenade Wooden Benches facing ESE toward Lake Zurich
+    # 9b. 20 Lakeside Promenade Wooden Benches facing ESE toward Lake Zurich (incl. Morfanlage)
     prom_benches = (
         (2684017.2, 1242062.8), (2684024.8, 1242058.8), (2684040.8, 1242048.2),
         (2684199.2, 1241656.2), (2684221.8, 1241627.8), (2684222.8, 1241589.8),
         (2684286.2, 1241488.2), (2684304.8, 1241471.2), (2684312.2, 1241454.2),
         (2684465.2, 1241192.8), (2684484.8, 1241167.8), (2684494.8, 1241138.8),
         (2683610.2, 1243038.8), (2683613.2, 1242993.2), (2683639.2, 1242982.8),
+        (2683882.0, 1242396.0), (2683892.0, 1242376.0), (2683904.0, 1242352.0),
+        (2683914.0, 1242332.0), (2683922.0, 1242306.0),
     )
     b_ux, b_uy = math.cos(math.radians(-65.0)), math.sin(math.radians(-65.0))
     for bi_b, (be_b, bn_b) in enumerate(prom_benches):
-        if not _prop_ok(be_b, bn_b, inset=1.5):
+        if not _prop_ok(be_b, bn_b, inset=2.0):
             continue
         bz_b = _sample_dem(be_b, bn_b)
         oid_b = 237200 + bi_b
@@ -3042,11 +3494,14 @@ def _render_3d_sports_details(
         _draw_3d_seg(e0_b, n0_b, bz_b + 0.48, e1_b, n1_b, bz_b + 0.48, [168.0, 118.0, 72.0], oid=oid_b, thick=True)
         _draw_3d_seg(e0_b - 0.25 * b_uy, n0_b + 0.25 * b_ux, bz_b + 0.88, e1_b - 0.25 * b_uy, n1_b + 0.25 * b_ux, bz_b + 0.88, [150.0, 102.0, 62.0], oid=oid_b)
 
-    # 9c. Upper Meadow Swiss Wooden Pasture Fences & Golden Round Hay Bales (02_kirche & 06_sanatorium)
+    # 9c. Upper Meadow Swiss Wooden Pasture Fences & Golden Round Hay Bales (02_kirche, 06_sanatorium, 10_stockengut)
     pasture_fences = (
         (2683512.0, 1241180.0, 2683584.0, 1241215.0),
         (2683512.0, 1241180.0, 2683508.0, 1241248.0),
         (2683372.0, 1242395.0, 2683432.0, 1242388.0),
+        (2683175.0, 1242050.0, 2683225.0, 1242095.0),
+        (2683225.0, 1242095.0, 2683285.0, 1242075.0),
+        (2683165.0, 1241980.0, 2683180.0, 1242045.0),
     )
     for fi_p, (fe0, fn0, fe1, fn1) in enumerate(pasture_fences):
         flen = math.hypot(fe1 - fe0, fn1 - fn0)
@@ -3057,6 +3512,8 @@ def _render_3d_sports_details(
             t1 = (kp + 1) / n_posts
             pe0, pn0 = fe0 + (fe1 - fe0) * t0, fn0 + (fn1 - fn0) * t0
             pe1, pn1 = fe0 + (fe1 - fe0) * t1, fn0 + (fn1 - fn0) * t1
+            if not (_prop_ok(pe0, pn0, inset=2.0) and _prop_ok(pe1, pn1, inset=2.0)):
+                continue
             z0_p, z1_p = _sample_dem(pe0, pn0), _sample_dem(pe1, pn1)
             _draw_3d_seg(pe0, pn0, z0_p, pe0, pn0, z0_p + 1.15, [112.0, 86.0, 62.0], oid=oid_f)
             _draw_3d_seg(pe0, pn0, z0_p + 0.55, pe1, pn1, z1_p + 0.55, [132.0, 104.0, 76.0], oid=oid_f)
@@ -3098,6 +3555,220 @@ def _render_3d_sports_details(
                     obj_buf[iy[win], ix[win]] = oid_h
                     norm_buf[iy[win], ix[win]] = [0.25, -0.25, 0.93]
                     shadow_buf[iy[win], ix[win]] = False
+
+    # 9d. v9.0 Museum-Grade Village, Civic & Estate 3D Props (all strictly _prop_ok(..., inset=2.0)!)
+    # 1. Lindt Forecourt: granite bollards (oid=244910), boxwood planters (237700..237703), golden entrance totem (244911)
+    for kb in range(6):
+        tb = kb / 5.0
+        be_l = 2684136.0 + 6.0 * tb
+        bn_l = 1241404.0 + 20.0 * tb
+        if _prop_ok(be_l, bn_l, inset=2.0, allow_sidewalk=True):
+            zl = _sample_dem(be_l, bn_l)
+            _draw_3d_seg(be_l, bn_l, zl, be_l, bn_l, zl + 0.85, [154.0, 152.0, 146.0], oid=244910)
+            _draw_3d_seg(be_l, bn_l, zl + 0.85, be_l, bn_l, zl + 0.98, [214.0, 212.0, 206.0], oid=244910)
+    for pi_l, (pe_l, pn_l) in enumerate(((2684131.0, 1241407.0), (2684133.0, 1241417.0), (2684126.0, 1241402.0), (2684130.0, 1241424.0))):
+        if _prop_ok(pe_l, pn_l, inset=2.0, allow_sidewalk=True):
+            zp_l = _sample_dem(pe_l, pn_l)
+            _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, pe_l, pn_l, zp_l, zp_l + 0.65, 0.45, (186.0, 178.0, 164.0), 237700 + pi_l, M_BRIDGE)
+            _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, pe_l, pn_l, zp_l + 0.65, zp_l + 1.25, 0.40, (46.0, 98.0, 48.0), 237700 + pi_l, M_BRIDGE)
+    if _prop_ok(2684139.0, 1241413.5, inset=2.0, allow_sidewalk=True):
+        zt_l = _sample_dem(2684139.0, 1241413.5)
+        _draw_3d_seg(2684139.0, 1241413.5, zt_l, 2684139.0, 1241413.5, zt_l + 3.2, [54.0, 46.0, 42.0], oid=244911, thick=True)
+        _draw_3d_seg(2684139.0, 1241413.5, zt_l + 2.0, 2684139.0, 1241413.5, zt_l + 2.9, [236.0, 192.0, 68.0], mat_c=M_WINDOW_LIT if is_night else M_BRIDGE, oid=244911, thick=True)
+    # M3.5 Enea-landscaped Schokoladenplatz Jura-stone benches & NE café parasols
+    for bni_l, (bne_l, bnn_l) in enumerate(((2684134.5, 1241404.0), (2684137.0, 1241419.5), (2684129.0, 1241428.0))):
+        if _prop_ok(bne_l, bnn_l, inset=2.0, allow_sidewalk=True):
+            zbn_l = _sample_dem(bne_l, bnn_l)
+            _draw_3d_seg(bne_l - 0.9, bnn_l - 0.3, zbn_l + 0.45, bne_l + 0.9, bnn_l + 0.3, zbn_l + 0.45, [204.0, 198.0, 186.0], oid=237705 + bni_l, thick=True)
+    if not is_night:
+        for upe_l, upn_l in ((2684124.5, 1241427.0), (2684127.5, 1241430.5)):
+            if _prop_ok(upe_l, upn_l, inset=2.0, allow_sidewalk=True):
+                zup_l = _sample_dem(upe_l, upn_l)
+                _draw_3d_seg(upe_l, upn_l, zup_l, upe_l, upn_l, zup_l + 2.15, [82.0, 80.0, 76.0], oid=244912)
+                _draw_3d_seg(upe_l - 1.0, upn_l, zup_l + 2.15, upe_l + 1.0, upn_l, zup_l + 2.15, [236.0, 230.0, 216.0], oid=237708, thick=True)
+                _draw_3d_seg(upe_l, upn_l - 1.0, zup_l + 2.15, upe_l, upn_l + 1.0, zup_l + 2.15, [236.0, 230.0, 216.0], oid=237708, thick=True)
+
+    # 2. Reformierte Kirche & Cemetery: stone gate pillars, cypress spires, 3D Dorfbrunnen, Thomas Mann/C.F. Meyer memorial
+    for gi_c, (ge_c, gn_c) in enumerate(((2683438.0, 1241305.0), (2683442.0, 1241306.0), (2683463.0, 1241276.0), (2683464.0, 1241272.0))):
+        if _prop_ok(ge_c, gn_c, inset=2.0, allow_sidewalk=True):
+            zg_c = _sample_dem(ge_c, gn_c)
+            _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, ge_c, gn_c, zg_c, zg_c + 1.65, 0.35, (186.0, 178.0, 164.0), 237720 + gi_c, M_BRIDGE)
+            _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, ge_c, gn_c, zg_c + 1.65, zg_c + 1.88, 0.40, (214.0, 208.0, 196.0), 237720 + gi_c, M_BRIDGE)
+    for cy_i, (cy_e, cy_n) in enumerate(((2683424.0, 1241256.0), (2683436.0, 1241242.0), (2683420.0, 1241205.0), (2683442.0, 1241195.0), (2683418.0, 1241152.0), (2683445.0, 1241145.0))):
+        if _prop_ok(cy_e, cy_n, inset=2.0):
+            zcy = _sample_dem(cy_e, cy_n)
+            _draw_3d_seg(cy_e, cy_n, zcy, cy_e, cy_n, zcy + 3.2, [34.0, 68.0, 42.0], oid=237724 + cy_i, thick=True)
+            _draw_3d_seg(cy_e, cy_n, zcy + 2.8, cy_e, cy_n, zcy + 4.8, [46.0, 86.0, 52.0], oid=237724 + cy_i)
+    if _prop_ok(2683436.0, 1241298.0, inset=2.0, allow_sidewalk=True):
+        zdb = _sample_dem(2683436.0, 1241298.0)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683436.0, 1241298.0, zdb, zdb + 0.85, 0.95, (178.0, 172.0, 162.0), 237730, M_BRIDGE)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683436.0, 1241298.0, zdb + 0.72, zdb + 0.88, 0.72, (66.0, 152.0, 176.0), 237730, M_BRIDGE)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683436.0, 1241298.0, zdb + 0.85, zdb + 2.15, 0.22, (194.0, 188.0, 176.0), 237730, M_BRIDGE)
+    if _prop_ok(2683434.0, 1241222.0, inset=2.0):
+        zmm = _sample_dem(2683434.0, 1241222.0)
+        # C.F. Meyer classical tall pale-limestone obelisk in front of church
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683434.0, 1241222.0, zmm, zmm + 1.50, 0.34, (222.0, 218.0, 208.0), 237731, M_BRIDGE)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683434.0, 1241222.0, zmm + 1.50, zmm + 1.85, 0.22, (230.0, 226.0, 216.0), 237731, M_BRIDGE)
+        _draw_3d_seg(2683434.34, 1241222.0, zmm + 0.65, 2683434.34, 1241222.0, zmm + 1.15, [76.0, 62.0, 48.0], oid=237731)
+    if _prop_ok(2683428.0, 1241236.0, inset=2.0):
+        ztm = _sample_dem(2683428.0, 1241236.0)
+        # M3.5 Distinct Thomas Mann family grave: light-granite ledger slab + dark upright headstone + boxwood border
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683428.0, 1241236.0, ztm, ztm + 0.32, 0.85, (212.0, 208.0, 200.0), 237732, M_BRIDGE)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683427.3, 1241236.0, ztm + 0.25, ztm + 1.15, 0.28, (64.0, 66.0, 72.0), 237732, M_BRIDGE)
+        _draw_3d_seg(2683427.1, 1241235.0, ztm + 0.22, 2683428.9, 1241235.0, ztm + 0.22, [44.0, 88.0, 48.0], oid=237732, thick=True)
+
+    # 3. Navillepark terraced stone wall & fountain + Sanatorium Park balustrade, pergola & benches
+    if _prop_ok(2684252.0, 1241432.0, inset=2.0) and _prop_ok(2684260.0, 1241456.0, inset=2.0):
+        znv = 0.5 * (_sample_dem(2684252.0, 1241432.0) + _sample_dem(2684260.0, 1241456.0))
+        _draw_3d_panel(2684252.0, 1241432.0, 2684260.0, 1241456.0, znv, znv + 1.2, np.array([174.0, 168.0, 156.0], dtype=np.float32), np.array([212.0, 206.0, 194.0], dtype=np.float32), oid=237740)
+    if _prop_ok(2684242.0, 1241428.0, inset=2.0):
+        znf = _sample_dem(2684242.0, 1241428.0)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2684242.0, 1241428.0, znf, znf + 0.72, 0.85, (186.0, 180.0, 168.0), 237741, M_BRIDGE)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2684242.0, 1241428.0, znf + 0.62, znf + 0.76, 0.62, (66.0, 154.0, 178.0), 237741, M_BRIDGE)
+    if _prop_ok(2683546.0, 1242455.0, inset=2.0) and _prop_ok(2683552.0, 1242486.0, inset=2.0):
+        zsn = 0.5 * (_sample_dem(2683546.0, 1242455.0) + _sample_dem(2683552.0, 1242486.0))
+        _draw_3d_panel(2683546.0, 1242455.0, 2683552.0, 1242486.0, zsn, zsn + 1.05, np.array([186.0, 180.0, 168.0], dtype=np.float32), np.array([224.0, 220.0, 210.0], dtype=np.float32), oid=237746)
+    if _prop_ok(2683514.0, 1242442.0, inset=2.0):
+        zpg = _sample_dem(2683514.0, 1242442.0)
+        for de_p, dn_p in ((-1.8, -1.2), (1.8, -1.2), (-1.8, 1.2), (1.8, 1.2)):
+            _draw_3d_seg(2683514.0 + de_p, 1242442.0 + dn_p, zpg, 2683514.0 + de_p, 1242442.0 + dn_p, zpg + 2.6, [118.0, 84.0, 56.0], oid=237747, thick=True)
+        for dn_b in (-1.2, -0.4, 0.4, 1.2):
+            _draw_3d_seg(2683514.0 - 1.9, 1242442.0 + dn_b, zpg + 2.6, 2683514.0 + 1.9, 1242442.0 + dn_b, zpg + 2.6, [132.0, 96.0, 64.0], oid=237747)
+    for sb_i, (sbe, sbn) in enumerate(((2683518.0, 1242458.0), (2683490.0, 1242432.0), (2683505.0, 1242402.0), (2683476.0, 1242462.0))):
+        if _prop_ok(sbe, sbn, inset=2.0):
+            zsb = _sample_dem(sbe, sbn)
+            _draw_3d_seg(sbe - 0.85, sbn - 0.35, zsb + 0.48, sbe + 0.85, sbn + 0.35, zsb + 0.48, [164.0, 116.0, 72.0], oid=237748 + sb_i, thick=True)
+    # M3.5 Sanatorium Portier-Loge entrance gate pillars + signboard (oid=244957 excluded) & historic Sodbrunnen wellhead
+    for ple_s, pln_s in ((2683556.5, 1242456.0), (2683559.5, 1242460.0)):
+        if _prop_ok(ple_s, pln_s, inset=2.0, allow_sidewalk=True):
+            zpl_s = _sample_dem(ple_s, pln_s)
+            _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, ple_s, pln_s, zpl_s, zpl_s + 1.9, 0.35, (206.0, 200.0, 188.0), 237752, M_BRIDGE)
+    if _prop_ok(2683558.0, 1242458.0, inset=2.0, allow_sidewalk=True):
+        zps_s = _sample_dem(2683558.0, 1242458.0)
+        _draw_3d_seg(2683557.2, 1242457.0, zps_s + 1.45, 2683558.8, 1242459.0, zps_s + 1.45, [34.0, 74.0, 52.0], oid=244957, thick=True)
+        _draw_3d_seg(2683557.4, 1242457.3, zps_s + 1.52, 2683558.6, 1242458.7, zps_s + 1.52, [236.0, 198.0, 88.0], oid=244957)
+    if _prop_ok(2683486.0, 1242402.0, inset=2.0):
+        zsd_s = _sample_dem(2683486.0, 1242402.0)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683486.0, 1242402.0, zsd_s, zsd_s + 0.95, 0.72, (178.0, 172.0, 160.0), 237753, M_BRIDGE)
+        _draw_3d_seg(2683485.4, 1242402.0, zsd_s + 0.95, 2683485.4, 1242402.0, zsd_s + 2.15, [52.0, 56.0, 62.0], oid=244957)
+        _draw_3d_seg(2683486.6, 1242402.0, zsd_s + 0.95, 2683486.6, 1242402.0, zsd_s + 2.15, [52.0, 56.0, 62.0], oid=244957)
+        _draw_3d_seg(2683485.4, 1242402.0, zsd_s + 2.15, 2683486.6, 1242402.0, zsd_s + 2.15, [52.0, 56.0, 62.0], oid=244957)
+    # M3.5 St. Elisabeth SE forecourt terraced limestone steps
+    if _prop_ok(2683520.0, 1241625.0, inset=2.0, allow_sidewalk=True):
+        zse_f = _sample_dem(2683520.0, 1241625.0)
+        for st_e in range(3):
+            _draw_3d_seg(2683518.5 + st_e * 0.5, 1241622.5, zse_f + 0.22 * (3 - st_e), 2683520.5 + st_e * 0.5, 1241627.5, zse_f + 0.22 * (3 - st_e), [196.0, 192.0, 182.0], oid=237756, thick=True)
+
+    # 4. C.F. Meyer-Haus (Alte Landstrasse 170): garden retaining wall, wrought-iron gate, pergola & fountain
+    if _prop_ok(2683724.0, 1241428.0, inset=2.0) and _prop_ok(2683730.0, 1241454.0, inset=2.0):
+        zcm1 = _sample_dem(2683726.0, 1241434.0)
+        zcm2 = _sample_dem(2683728.5, 1241448.0)
+        _draw_3d_panel(2683724.0, 1241428.0, 2683726.8, 1241439.5, zcm1, zcm1 + 1.25, np.array([178.0, 172.0, 158.0], dtype=np.float32), np.array([214.0, 208.0, 196.0], dtype=np.float32), oid=237760)
+        _draw_3d_panel(2683727.4, 1241442.2, 2683730.0, 1241454.0, zcm2, zcm2 + 1.25, np.array([178.0, 172.0, 158.0], dtype=np.float32), np.array([214.0, 208.0, 196.0], dtype=np.float32), oid=237760)
+        for gp_e, gp_n in ((2683726.8, 1241439.5), (2683727.4, 1241442.2)):
+            zgp = _sample_dem(gp_e, gp_n)
+            _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, gp_e, gp_n, zgp, zgp + 1.75, 0.30, (194.0, 188.0, 174.0), 237761, M_BRIDGE)
+        _draw_3d_seg(2683726.8, 1241439.5, zcm1 + 1.35, 2683727.4, 1241442.2, zcm2 + 1.35, [44.0, 48.0, 54.0], oid=237762)
+        _draw_3d_seg(2683726.8, 1241439.5, zcm1 + 0.65, 2683727.4, 1241442.2, zcm2 + 0.65, [44.0, 48.0, 54.0], oid=237762)
+    if _prop_ok(2683721.5, 1241441.6, inset=2.0):
+        zcr = _sample_dem(2683721.5, 1241441.6)
+        # M3.5 C.F. Meyer-Haus exterior stone stair wrought-iron handrails (oid=244958 excluded from occ_m)
+        _draw_3d_seg(2683721.0, 1241440.5, zcr + 1.15, 2683722.4, 1241440.5, zcr + 0.45, [44.0, 48.0, 54.0], oid=244958)
+        _draw_3d_seg(2683721.0, 1241442.7, zcr + 1.15, 2683722.4, 1241442.7, zcr + 0.45, [44.0, 48.0, 54.0], oid=244958)
+    if _prop_ok(2683702.0, 1241426.0, inset=2.0):
+        zcp = _sample_dem(2683702.0, 1241426.0)
+        for de_p, dn_p in ((-1.6, -1.1), (1.6, -1.1), (-1.6, 1.1), (1.6, 1.1)):
+            _draw_3d_seg(2683702.0 + de_p, 1241426.0 + dn_p, zcp, 2683702.0 + de_p, 1241426.0 + dn_p, zcp + 2.5, [112.0, 80.0, 54.0], oid=237763)
+        for dn_b in (-1.0, 0.0, 1.0):
+            _draw_3d_seg(2683700.3, 1241426.0 + dn_b, zcp + 2.55, 2683703.7, 1241426.0 + dn_b, zcp + 2.55, [54.0, 108.0, 52.0], oid=237763, thick=True)
+    if _prop_ok(2683720.0, 1241434.0, inset=2.0):
+        zcf = _sample_dem(2683720.0, 1241434.0)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683720.0, 1241434.0, zcf, zcf + 0.72, 0.78, (186.0, 180.0, 168.0), 237764, M_BRIDGE)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683720.0, 1241434.0, zcf + 0.62, zcf + 0.76, 0.54, (68.0, 152.0, 178.0), 237764, M_BRIDGE)
+        # M3.5 Auf Brunnen carved stone spring spout column
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683719.6, 1241434.0, zcf + 0.72, zcf + 1.55, 0.18, (204.0, 198.0, 186.0), 237764, M_BRIDGE)
+
+    # 5. Gemeindehaus Forecourt: formal limestone steps + dual 3D flagpoles (oid=244900, 244901 EXCLUDED from occ_m!)
+    if _prop_ok(2683642.0, 1242099.0, inset=2.0, allow_sidewalk=True):
+        zgs = _sample_dem(2683642.0, 1242099.0)
+        for step_k in range(3):
+            off_s = step_k * 0.55
+            _draw_3d_seg(2683640.0 + off_s, 1242094.0, zgs + 0.25 * (3 - step_k), 2683644.0 + off_s, 1242104.0, zgs + 0.25 * (3 - step_k), [194.0, 188.0, 176.0], oid=237780, thick=True)
+    for fp_i, (fpe, fpn, is_swiss) in enumerate(((2683646.0, 1242086.0, True), (2683648.5, 1242091.0, False))):
+        if _prop_ok(fpe, fpn, inset=2.0, allow_sidewalk=True):
+            zfp = _sample_dem(fpe, fpn)
+            oid_fp = 244900 + fp_i
+            _draw_3d_seg(fpe, fpn, zfp, fpe, fpn, zfp + 7.5, [218.0, 222.0, 226.0], oid=oid_fp)
+            if is_swiss:
+                _draw_3d_seg(fpe, fpn, zfp + 6.7, fpe + 1.25, fpn + 0.4, zfp + 6.9, [218.0, 38.0, 38.0], oid=oid_fp, thick=True)
+                _draw_3d_seg(fpe + 0.45, fpn + 0.14, zfp + 6.8, fpe + 0.78, fpn + 0.24, zfp + 6.84, [246.0, 246.0, 242.0], oid=oid_fp)
+            else:
+                # M3.5 Authentic Kilchberg Wappen flag: azure #1a5fb4 + 4-petal white flower + gold center
+                _draw_3d_seg(fpe, fpn, zfp + 6.75, fpe + 1.25, fpn + 0.4, zfp + 6.95, [26.0, 95.0, 180.0], oid=oid_fp, thick=True)
+                _draw_3d_seg(fpe + 0.40, fpn + 0.13, zfp + 6.84, fpe + 0.85, fpn + 0.27, zfp + 6.88, [244.0, 246.0, 248.0], oid=oid_fp)
+                _draw_3d_seg(fpe + 0.58, fpn + 0.18, zfp + 6.85, fpe + 0.66, fpn + 0.21, zfp + 6.87, [242.0, 196.0, 48.0], oid=oid_fp)
+
+    # 6. Stockengut: stone courtyard wall, Hofladen farm stand + crates & horned Swiss Grauvieh cattle
+    if _prop_ok(2683226.0, 1242016.0, inset=2.0) and _prop_ok(2683254.0, 1242018.0, inset=2.0):
+        zsw = 0.5 * (_sample_dem(2683226.0, 1242016.0) + _sample_dem(2683254.0, 1242018.0))
+        _draw_3d_panel(2683226.0, 1242016.0, 2683254.0, 1242018.0, zsw, zsw + 1.15, np.array([170.0, 164.0, 152.0], dtype=np.float32), np.array([208.0, 202.0, 190.0], dtype=np.float32), oid=237790)
+    if _prop_ok(2683222.0, 1242024.0, inset=2.0):
+        zhl = _sample_dem(2683222.0, 1242024.0)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683222.0, 1242024.0, zhl, zhl + 1.25, 0.95, (146.0, 102.0, 66.0), 237791, M_BRIDGE)
+        _draw_3d_seg(2683221.0, 1242023.0, zhl + 2.25, 2683223.2, 1242025.0, zhl + 2.25, [212.0, 48.0, 48.0], oid=237792, thick=True)
+        _draw_3d_seg(2683221.3, 1242023.3, zhl + 2.32, 2683222.9, 1242024.7, zhl + 2.32, [242.0, 240.0, 234.0], oid=237792)
+        # Wooden Hofladen produce crates with apples
+        for cr_e, cr_n, cr_top in ((2683223.8, 1242023.2, (198.0, 54.0, 46.0)), (2683224.5, 1242024.1, (92.0, 146.0, 62.0))):
+            if _prop_ok(cr_e, cr_n, inset=2.0):
+                zcr_s = _sample_dem(cr_e, cr_n)
+                _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, cr_e, cr_n, zcr_s, zcr_s + 0.45, 0.34, (156.0, 114.0, 68.0), 237793, M_BRIDGE)
+                _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, cr_e, cr_n, zcr_s + 0.45, zcr_s + 0.58, 0.28, cr_top, 237793, M_BRIDGE)
+    # M3.5 Grazing horned Swiss Grauvieh cattle (silvery-grey/taupe) on upland meadow west of Stockengut barn
+    if not is_night:
+        for gv_e, gv_n in ((2683178.0, 1242048.0), (2683172.0, 1242038.0), (2683182.0, 1242024.0), (2683166.0, 1242044.0)):
+            if _prop_ok(gv_e, gv_n, inset=2.0):
+                zgv = _sample_dem(gv_e, gv_n)
+                _draw_3d_seg(gv_e - 0.65, gv_n - 0.15, zgv + 0.85, gv_e + 0.65, gv_n + 0.15, zgv + 0.85, [155.0, 150.0, 142.0], oid=237794, thick=True)
+                _draw_3d_seg(gv_e - 0.5, gv_n - 0.12, zgv, gv_e - 0.5, gv_n - 0.12, zgv + 0.72, [110.0, 105.0, 98.0], oid=237794)
+                _draw_3d_seg(gv_e + 0.5, gv_n + 0.12, zgv, gv_e + 0.5, gv_n + 0.12, zgv + 0.72, [110.0, 105.0, 98.0], oid=237794)
+                _draw_3d_seg(gv_e + 0.65, gv_n + 0.15, zgv + 1.05, gv_e + 0.85, gv_n + 0.25, zgv + 1.20, [224.0, 220.0, 210.0], oid=237794)
+
+    # 7. Broelberggut stone terrace steps & clipped boxwood parterre hedges
+    if _prop_ok(2683786.0, 1241244.0, inset=2.0):
+        zbs = _sample_dem(2683786.0, 1241244.0)
+        for step_b in range(3):
+            _draw_3d_seg(2683784.0 + step_b * 0.55, 1241241.5, zbs + 0.25 * (3 - step_b), 2683786.5 + step_b * 0.55, 1241246.5, zbs + 0.25 * (3 - step_b), [196.0, 190.0, 178.0], oid=237800, thick=True)
+    for bhe, bhn in ((2683754.0, 1241252.0), (2683758.0, 1241260.0)):
+        if _prop_ok(bhe, bhn, inset=2.0):
+            zbh = _sample_dem(bhe, bhn)
+            _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, bhe, bhn, zbh, zbh + 0.65, 1.05, (46.0, 86.0, 48.0), 237801, M_BRIDGE)
+
+    # 8. M3.5 Hallenbad outdoor cold-plunge pool (Kaltwasserbecken) & Sportanlage Hochweid floodlight masts (oid=244940..244943 excluded!)
+    if _prop_ok(2683126.0, 1241392.0, inset=2.0):
+        zhp = _sample_dem(2683126.0, 1241392.0)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683126.0, 1241392.0, zhp, zhp + 0.45, 1.75, (186.0, 188.0, 184.0), 237805, M_BRIDGE)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, 2683126.0, 1241392.0, zhp + 0.36, zhp + 0.48, 1.42, (68.0, 176.0, 198.0), 237805, M_WINDOW_LIT if (is_night or preset_key == "sunset") else M_BRIDGE)
+    for fl_i, (fle, fln) in enumerate(((2683138.0, 1241482.0), (2683194.0, 1241492.0), (2683148.0, 1241428.0), (2683204.0, 1241438.0))):
+        if _prop_ok(fle, fln, inset=2.0):
+            zfl = _sample_dem(fle, fln)
+            oid_fl = 244940 + fl_i
+            _draw_3d_seg(fle, fln, zfl, fle, fln, zfl + 14.0, [74.0, 80.0, 88.0], oid=oid_fl)
+            _draw_3d_seg(fle - 0.85, fln, zfl + 14.0, fle + 0.85, fln, zfl + 14.0, [252.0, 246.0, 218.0], mat_c=M_WINDOW_LIT if (is_night or preset_key == "sunset") else M_BRIDGE, oid=oid_fl, thick=True)
+
+    # 9. M3.5 TC Kilchberg "Matchball" sun-terrace parasols & 2 all-weather LED court floodlights (oid=244946..244948 excluded!)
+    if not is_night:
+        for tpi, (tpe, tpn, tp_c) in enumerate(((2683412.0, 1240886.0, [244.0, 239.0, 226.0]), (2683416.0, 1240882.0, [46.0, 110.0, 78.0]))):
+            if _prop_ok(tpe, tpn, inset=2.0):
+                ztp = _sample_dem(tpe, tpn)
+                _draw_3d_seg(tpe, tpn, ztp, tpe, tpn, ztp + 2.1, [88.0, 76.0, 62.0], oid=244946)
+                _draw_3d_seg(tpe - 1.1, tpn, ztp + 2.15, tpe + 1.1, tpn, ztp + 2.15, tp_c, oid=237808, thick=True)
+                _draw_3d_seg(tpe, tpn - 1.1, ztp + 2.15, tpe, tpn + 1.1, ztp + 2.15, tp_c, oid=237808, thick=True)
+    for tfl_i, (tfle, tfln) in enumerate(((2683404.0, 1240864.0), (2683424.0, 1240868.0))):
+        if _prop_ok(tfle, tfln, inset=2.0):
+            ztfl = _sample_dem(tfle, tfln)
+            oid_tfl = 244947 + tfl_i
+            _draw_3d_seg(tfle, tfln, ztfl, tfle, tfln, ztfl + 8.5, [76.0, 82.0, 90.0], oid=oid_tfl)
+            _draw_3d_seg(tfle - 0.55, tfln, ztfl + 8.5, tfle + 0.55, tfln, ztfl + 8.5, [252.0, 248.0, 226.0], mat_c=M_WINDOW_LIT if (is_night or preset_key == "sunset") else M_BRIDGE, oid=oid_tfl, thick=True)
 
 
 def _render_3d_harbor_and_boats(
@@ -3254,8 +3925,72 @@ def _render_3d_harbor_and_boats(
                     rgb_buf[ty_l, tx_l] = [255.0, 222.0, 138.0] if is_night else [234.0, 236.0, 232.0]
                     mat_buf[ty_l, tx_l] = M_WINDOW_LIT if is_night else M_HARBOR_OBJ
                     obj_buf[ty_l, tx_l] = 255202
+        # v9.0 ZSG KILCHBERG ZH (SEE) pier fascia sign, white shelter pillars, ZVV pylon, timetable board, lifebuoy, bench & hinged gangplank
+        if _in_box_am(2684064.8, 1242075.5, ins=2.0):
+            for dz_z, col_z in ((-0.22, [18.0, 58.0, 134.0]), (-0.10, [22.0, 72.0, 154.0]), (0.0, [244.0, 246.0, 248.0]), (0.10, [22.0, 72.0, 154.0]), (0.22, [18.0, 58.0, 134.0])):
+                _draw_harbor_seg(2684064.8, 1242071.5, 410.05 + dz_z, 2684064.8, 1242079.5, 410.05 + dz_z, col_z, mat_c=M_WINDOW_LIT if is_night else M_HARBOR_OBJ, oid=255203)
+        # M3.5 4 white tubular ZSG canopy pillars + blue ZVV info pylon (oid=244955 excluded from occ_m)
+        for pce, pcn in ((2684057.2, 1242071.8), (2684057.2, 1242079.2), (2684064.4, 1242071.8), (2684064.4, 1242079.2)):
+            if _in_box_am(pce, pcn, ins=2.0):
+                _draw_harbor_seg(pce, pcn, 407.7, pce, pcn, 410.05, [232.0, 236.0, 240.0], oid=244955)
+        if _in_box_am(2684054.5, 1242073.5, ins=2.0):
+            _draw_harbor_seg(2684054.5, 1242073.5, 407.7, 2684054.5, 1242073.5, 409.9, [22.0, 72.0, 154.0], oid=244955, thick=True)
+            _draw_harbor_seg(2684054.5, 1242073.5, 409.45, 2684054.5, 1242073.5, 409.85, [244.0, 246.0, 248.0], mat_c=M_WINDOW_LIT if is_night else M_HARBOR_OBJ, oid=244955, thick=True)
+        if _in_box_am(2684056.2, 1242071.0, ins=2.0):
+            _draw_harbor_seg(2684056.2, 1242071.0, 407.7, 2684056.2, 1242071.0, 409.5, [24.0, 56.0, 124.0], oid=255204, thick=True)
+            _draw_harbor_seg(2684056.3, 1242071.0, 408.35, 2684056.3, 1242071.0, 409.15, [244.0, 246.0, 248.0], mat_c=M_WINDOW_LIT if is_night else M_HARBOR_OBJ, oid=255204)
+        if _in_box_am(2684052.5, 1242065.5, ins=2.0):
+            px_b, py_b, pd_b = camera.project(np.array([2684052.5]), np.array([1242065.5]), np.array([408.25]))
+            bx_p, by_p = int(round(float(px_b[0] + shift_x))), int(round(float(py_b[0] + shift_y)))
+            db = float(pd_b[0]) - 0.15
+            for ox_b, oy_b, cb_rgb in (
+                (-1, 0, [234.0, 94.0, 34.0]), (1, 0, [234.0, 94.0, 34.0]),
+                (0, -1, [244.0, 244.0, 240.0]), (0, 1, [244.0, 244.0, 240.0]),
+            ):
+                tx_b, ty_b = bx_p + ox_b, by_p + oy_b
+                if 0 <= tx_b < W and 0 <= ty_b < H and db < zbuf[ty_b, tx_b]:
+                    zbuf[ty_b, tx_b] = db
+                    rgb_buf[ty_b, tx_b] = cb_rgb
+                    mat_buf[ty_b, tx_b] = M_HARBOR_OBJ
+                    obj_buf[ty_b, tx_b] = 255205
+        if _in_box_am(2684059.0, 1242075.5, ins=2.0):
+            _draw_harbor_seg(2684059.0, 1242073.5, 408.20, 2684059.0, 1242077.5, 408.20, [166.0, 118.0, 72.0], oid=255206, thick=True)
+        if _in_box_am(2684069.8, 1242074.4, ins=2.0):
+            _draw_harbor_seg(2684068.5, 1242074.4, 407.85, 2684071.2, 1242074.4, 407.25, [168.0, 174.0, 182.0], oid=255207, thick=True)
+            _draw_harbor_seg(2684068.5, 1242073.9, 408.45, 2684071.2, 1242073.9, 407.85, [196.0, 202.0, 210.0], oid=255207)
+            _draw_harbor_seg(2684068.5, 1242074.9, 408.45, 2684071.2, 1242074.9, 407.85, [196.0, 202.0, 210.0], oid=255207)
 
-    # Seebad Kilchberg 3 Wooden Jetties: stainless swim ladders + south diving board!
+    # Bendlikon Pavilion quay stone steps & café parasols (day & sunset)
+    if _in_box_am(2684152.0, 1241898.0, ins=2.0):
+        for sk_p in range(3):
+            _draw_harbor_seg(2684150.5 + sk_p * 0.55, 1241896.5, 407.1 - sk_p * 0.35, 2684150.5 + sk_p * 0.55, 1241899.5, 407.1 - sk_p * 0.35, [192.0, 186.0, 174.0], oid=255210, thick=True)
+    if not is_night:
+        for cp_i, (cpe, cpn, cp_col) in enumerate((
+            (2684148.0, 1241888.0, [212.0, 54.0, 54.0]),
+            (2684152.0, 1241892.0, [238.0, 232.0, 218.0]),
+            (2684144.0, 1241884.0, [212.0, 54.0, 54.0]),
+        )):
+            if not _in_box_am(cpe, cpn, ins=2.0):
+                continue
+            rrc = int(np.clip((N_MAX - cpn) / GRID_RES, 0, GRID_H - 1))
+            ccc = int(np.clip((cpe - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            if scene.lake_mask[rrc, ccc] or scene.bldg_roof_mask[rrc, ccc]:
+                continue
+            zcp_p = float(scene.dem[rrc, ccc])
+            _draw_harbor_seg(cpe, cpn, zcp_p, cpe, cpn, zcp_p + 2.0, [76.0, 78.0, 84.0], oid=255211 + cp_i)
+            px_p, py_p, pd_p = camera.project(np.array([cpe]), np.array([cpn]), np.array([zcp_p + 2.05]))
+            ux_c, uy_c, du_c = int(round(float(px_p[0] + shift_x))), int(round(float(py_p[0] + shift_y))), float(pd_p[0]) - 0.12
+            for dy_c in (-1, 0, 1):
+                for dx_c in (-2, -1, 0, 1, 2):
+                    if abs(dx_c) + abs(dy_c) * 2 <= 2:
+                        tx_c, ty_c = ux_c + dx_c, uy_c + dy_c
+                        if 0 <= tx_c < W and 0 <= ty_c < H and du_c < zbuf[ty_c, tx_c]:
+                            zbuf[ty_c, tx_c] = du_c
+                            rgb_buf[ty_c, tx_c] = [244.0, 242.0, 236.0] if ((dx_c + dy_c) & 1) else cp_col
+                            mat_buf[ty_c, tx_c] = M_HARBOR_OBJ
+                            obj_buf[ty_c, tx_c] = 255211 + cp_i
+
+    # Seebad Kilchberg 3 Wooden Jetties: stainless swim ladders + south diving board + v9.0 Floss swim raft & buoy line!
     seebad_jetties = (
         (2684329.5, 1241522.0, 406.70),  # North jetty tip
         (2684344.2, 1241499.0, 406.80),  # Center jetty tip
@@ -3269,9 +4004,148 @@ def _render_3d_harbor_and_boats(
             _draw_harbor_seg(je_t, jn_t + dn_l, LAKE_SURFACE_Z - 0.10, je_t, jn_t + dn_l, jz_t + 0.85, [206.0, 212.0, 220.0], oid=oid_j)
         _draw_harbor_seg(je_t, jn_t - 0.28, jz_t + 0.32, je_t, jn_t + 0.28, jz_t + 0.32, [206.0, 212.0, 220.0], oid=oid_j)
         _draw_harbor_seg(je_t, jn_t - 0.28, jz_t + 0.72, je_t, jn_t + 0.28, jz_t + 0.72, [206.0, 212.0, 220.0], oid=oid_j)
-        if ji_s == 2:
-            # Tiny classic diving board plank on south swim jetty!
-            _draw_harbor_seg(je_t - 0.6, jn_t - 1.2, jz_t + 0.55, je_t + 1.6, jn_t - 1.2, jz_t + 0.62, [226.0, 222.0, 212.0], oid=oid_j, thick=True)
+        if ji_s == 2 and _in_box_am(je_t, jn_t - 1.2, ins=2.0):
+            # M3.5 3D 3m Sprungturm diving tower (1m & 3m platforms, ladder, white tubular railings, oid=244956 excluded from occ_m!)
+            for dn_sp in (-0.42, 0.42):
+                _draw_harbor_seg(je_t - 0.5, jn_t - 1.2 + dn_sp, jz_t, je_t - 0.5, jn_t - 1.2 + dn_sp, jz_t + 3.15, [236.0, 240.0, 244.0], oid=244956)
+                _draw_harbor_seg(je_t - 0.5, jn_t - 1.2 + dn_sp, jz_t + 2.95, je_t + 0.5, jn_t - 1.2 + dn_sp, jz_t + 3.85, [236.0, 240.0, 244.0], oid=244956)
+            for rung_k in range(1, 7):
+                zr_sp = jz_t + rung_k * 0.45
+                _draw_harbor_seg(je_t - 0.5, jn_t - 1.62, zr_sp, je_t - 0.5, jn_t - 0.78, zr_sp, [224.0, 228.0, 234.0], oid=244956)
+            _draw_harbor_seg(je_t - 0.5, jn_t - 1.2, jz_t + 1.05, je_t + 1.0, jn_t - 1.2, jz_t + 1.10, [244.0, 242.0, 236.0], oid=244956, thick=True)
+            _draw_harbor_seg(je_t - 0.5, jn_t - 1.2, jz_t + 2.95, je_t + 1.3, jn_t - 1.2, jz_t + 3.02, [244.0, 242.0, 236.0], oid=244956, thick=True)
+
+    # Floating wooden swim raft (Floss) offshore at Seebad
+    fl_e, fl_n = 2684356.0, 1241484.0
+    if _in_box_am(fl_e, fl_n, ins=2.5):
+        rr_f = int(np.clip((N_MAX - fl_n) / GRID_RES, 0, GRID_H - 1))
+        cc_f = int(np.clip((fl_e - E_MIN) / GRID_RES, 0, GRID_W - 1))
+        if scene.lake_mask[rr_f, cc_f]:
+            us_f = np.linspace(-1.7, 1.7, 15)
+            vs_f = np.linspace(-1.7, 1.7, 15)
+            uf_g, vf_g = np.meshgrid(us_f, vs_f, indexing="ij")
+            ef_r = (fl_e + uf_g).ravel()
+            nf_r = (fl_n + vf_g).ravel()
+            zf_r = np.full_like(ef_r, LAKE_SURFACE_Z + 0.28)
+            px_f, py_f, pd_f = camera.project(ef_r, nf_r, zf_r)
+            ix_f, iy_f = np.round(px_f + shift_x).astype(np.int32), np.round(py_f + shift_y).astype(np.int32)
+            vm_f = (ix_f >= 0) & (ix_f < W) & (iy_f >= 0) & (iy_f < H)
+            if vm_f.any():
+                ix_f, iy_f, pd_f = ix_f[vm_f], iy_f[vm_f], pd_f[vm_f]
+                uf_v = uf_g.ravel()[vm_f]
+                win_f = pd_f < zbuf[iy_f, ix_f]
+                if win_f.any():
+                    wy_f, wx_f = iy_f[win_f], ix_f[win_f]
+                    zbuf[wy_f, wx_f] = pd_f[win_f]
+                    seam_f = ((uf_v[win_f] + 1.7) % 0.55) < 0.10
+                    rgb_buf[wy_f, wx_f] = np.where(seam_f[:, None], [136.0, 104.0, 68.0], [184.0, 148.0, 102.0])
+                    mat_buf[wy_f, wx_f] = M_HARBOR_OBJ
+                    obj_buf[wy_f, wx_f] = 255310
+                    norm_buf[wy_f, wx_f] = [0.0, 0.0, 1.0]
+            _draw_harbor_seg(fl_e - 1.7, fl_n - 0.3, LAKE_SURFACE_Z, fl_e - 1.7, fl_n - 0.3, LAKE_SURFACE_Z + 0.95, [206.0, 212.0, 220.0], oid=255310)
+            _draw_harbor_seg(fl_e - 1.7, fl_n + 0.3, LAKE_SURFACE_Z, fl_e - 1.7, fl_n + 0.3, LAKE_SURFACE_Z + 0.95, [206.0, 212.0, 220.0], oid=255310)
+
+    # Red-white swim-zone buoy line offshore at Seebad
+    buoy_pts = (
+        (2684338.0, 1241526.0), (2684350.0, 1241516.0), (2684360.0, 1241504.0),
+        (2684364.0, 1241492.0), (2684360.0, 1241478.0), (2684352.0, 1241465.0),
+        (2684340.0, 1241454.0),
+    )
+    for bi_y, (bye, byn) in enumerate(buoy_pts):
+        if not _in_box_am(bye, byn, ins=2.0):
+            continue
+        rr_y = int(np.clip((N_MAX - byn) / GRID_RES, 0, GRID_H - 1))
+        cc_y = int(np.clip((bye - E_MIN) / GRID_RES, 0, GRID_W - 1))
+        if scene.lake_mask[rr_y, cc_y]:
+            bcol_y = [226.0, 48.0, 48.0] if (bi_y % 2 == 0) else [242.0, 242.0, 238.0]
+            _draw_harbor_seg(bye, byn, LAKE_SURFACE_Z + 0.05, bye, byn, LAKE_SURFACE_Z + 0.25, bcol_y, oid=255311, thick=True)
+
+    # Mönchhof & Horn, Sulzergut & Morfanlage lakeside slipways, balustrade, bathing steps & lantern bollards
+    # Mönchhof slipways & seawall steps
+    if _in_box_am(2683597.0, 1243018.0, ins=2.0):
+        for dn_s in (-0.8, 0.8):
+            _draw_harbor_seg(2683593.0, 1243016.0 + dn_s, 406.5, 2683601.0, 1243020.0 + dn_s, LAKE_SURFACE_Z - 0.1, [122.0, 92.0, 62.0], oid=255406, thick=True)
+    if _in_box_am(2683584.0, 1242994.0, ins=2.0):
+        for sk_m in range(3):
+            _draw_harbor_seg(2683583.0 + sk_m * 0.5, 1242992.5, 407.1 - sk_m * 0.35, 2683583.0 + sk_m * 0.5, 1242995.5, 407.1 - sk_m * 0.35, [190.0, 184.0, 172.0], oid=255407, thick=True)
+    for lb_i, (lbe, lbn) in enumerate(((2683578.0, 1242992.0), (2683586.0, 1243004.0), (2683598.0, 1243024.0), (2683570.0, 1243028.0), (2683556.0, 1243046.0), (2683542.0, 1243064.0))):
+        if _in_box_am(lbe, lbn, ins=2.0):
+            rr_lb = int(np.clip((N_MAX - lbn) / GRID_RES, 0, GRID_H - 1))
+            cc_lb = int(np.clip((lbe - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            if (not scene.lake_mask[rr_lb, cc_lb]) and (not scene.bldg_roof_mask[rr_lb, cc_lb]):
+                zlb = float(scene.dem[rr_lb, cc_lb])
+                _draw_harbor_seg(lbe, lbn, zlb, lbe, lbn, zlb + 0.95, [52.0, 56.0, 62.0], oid=244920 + lb_i)
+                _draw_harbor_seg(lbe, lbn, zlb + 0.95, lbe, lbn, zlb + 1.18, [255.0, 224.0, 142.0] if is_night else [232.0, 234.0, 228.0], mat_c=M_WINDOW_LIT if is_night else M_HARBOR_OBJ, oid=244920 + lb_i, thick=True)
+    # M3.5 Mönchhof am See beer-garden cream parasols & 4 guest boat mooring bollards (oid=244926..244927 excluded!)
+    if not is_night:
+        for pe_m, pn_m in ((2683576.0, 1243006.0), (2683579.0, 1243011.0), (2683582.0, 1243003.0), (2683574.0, 1242999.0)):
+            if _in_box_am(pe_m, pn_m, ins=2.0):
+                rr_pm = int(np.clip((N_MAX - pn_m) / GRID_RES, 0, GRID_H - 1))
+                cc_pm = int(np.clip((pe_m - E_MIN) / GRID_RES, 0, GRID_W - 1))
+                if (not scene.lake_mask[rr_pm, cc_pm]) and (not scene.bldg_roof_mask[rr_pm, cc_pm]):
+                    zpm = float(scene.dem[rr_pm, cc_pm])
+                    _draw_harbor_seg(pe_m, pn_m, zpm, pe_m, pn_m, zpm + 2.1, [112.0, 82.0, 56.0], oid=244926)
+                    _draw_harbor_seg(pe_m - 1.2, pn_m, zpm + 2.15, pe_m + 1.2, pn_m, zpm + 2.15, [238.0, 234.0, 222.0], oid=255408, thick=True)
+                    _draw_harbor_seg(pe_m, pn_m - 1.2, zpm + 2.15, pe_m, pn_m + 1.2, zpm + 2.15, [238.0, 234.0, 222.0], oid=255408, thick=True)
+    for mbe, mbn in ((2683586.0, 1242996.0), (2683589.5, 1243001.5), (2683593.0, 1243007.0), (2683596.5, 1243012.5)):
+        if _in_box_am(mbe, mbn, ins=2.0):
+            rr_mb = int(np.clip((N_MAX - mbn) / GRID_RES, 0, GRID_H - 1))
+            cc_mb = int(np.clip((mbe - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            if not scene.bldg_roof_mask[rr_mb, cc_mb]:
+                zmb = max(LAKE_SURFACE_Z + 0.35, float(scene.dem[rr_mb, cc_mb]))
+                _draw_harbor_seg(mbe, mbn, zmb, mbe, mbn, zmb + 0.65, [56.0, 60.0, 66.0], oid=244927, thick=True)
+
+    # Sulzergut boathouse slipways, stone park balustrade, kleine Steintreppe bathing steps & mooring lanterns
+    for sl_i, (se0, sn0, se1, sn1) in enumerate(((2684436.0, 1241178.0, 2684445.0, 1241182.0), (2684425.0, 1241186.0, 2684434.0, 1241190.0))):
+        if _in_box_am(0.5 * (se0 + se1), 0.5 * (sn0 + sn1), ins=2.0):
+            _draw_harbor_seg(se0, sn0 - 0.65, 406.5, se1, sn1 - 0.65, LAKE_SURFACE_Z - 0.1, [118.0, 88.0, 58.0], oid=255420 + sl_i, thick=True)
+            _draw_harbor_seg(se0, sn0 + 0.65, 406.5, se1, sn1 + 0.65, LAKE_SURFACE_Z - 0.1, [118.0, 88.0, 58.0], oid=255420 + sl_i, thick=True)
+    if _in_box_am(2684444.0, 1241172.0, ins=2.0):
+        for st_sz in range(3):
+            z_st_sz = 407.1 - st_sz * 0.42
+            _draw_harbor_seg(2684443.0 + st_sz * 0.55, 1241170.5, z_st_sz, 2684443.0 + st_sz * 0.55, 1241173.5, z_st_sz, [204.0, 198.0, 186.0], oid=255425, thick=True)
+    for bze, bzn in ((2684464.0, 1241152.0), (2684476.0, 1241142.0)):
+        if _in_box_am(bze, bzn, ins=2.0):
+            rr_bz = int(np.clip((N_MAX - bzn) / GRID_RES, 0, GRID_H - 1))
+            cc_bz = int(np.clip((bze - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            if (not scene.lake_mask[rr_bz, cc_bz]) and (not scene.bldg_roof_mask[rr_bz, cc_bz]):
+                zbz = float(scene.dem[rr_bz, cc_bz])
+                _draw_harbor_seg(bze - 0.85, bzn - 0.3, zbz + 0.48, bze + 0.85, bzn + 0.3, zbz + 0.48, [152.0, 112.0, 72.0], oid=255426, thick=True)
+    if _in_box_am(2684471.0, 1241147.0, ins=2.0):
+        rr_sb = int(np.clip((N_MAX - 1241147.0) / GRID_RES, 0, GRID_H - 1))
+        cc_sb = int(np.clip((2684471.0 - E_MIN) / GRID_RES, 0, GRID_W - 1))
+        zsb_b = float(scene.dem[rr_sb, cc_sb])
+        _draw_harbor_seg(2684455.0, 1241162.0, zsb_b + 0.85, 2684488.0, 1241132.0, zsb_b + 0.85, [212.0, 206.0, 194.0], oid=255424, thick=True)
+        _draw_harbor_seg(2684455.0, 1241162.0, zsb_b + 0.35, 2684488.0, 1241132.0, zsb_b + 0.35, [178.0, 172.0, 160.0], oid=255424)
+    for ml_i, (mle, mln) in enumerate(((2684435.0, 1241175.0), (2684423.0, 1241184.0), (2684458.0, 1241160.0), (2684482.0, 1241138.0))):
+        if _in_box_am(mle, mln, ins=2.0):
+            rr_ml = int(np.clip((N_MAX - mln) / GRID_RES, 0, GRID_H - 1))
+            cc_ml = int(np.clip((mle - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            if (not scene.lake_mask[rr_ml, cc_ml]) and (not scene.bldg_roof_mask[rr_ml, cc_ml]):
+                zml = float(scene.dem[rr_ml, cc_ml])
+                _draw_harbor_seg(mle, mln, zml, mle, mln, zml + 1.15, [54.0, 58.0, 64.0], oid=244930 + ml_i)
+                _draw_harbor_seg(mle, mln, zml + 1.15, mle, mln, zml + 1.38, [255.0, 224.0, 142.0] if is_night else [232.0, 234.0, 228.0], mat_c=M_WINDOW_LIT if is_night else M_HARBOR_OBJ, oid=244930 + ml_i, thick=True)
+
+    # Morfanlage boathouse slipway, dressed limestone quay coping, benches & wooden bathing steps
+    if _in_box_am(2683877.0, 1242414.0, ins=2.0):
+        _draw_harbor_seg(2683872.0, 1242411.4, 406.5, 2683882.0, 1242415.4, LAKE_SURFACE_Z - 0.1, [120.0, 90.0, 60.0], oid=255440, thick=True)
+        _draw_harbor_seg(2683872.0, 1242412.6, 406.5, 2683882.0, 1242416.6, LAKE_SURFACE_Z - 0.1, [120.0, 90.0, 60.0], oid=255440, thick=True)
+    if _in_box_am(2683892.0, 1242388.0, ins=2.0) and _in_box_am(2683928.0, 1242322.0, ins=2.0):
+        _draw_harbor_seg(2683892.0, 1242388.0, 407.35, 2683928.0, 1242322.0, 407.35, [204.0, 200.0, 188.0], oid=255444, thick=True)
+        _draw_harbor_seg(2683892.0, 1242388.0, 406.90, 2683928.0, 1242322.0, 406.90, [168.0, 164.0, 154.0], oid=255444)
+    for mfe, mfn in ((2683896.0, 1242374.0), (2683908.0, 1242352.0), (2683918.0, 1242336.0)):
+        if _in_box_am(mfe, mfn, ins=2.0):
+            rr_mf = int(np.clip((N_MAX - mfn) / GRID_RES, 0, GRID_H - 1))
+            cc_mf = int(np.clip((mfe - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            if (not scene.lake_mask[rr_mf, cc_mf]) and (not scene.bldg_roof_mask[rr_mf, cc_mf]):
+                zmf = float(scene.dem[rr_mf, cc_mf])
+                _draw_harbor_seg(mfe - 0.8, mfn - 0.35, zmf + 0.48, mfe + 0.8, mfn + 0.35, zmf + 0.48, [152.0, 112.0, 72.0], oid=255445, thick=True)
+    for bs_i, (bse, bsn) in enumerate(((2683906.0, 1242362.0), (2683924.0, 1242328.0))):
+        if _in_box_am(bse, bsn, ins=2.0):
+            for dn_b in (-0.32, 0.32):
+                _draw_harbor_seg(bse, bsn + dn_b, LAKE_SURFACE_Z - 0.1, bse, bsn + dn_b, 407.6, [206.0, 212.0, 220.0], oid=255441 + bs_i)
+            _draw_harbor_seg(bse, bsn - 0.32, 406.8, bse, bsn + 0.32, 406.8, [168.0, 126.0, 82.0], oid=255441 + bs_i, thick=True)
+            _draw_harbor_seg(bse, bsn - 0.32, 407.2, bse, bsn + 0.32, 407.2, [168.0, 126.0, 82.0], oid=255441 + bs_i, thick=True)
 
     # -------------------------------------------------------------------------
     # Part B: 3D Isometric Moored Boats (40 clean open-water sailboats & Boesch motorboats!)
@@ -3482,6 +4356,53 @@ def _render_3d_harbor_and_boats(
                             obj_buf[ty_u, tx_u] = oid_u
                             norm_buf[ty_u, tx_u] = [0.15, -0.15, 0.97]
                             shadow_buf[ty_u, tx_u] = False
+
+            # v9.0 Seebad wooden sun-loungers & outdoor shower/lifeguard post
+            for lg_i, (lge, lgn) in enumerate(((2684304.0, 1241484.0), (2684308.0, 1241481.0), (2684312.0, 1241489.0), (2684306.0, 1241493.0), (2684314.0, 1241480.0))):
+                if not _in_box_am(lge, lgn, ins=2.0):
+                    continue
+                rr_lg = int(np.clip((N_MAX - lgn) / GRID_RES, 0, GRID_H - 1))
+                cc_lg = int(np.clip((lge - E_MIN) / GRID_RES, 0, GRID_W - 1))
+                if scene.lake_mask[rr_lg, cc_lg] or scene.bldg_roof_mask[rr_lg, cc_lg]:
+                    continue
+                zlg = float(scene.dem[rr_lg, cc_lg])
+                _draw_harbor_seg(lge - 0.85, lgn - 0.25, zlg + 0.30, lge + 0.85, lgn + 0.25, zlg + 0.30, [176.0, 132.0, 82.0], oid=255312 + lg_i, thick=True)
+                _draw_harbor_seg(lge - 0.85, lgn - 0.25, zlg + 0.45, lge - 0.45, lgn - 0.12, zlg + 0.62, [242.0, 242.0, 238.0], oid=255312 + lg_i)
+            if _in_box_am(2684318.0, 1241488.0, ins=2.0):
+                rr_sh = int(np.clip((N_MAX - 1241488.0) / GRID_RES, 0, GRID_H - 1))
+                cc_sh = int(np.clip((2684318.0 - E_MIN) / GRID_RES, 0, GRID_W - 1))
+                if (not scene.lake_mask[rr_sh, cc_sh]) and (not scene.bldg_roof_mask[rr_sh, cc_sh]):
+                    zsh = float(scene.dem[rr_sh, cc_sh])
+                    _draw_harbor_seg(2684318.0, 1241488.0, zsh, 2684318.0, 1241488.0, zsh + 2.4, [206.0, 212.0, 220.0], oid=255320)
+                    _draw_harbor_seg(2684318.0, 1241488.0, zsh + 1.9, 2684318.0, 1241488.0, zsh + 2.35, [224.0, 48.0, 48.0], oid=255320, thick=True)
+
+        # v9.0 Hafenbeiz Mönchhof beer-garden parasols (day & sunset)
+        for mp_i, (mpe, mpn, mp_col) in enumerate((
+            (2683578.0, 1243006.0, [238.0, 232.0, 216.0]),
+            (2683582.0, 1243002.0, [166.0, 46.0, 48.0]),
+            (2683585.0, 1242998.0, [238.0, 232.0, 216.0]),
+            (2683580.0, 1242996.0, [166.0, 46.0, 48.0]),
+            (2683584.0, 1243008.0, [238.0, 232.0, 216.0]),
+        )):
+            if not _in_box_am(mpe, mpn, ins=2.0):
+                continue
+            rr_mp = int(np.clip((N_MAX - mpn) / GRID_RES, 0, GRID_H - 1))
+            cc_mp = int(np.clip((mpe - E_MIN) / GRID_RES, 0, GRID_W - 1))
+            if scene.lake_mask[rr_mp, cc_mp] or scene.bldg_roof_mask[rr_mp, cc_mp]:
+                continue
+            zmp = float(scene.dem[rr_mp, cc_mp])
+            _draw_harbor_seg(mpe, mpn, zmp, mpe, mpn, zmp + 2.0, [74.0, 76.0, 82.0], oid=255400 + mp_i)
+            px_m, py_m, pd_m = camera.project(np.array([mpe]), np.array([mpn]), np.array([zmp + 2.05]))
+            mx_p, my_p, dm_p = int(round(float(px_m[0] + shift_x))), int(round(float(py_m[0] + shift_y))), float(pd_m[0]) - 0.12
+            for dy_m in (-1, 0, 1):
+                for dx_m in (-2, -1, 0, 1, 2):
+                    if abs(dx_m) + abs(dy_m) * 2 <= 2:
+                        tx_m, ty_m = mx_p + dx_m, my_p + dy_m
+                        if 0 <= tx_m < W and 0 <= ty_m < H and dm_p < zbuf[ty_m, tx_m]:
+                            zbuf[ty_m, tx_m] = dm_p
+                            rgb_buf[ty_m, tx_m] = [244.0, 240.0, 232.0] if ((dx_m + dy_m) & 1) else mp_col
+                            mat_buf[ty_m, tx_m] = M_HARBOR_OBJ
+                            obj_buf[ty_m, tx_m] = 255400 + mp_i
 
 
 def _render_sculpted_pixel_art_trees_and_hedges(
@@ -4501,6 +5422,52 @@ def render_diorama(
         [lm.get(k, -1) for k in ("seebad_bathhouse", "seebad_kiosk", "seebad_south")],
         dtype=np.int32,
     )
+    id_lindt_brick_n = lm.get("lindt_brick_n", -1)
+    id_lindt_brick_s = lm.get("lindt_brick_s", -1)
+    id_gotisch_hus = lm.get("gotisch_hus", -1)
+    id_schul_dorf = lm.get("schulhaus_dorfstr", -1)
+    id_chez_fritz = lm.get("chez_fritz", -1)
+    id_schul_al_868 = lm.get("schulhaus_alteland_868", -1)
+    id_schul_al_437 = lm.get("schulhaus_alteland_437", -1)
+    id_hb_pool = lm.get("hallenbad_pool_1448", -1)
+    id_hb_entry = lm.get("hallenbad_entry_1628", -1)
+    id_broel_manor = lm.get("broelberg_manor_979", -1)
+    id_broel_temp = lm.get("broelberg_tempelchen_1074", -1)
+    id_spin_villa = lm.get("spinnergut_villa_1601", -1)
+    id_spin_pav = lm.get("spinnergut_pav_1132", -1)
+    id_tc_club = lm.get("tc_clubhouse_1287", -1)
+    id_stock_807 = lm.get("stockengut_barn_807", -1)
+    id_stock_77 = lm.get("stockengut_barn_77", -1)
+    id_stock_silo_1 = lm.get("stockengut_silo_1135", -1)
+    id_stock_silo_2 = lm.get("stockengut_silo_1174", -1)
+    id_san_gh_225 = lm.get("sanatorium_gh_225", -1)
+    id_san_gh_886 = lm.get("sanatorium_gh_886", -1)
+    id_san_633 = lm.get("sanatorium_633", -1)
+    id_san_521 = lm.get("sanatorium_521", -1)
+    id_hafenbeiz_243 = lm.get("moenchhof_hafenbeiz_243", -1)
+    hafenbeiz_ids_arr = np.array([id_hafenbeiz_243, lm.get("moenchhof_hafenbeiz_843", -1)], dtype=np.int32)
+    moenchhof_villas_arr = np.array(
+        [lm.get(k, -1) for k in ("moenchhof_villa_727", "moenchhof_villa_303", "moenchhof_villa_527", "moenchhof_villa_890", "moenchhof_villa_781")],
+        dtype=np.int32,
+    )
+    morfanlage_villas_arr = np.array([lm.get("morfanlage_villa_771", -1), lm.get("morfanlage_villa_423", -1)], dtype=np.int32)
+    lakeside_boats_arr = np.array(
+        [lm.get(k, -1) for k in (
+            "sulzergut_boat_1169", "sulzergut_boat_1550", "sulzergut_boat_1706", "sulzergut_boat_984",
+            "moenchhof_boat_25", "moenchhof_boat_825", "morfanlage_boat_42", "morfanlage_boat_379",
+        )],
+        dtype=np.int32,
+    )
+    sulzergut_chalet_boats_arr = np.array([lm.get("sulzergut_boat_1169", -1), lm.get("sulzergut_boat_1550", -1)], dtype=np.int32)
+    sulzergut_villas_arr = np.array([lm.get("sulzergut_villa_1617", -1), lm.get("sulzergut_villa_1338", -1)], dtype=np.int32)
+    broel_outb_arr = np.array([lm.get("broelberg_gardener_1678", -1), lm.get("broelberg_outb_1332", -1)], dtype=np.int32)
+    stock_barns_arr = np.array([id_stock_807, id_stock_77], dtype=np.int32)
+    stock_roof_arr = np.array(
+        [id_stock_77, lm.get("stockengut_house_279", -1), lm.get("stockengut_house_574", -1)],
+        dtype=np.int32,
+    )  # M3.5: id_stock_807 excluded to strictly preserve its real DOP10 solar-panel barn roof!
+    gem_all_arr = np.array([id_gem_main, id_gem_wing, id_schul_al_868, id_schul_al_437], dtype=np.int32)
+    san_main_arr = np.array([id_san_633, id_san_521, lm.get("sanatorium_483", -1)], dtype=np.int32)
 
     if crop_box_lv95 is not None:
         e0, n0, e1, n1 = crop_box_lv95
@@ -4755,6 +5722,18 @@ def render_diorama(
                     rad_c = np.clip(rad_n, 0.0, 1.0)[:, None]
                     dome_c = (1.0 - rad_c) * np.array([224.0, 228.0, 234.0], dtype=np.float32) + rad_c * np.array([164.0, 170.0, 178.0], dtype=np.float32)
                     dome_c[rad_n > 0.86] = [116.0, 122.0, 130.0]
+                    # v9.0 Lindt cocoa silo perimeter safety guardrail ring
+                    is_tall_silo = (bldg_z1[s_bi] - bldg_z0[s_bi]) >= 14.0
+                    in_guard = is_tall_silo & (rad_n >= 0.80) & (rad_n <= 0.90)
+                    if in_guard.any():
+                        az_s = np.arctan2(rn_r[si_r[in_guard]] - bldg_n0[s_bi[in_guard]], re_r[si_r[in_guard]] - bldg_e0[s_bi[in_guard]])
+                        g_post = ((az_s * 6.0) % 1.0) < 0.35
+                        dome_c[in_guard] = np.where(g_post[:, None], [218.0, 224.0, 232.0], [96.0, 102.0, 110.0])
+                    # v9.0 Stockengut rural weathered concrete-olive farm silo domes
+                    is_st_silo = (s_bi == id_stock_silo_1) | (s_bi == id_stock_silo_2)
+                    if is_st_silo.any():
+                        rc_st = rad_c[is_st_silo]
+                        dome_c[is_st_silo] = (1.0 - rc_st) * np.array([152.0, 156.0, 148.0], dtype=np.float32) + rc_st * np.array([118.0, 122.0, 116.0], dtype=np.float32)
                     r_alb[si_r] = dome_c
 
                 r_is_gh = r_sty == 7
@@ -4767,6 +5746,19 @@ def render_diorama(
                     mull_r = (((re_r[gi_r] % 1.65) < 0.16) | ((rn_r[gi_r] % 1.65) < 0.16))
                     g_rf[mull_r] = [164.0, 172.0, 182.0] if preset.is_night else [226.0, 230.0, 234.0]
                     r_alb[gi_r] = g_rf
+
+                # v9.0 Landmark roof refinements (strictly r_bi != id_lindt_hoc!)
+                r_is_hb = ((r_bi == id_hb_pool) | (r_bi == id_hb_entry)) & flat & (r_bi != id_lindt_hoc)
+                if r_is_hb.any():
+                    hbi_r = np.nonzero(r_is_hb)[0]
+                    hb_est = sample_roof_edge_25cm(scene, re_r[hbi_r], rn_r[hbi_r])
+                    r_alb[hbi_r[hb_est == 1]] = [228.0, 230.0, 226.0]
+                r_is_tmp = (r_bi == id_broel_temp) & (r_bi != id_lindt_hoc)
+                if r_is_tmp.any():
+                    r_alb[r_is_tmp] = 0.45 * r_alb[r_is_tmp] + 0.55 * np.array([92.0, 116.0, 110.0], dtype=np.float32)
+                r_is_stf = np.isin(r_bi, stock_roof_arr) & pitched & (r_bi != id_lindt_hoc)
+                if r_is_stf.any():
+                    r_alb[r_is_stf] = np.clip(r_alb[r_is_stf] * np.array([1.06, 0.99, 0.94], dtype=np.float32), 0.0, 244.0)
 
                 f_col[rm] = r_alb
 
@@ -4807,12 +5799,17 @@ def render_diorama(
                 w_base[(top_dist > 0.0) & (top_dist < 0.50)] *= 0.78
                 w_base[(edge_dist < 0.28) & (wall_len > 3.2)] *= 0.92
 
-                # Buff-brick Lindt smokestack (43.6m Hochkamin)
+                # Buff-brick Lindt smokestack (43.6m Hochkamin) + v9.0 iron tension rings & climbing ladder
                 is_chimney = w_bi == id_lindt_chim
                 if is_chimney.any():
                     ch_i = np.nonzero(is_chimney)[0]
                     ch_course = ((w_z[ch_i] * 1.4) % 1.0) < 0.25
                     w_base[ch_i[ch_course]] *= 0.93
+                    ch_ring = (h_rel[ch_i] > 3.0) & (top_dist[ch_i] > 1.8) & ((h_rel[ch_i] % 4.5) < 0.24)
+                    w_base[ch_i[ch_ring]] = [64.0, 62.0, 60.0]
+                    ch_lad_zone = (norms_v[w_ft[ch_i], 0] > 0.35) & (np.abs(d_center[ch_i]) <= 0.32) & (h_rel[ch_i] >= 2.0) & (top_dist[ch_i] >= 1.6)
+                    ch_lad = ch_lad_zone & ((np.abs(d_center[ch_i]) >= 0.20) | ((h_rel[ch_i] % 0.65) < 0.14))
+                    w_base[ch_i[ch_lad]] = [58.0, 62.0, 68.0]
                     ch_cap = top_dist[ch_i] < 1.55
                     w_base[ch_i[ch_cap]] = [86.0, 82.0, 78.0]
 
@@ -4843,19 +5840,34 @@ def render_diorama(
                     cyl_dot = np.maximum(0.0, cx_s * sun_vec[0] + cy_s * sun_vec[1])
                     spec = (cyl_dot ** 5) * 44.0
                     s_col = np.full((len(sl_i), 3), [182.0, 188.0, 196.0], dtype=np.float32) + spec[:, None]
-                    s_col[(h_rel[sl_i] % 2.5) < 0.16] *= 0.84      # Horizontal bolted steel rings
+                    is_st_s = (s_bi == id_stock_silo_1) | (s_bi == id_stock_silo_2)
+                    if is_st_s.any():
+                        s_col[is_st_s] = np.array([158.0, 160.0, 150.0], dtype=np.float32) + spec[is_st_s, None]
+                        s_col[is_st_s & ((h_rel[sl_i] % 1.8) < 0.14)] *= 0.78
+                    s_col[(~is_st_s) & ((h_rel[sl_i] % 2.5) < 0.16)] *= 0.84      # Horizontal bolted steel rings
                     s_col[h_rel[sl_i] < 0.90] = [118.0, 122.0, 128.0]  # Galvanized base plinth
                     s_col[top_dist[sl_i] < 0.42] = [132.0, 138.0, 146.0]
+                    # v9.0 Tall Lindt cocoa silos: top safety guardrail band & vertical service ladder
+                    is_tall_sw = (bldg_z1[s_bi] - bldg_z0[s_bi]) >= 14.0
+                    in_gr_w = is_tall_sw & (top_dist[sl_i] < 0.78)
+                    if in_gr_w.any():
+                        gp_w = (((np.arctan2(cy_s[in_gr_w], cx_s[in_gr_w]) * 6.0) % 1.0) < 0.25) | (top_dist[sl_i[in_gr_w]] < 0.22)
+                        s_col[in_gr_w] = np.where(gp_w[:, None], [214.0, 220.0, 228.0], [92.0, 98.0, 106.0])
+                    in_lad_s = is_tall_sw & (cx_s > 0.78) & (np.abs(cy_s) < 0.22) & (h_rel[sl_i] >= 1.2)
+                    lad_s_px = in_lad_s & ((np.abs(cy_s) >= 0.14) | ((h_rel[sl_i] % 0.65) < 0.15))
+                    s_col[lad_s_px] = [74.0, 80.0, 88.0]
                     w_base[sl_i] = np.clip(s_col, 24.0, 248.0)
 
                 # F12: Treibhaus Glass Greenhouses (style 7 — Langholzweg 70g/70h & Uf Stocken!)
                 is_gh_w = w_sty == 7
                 if is_gh_w.any():
                     gh_i = np.nonzero(is_gh_w)[0]
+                    gh_bi = w_bi[gh_i]
                     gh_h = h_rel[gh_i]
                     gh_u = u_local[gh_i]
                     is_knee = gh_h < 0.72
                     is_mull = ((gh_u % 1.65) < 0.16) | ((gh_h % 1.45) < 0.14)
+                    is_transom = np.abs(gh_h - 2.4) < 0.14
                     g_col_w = np.full(
                         (len(gh_i), 3),
                         [64.0, 92.0, 118.0] if preset.is_night else [146.0, 190.0, 206.0],
@@ -4865,19 +5877,31 @@ def render_diorama(
                     gh_noise = ((np.floor(gh_u * 2.5).astype(np.int32) * 73856093) ^ (np.floor(gh_h * 3.0).astype(np.int32) * 19349663)) & 15
                     in_fol = (~is_knee) & (gh_h <= 2.35) & (gh_noise < 9)
                     g_col_w[in_fol] = [44.0, 74.0, 54.0] if preset.is_night else [86.0, 134.0, 88.0]
+                    # v9.0 Soft warm conservatory lantern glow on Sanatorium greenhouses at Sunset/Night
+                    is_san_gh = ((gh_bi == id_san_gh_225) | (gh_bi == id_san_gh_886)) & (~is_knee) & (~is_mull) & (~is_transom)
+                    if (preset.is_night or preset_key == "sunset") and is_san_gh.any():
+                        g_col_w[is_san_gh] = [142.0, 154.0, 118.0]
+                        f_mat[wi[gh_i[is_san_gh]]] = M_WINDOW_LIT
                     g_col_w[is_mull] = [156.0, 164.0, 174.0] if preset.is_night else [222.0, 228.0, 232.0]
+                    is_san_mull = ((gh_bi == id_san_gh_225) | (gh_bi == id_san_gh_886)) & (is_mull | is_transom)
+                    if (not preset.is_night) and is_san_mull.any():
+                        g_col_w[is_san_mull] = [236.0, 242.0, 244.0]  # Crisp white Sanatorium Treibhaus glass ribs
+                    g_col_w[is_transom] = [184.0, 190.0, 196.0] if preset.is_night else [234.0, 236.0, 238.0]
                     g_col_w[is_knee] = [168.0, 166.0, 160.0]
                     w_base[gh_i] = g_col_w
-                    f_mat[wi[gh_i[(~is_knee) & (~is_mull)]]] = M_WINDOW_DAY
+                    f_mat[wi[gh_i[(~is_knee) & (~is_mull) & (~is_transom) & (~(is_san_gh & (preset.is_night or preset_key == "sunset")))]]] = M_WINDOW_DAY
 
-                # B1. Lindt Home of Chocolate (style 2)
+                # B1. Lindt Home of Chocolate (style 2 — wall pixels ONLY; id=1443 DOP10 roof is 100% untouched!)
                 is_hoc = w_sty == 2
                 if is_hoc.any():
                     hi_l = np.nonzero(is_hoc)[0]
                     le, ln, lz, lh = w_e[hi_l], w_n[hi_l], w_z[hi_l], h_rel[hi_l]
                     lu = u_local[hi_l]
                     in_white_curve = (le >= 2684107.5) & (ln >= 1241401.5) & (ln <= 1241437.2)
-                    w_base[hi_l[in_white_curve]] = [238.0, 236.0, 230.0]
+                    # Glossy white glazed ceramic brick (Koninklijke Tichelaar Makkum, Christ & Gantenbein 2020)
+                    w_base[hi_l[in_white_curve]] = [244.0, 242.0, 236.0]
+                    sun_glaze = in_white_curve & (le >= 2684122.0) & (ln <= 1241422.0)
+                    w_base[hi_l[sun_glaze]] = [250.0, 248.0, 242.0]
                     w_course = in_white_curve & (((lz * 1.8) % 1.0) < 0.16)
                     w_base[hi_l[w_course]] *= 0.96
 
@@ -4893,16 +5917,25 @@ def render_diorama(
                         lu,
                     )
                     lt_d = top_dist[hi_l]
+                    # 3D golden "LINDT HOME OF CHOCOLATE" capital lettering frieze (3 word groups + cast drop shadow)
+                    in_word_grp = (
+                        ((arc_u >= 4.0) & (arc_u <= 10.5))
+                        | ((arc_u >= 11.6) & (arc_u <= 19.2))
+                        | ((arc_u >= 20.3) & (arc_u <= 29.8))
+                    )
                     gold_frieze = (
                         in_white_curve
-                        & (lt_d >= 0.70)
-                        & (lt_d <= 1.95)
-                        & (((arc_u * 1.45) % 1.0) >= 0.28)
-                        & (arc_u >= 3.5)
+                        & (lt_d >= 0.85)
+                        & (lt_d <= 1.88)
+                        & in_word_grp
+                        & (((arc_u * 1.65) % 1.0) >= 0.25)
                     )
+                    frieze_sh = in_white_curve & (lt_d > 1.88) & (lt_d <= 2.15) & in_word_grp
+                    if frieze_sh.any():
+                        w_base[hi_l[frieze_sh]] *= 0.86
                     if gold_frieze.any():
                         gf_idx = hi_l[gold_frieze]
-                        w_base[gf_idx] = [228.0, 188.0, 74.0]
+                        w_base[gf_idx] = [236.0, 194.0, 72.0]
                         if preset.is_night or preset_key == "sunset":
                             f_mat[wi[gf_idx]] = M_WINDOW_LIT
 
@@ -4931,8 +5964,30 @@ def render_diorama(
                         else:
                             w_base[hw_idx] = [48.0, 68.0, 92.0]
                             f_mat[wi[hw_idx]] = M_WINDOW_DAY
+                    # v9.0 Lindt HoC rotunda warm golden interior chocolate-fountain glow, dark glazing mullions & arched portal
+                    rot_fountain = plaza_glass & in_white_curve & (lh >= 0.8) & (lh <= 4.8)
+                    if rot_fountain.any():
+                        rf_idx = hi_l[rot_fountain]
+                        if preset.is_night or preset_key == "sunset":
+                            w_base[rf_idx] = [255.0, 212.0, 108.0]
+                            f_mat[wi[rf_idx]] = M_WINDOW_LIT
+                        else:
+                            in_cent_atr = (arc_u[rot_fountain] >= 10.0) & (arc_u[rot_fountain] <= 20.0)
+                            w_base[rf_idx[in_cent_atr]] = [148.0, 120.0, 74.0]
+                    rot_mull = plaza_glass & in_white_curve & (((arc_u % 1.05) < 0.14) | (np.abs(lh - 3.6) < 0.16))
+                    if rot_mull.any():
+                        rm_idx = hi_l[rot_mull]
+                        w_base[rm_idx] = [42.0, 44.0, 48.0]
+                        f_mat[wi[rm_idx]] = M_WALL
+                    rot_door = in_white_curve & (lh >= 0.20) & (lh <= 3.65) & (arc_u >= 11.6) & (arc_u <= 17.9)
+                    if rot_door.any():
+                        rd_idx = hi_l[rot_door]
+                        is_arch_frame = (lh[rot_door] > 3.30) | (arc_u[rot_door] < 12.1) | (arc_u[rot_door] > 17.4)
+                        is_brass_bar = (np.abs(arc_u[rot_door] - 14.75) < 0.22) | ((lh[rot_door] > 3.08) & (lh[rot_door] <= 3.30))
+                        w_base[rd_idx] = np.where(is_arch_frame[:, None], [48.0, 44.0, 42.0], np.where(is_brass_bar[:, None], [228.0, 188.0, 74.0], [34.0, 38.0, 46.0]))
+                        f_mat[wi[rd_idx]] = M_WALL
 
-                # B1b. Main Seestrasse 204 Lindt & Sprüngli Complex
+                # B1b. Main Seestrasse 204 Lindt & Sprüngli Complex + 1899 brick wing dentil cornice & factory wall clock
                 is_1642 = w_bi == id_lindt_main
                 if is_1642.any():
                     m_i = np.nonzero(is_1642)[0]
@@ -4946,14 +6001,22 @@ def render_diorama(
                         ph = mh[wing_poly]
                         pu = mu[wing_poly]
                         pz = mz[wing_poly]
+                        ptd = mtd[wing_poly]
+                        pedg = edge_dist[pi]
                         pcol = np.full((len(pi), 3), [158.0, 66.0, 50.0], dtype=np.float32)
                         brick_line = ((pz * 2.2) % 1.0) < 0.22
                         pcol[brick_line] *= 0.90
                         pilaster_l = (pu % 4.2) < 0.58
                         string_c = ((ph % 4.1) < 0.34) & (ph >= 3.8)
-                        pcol[pilaster_l | string_c] = [212.0, 196.0, 158.0]
+                        arch_lintel = ((ph % 4.1) >= 2.85) & ((ph % 4.1) <= 3.15) & ((pu % 4.2) >= 0.85) & ((pu % 4.2) <= 3.35)
+                        pcol[pilaster_l | string_c | arch_lintel] = [212.0, 196.0, 158.0]
                         pcol[ph < 4.2] = [148.0, 144.0, 136.0]
                         pcol[(ph >= 15.8) & (ph < 16.9)] = [216.0, 200.0, 162.0]
+                        # v9.0 Brick dentil cornice & steel loading-dock canopy
+                        dentil_p = (ptd < 0.95) & (ptd >= 0.40) & ((np.floor(pu * 2.5).astype(np.int32) & 1) == 0)
+                        pcol[dentil_p] = [216.0, 200.0, 162.0]
+                        pcol[(ph >= 3.55) & (ph <= 4.05) & (pedg >= 1.2)] = [66.0, 72.0, 80.0]
+                        pcol[(ph >= 3.25) & (ph < 3.55) & (pedg >= 1.2)] *= 0.72
                         w_base[pi] = pcol
 
                     wing_mid = (mn >= 1241362.0) & (mn < 1241403.0)
@@ -4981,6 +6044,23 @@ def render_diorama(
                         tcol[recess] = [196.0, 194.0, 186.0]
                         crest = (ttd_c <= 1.6) & (np.abs(d_center[ti_c]) <= 3.6)
                         tcol[crest] = [228.0, 190.0, 76.0]
+                        # M3.5 Historic Lindt Factory circular wall clock below gilded crest
+                        ux_fc = d_center[ti_c]
+                        uz_fc = th_c - 18.2
+                        r_fc = np.hypot(ux_fc, uz_fc)
+                        on_fc = r_fc <= 1.35
+                        if on_fc.any():
+                            tcol[on_fc] = [28.0, 34.0, 46.0]
+                            d_hr_f = np.abs(ux_fc * 0.57 + uz_fc * 0.82)
+                            al_hr_f = -ux_fc * 0.82 + uz_fc * 0.57
+                            h_hr_f = on_fc & (d_hr_f <= 0.14) & (al_hr_f >= -0.08) & (al_hr_f <= 0.72)
+                            d_mn_f = np.abs(-ux_fc * 0.50 + uz_fc * 0.866)
+                            al_mn_f = ux_fc * 0.866 + uz_fc * 0.50
+                            h_mn_f = on_fc & (d_mn_f <= 0.11) & (al_mn_f >= -0.08) & (al_mn_f <= 0.96)
+                            fc_gold = on_fc & ((r_fc >= 1.05) | (r_fc <= 0.18) | h_hr_f | h_mn_f)
+                            tcol[fc_gold] = [232.0, 192.0, 76.0]
+                            if preset.is_night or preset_key == "sunset":
+                                f_mat[wi[ti_c[fc_gold]]] = M_WINDOW_LIT
                         w_base[ti_c] = tcol
 
                     wing_south = (mn < 1241342.0) | ((mn < 1241362.0) & (me < 2684225.0))
@@ -5060,12 +6140,15 @@ def render_diorama(
                             ux = d_tc[ck_sub]
                             uz = dz_ck[ck_sub]
 
-                            dial_col = np.full((len(ck_sub), 3), 24.0, dtype=np.float32)
-                            dial_col[:, 1] = 28.0
-                            dial_col[:, 2] = 38.0
+                            dial_col = np.full((len(ck_sub), 3), 22.0, dtype=np.float32)
+                            dial_col[:, 1] = 26.0
+                            dial_col[:, 2] = 34.0
 
                             gold_rim = (rc >= 1.72) & (rc <= 2.22)
-                            inner_ring = (rc >= 1.38) & (rc <= 1.50)
+                            inner_ring = (rc >= 1.38) & (rc <= 1.48)
+                            # M3.5 12 gilded Roman-numeral hour tick marks
+                            ang_ck = np.arctan2(uz, ux)
+                            roman_ticks = (rc >= 1.46) & (rc <= 1.72) & (np.abs(((ang_ck * 6.0 / math.pi) + 0.5) % 1.0 - 0.5) < 0.14)
                             d_hr = np.abs(ux * 0.57 + uz * 0.82)
                             along_hr = -ux * 0.82 + uz * 0.57
                             hand_hr = (d_hr <= 0.22) & (along_hr >= -0.15) & (along_hr <= 1.18)
@@ -5075,8 +6158,8 @@ def render_diorama(
                             hand_mn = (d_mn <= 0.18) & (along_mn >= -0.15) & (along_mn <= 1.58)
 
                             hub = rc <= 0.28
-                            is_gold = gold_rim | inner_ring | hand_hr | hand_mn | hub
-                            dial_col[is_gold] = [238.0, 196.0, 76.0]
+                            is_gold = gold_rim | inner_ring | roman_ticks | hand_hr | hand_mn | hub
+                            dial_col[is_gold] = [242.0, 200.0, 78.0]
                             w_base[ck_g] = dial_col
                             if preset.is_night or preset_key == "sunset":
                                 f_mat[wi[ck_g[is_gold]]] = M_WINDOW_LIT
@@ -5085,6 +6168,18 @@ def render_diorama(
                     if rk_nave.any():
                         rn_i = np.nonzero(rk_nave)[0]
                         rn_glob = si_l[rn_i]
+                        # v9.0 Gothic nave stepped sandstone buttresses between lancet bays
+                        butt_u = s_ul[rn_i] % 4.8
+                        on_butt = butt_u < 0.44
+                        on_butt_sh = (butt_u >= 0.44) & (butt_u < 0.62)
+                        w_base[rn_glob[on_butt]] = [202.0, 192.0, 174.0]
+                        w_base[rn_glob[on_butt_sh]] = [162.0, 152.0, 136.0]
+                        # v9.0 Arched sandstone entrance portal with walnut double doors
+                        rk_portal = (np.abs(s_dc[rn_i]) <= 1.25) & (sz_w[rn_i] >= 510.2) & (sz_w[rn_i] <= 513.2)
+                        if rk_portal.any():
+                            rp_g = rn_glob[rk_portal]
+                            in_door_rk = (np.abs(s_dc[rn_i[rk_portal]]) <= 0.82) & (sz_w[rn_i[rk_portal]] <= 512.7)
+                            w_base[rp_g] = np.where(in_door_rk[:, None], [74.0, 50.0, 36.0], [198.0, 188.0, 168.0])
                         nu = (s_ul[rn_i] % 4.8) - 2.4
                         nz_w = sz_w[rn_i]
                         lancet_body = (np.abs(nu) <= 0.64) & (nz_w >= 513.4) & (nz_w <= 518.2)
@@ -5092,15 +6187,20 @@ def render_diorama(
                         lancet = lancet_body | lancet_arch
                         if lancet.any():
                             lg_idx = rn_glob[lancet]
-                            if preset.is_night:
-                                w_base[lg_idx] = [255.0, 214.0, 118.0]
-                                f_mat[wi[lg_idx]] = M_WINDOW_LIT
-                            elif preset_key == "sunset":
-                                w_base[lg_idx] = [248.0, 198.0, 108.0]
-                                f_mat[wi[lg_idx]] = M_WINDOW_LIT
+                            l_nu = nu[lancet]
+                            l_nz = nz_w[lancet]
+                            is_trac = (np.abs(l_nu) < 0.08) | (np.abs(l_nz - 516.0) < 0.12)
+                            if preset.is_night or preset_key == "sunset":
+                                j_hash = (np.floor(l_nz * 2.5).astype(np.int32) + np.floor(s_ul[rn_i[lancet]] * 0.5).astype(np.int32)) % 3
+                                j_col = np.where(
+                                    (j_hash == 0)[:, None], [252.0, 196.0, 92.0],
+                                    np.where((j_hash == 1)[:, None], [212.0, 84.0, 68.0], [84.0, 132.0, 196.0]),
+                                ).astype(np.float32)
+                                w_base[lg_idx] = np.where(is_trac[:, None], [196.0, 186.0, 168.0], j_col)
+                                f_mat[wi[lg_idx[~is_trac]]] = M_WINDOW_LIT
                             else:
-                                w_base[lg_idx] = [48.0, 68.0, 92.0]
-                                f_mat[wi[lg_idx]] = M_WINDOW_DAY
+                                w_base[lg_idx] = np.where(is_trac[:, None], [196.0, 186.0, 168.0], [48.0, 68.0, 92.0])
+                                f_mat[wi[lg_idx[~is_trac]]] = M_WINDOW_DAY
 
                     st_el_tower = s_bi == id_st_el_twr
                     if st_el_tower.any():
@@ -5108,21 +6208,75 @@ def render_diorama(
                         et_glob = si_l[et_i]
                         edc = s_dc[et_i]
                         ez = sz_w[et_i]
+                        # v9.0 Board-formed architectural concrete lift seam bands + M3.5 Crown fins (Krone der Hl. Elisabeth)
+                        w_base[et_glob[((ez % 2.4) < 0.14)]] *= 0.90
+                        crown_fin = (ez >= 509.5) & ((np.abs(np.abs(edc) - 0.35) < 0.14) | (np.abs(np.abs(edc) - 0.95) < 0.16))
+                        crown_edge = (ez >= 509.5) & ((np.abs(np.abs(edc) - 0.52) < 0.08) | (np.abs(np.abs(edc) - 1.14) < 0.08))
+                        w_base[et_glob[crown_edge]] = [214.0, 210.0, 200.0]
+                        w_base[et_glob[crown_fin]] = [62.0, 60.0, 58.0]
                         bslot = (np.abs(np.abs(edc) - 0.55) <= 0.24) & (ez >= 510.2) & (ez <= 516.4)
                         w_base[et_glob[bslot]] = [42.0, 44.0, 50.0]
-                        r_ec = np.hypot(edc, ez - 507.6)
-                        w_base[et_glob[(r_ec <= 1.25) & (r_ec >= 0.90)]] = [228.0, 188.0, 74.0]
-                        w_base[et_glob[r_ec < 0.90]] = [30.0, 34.0, 44.0]
+                        dz_ec = ez - 507.6
+                        r_ec = np.hypot(edc, dz_ec)
+                        on_ec = r_ec <= 1.25
+                        if on_ec.any():
+                            ec_sub = np.nonzero(on_ec)[0]
+                            ec_g = et_glob[ec_sub]
+                            rc_e = r_ec[ec_sub]
+                            ux_e = edc[ec_sub]
+                            uz_e = dz_ec[ec_sub]
+                            ec_col = np.full((len(ec_sub), 3), [30.0, 34.0, 44.0], dtype=np.float32)
+                            ec_rim = (rc_e >= 0.90) & (rc_e <= 1.25)
+                            # v9.0 Crisp gold hour/minute clock hands & center hub on St. Elisabeth bell tower!
+                            d_hr_e = np.abs(ux_e * 0.57 + uz_e * 0.82)
+                            al_hr_e = -ux_e * 0.82 + uz_e * 0.57
+                            h_hr_e = (d_hr_e <= 0.14) & (al_hr_e >= -0.08) & (al_hr_e <= 0.52)
+                            d_mn_e = np.abs(-ux_e * 0.50 + uz_e * 0.866)
+                            al_mn_e = ux_e * 0.866 + uz_e * 0.50
+                            h_mn_e = (d_mn_e <= 0.11) & (al_mn_e >= -0.08) & (al_mn_e <= 0.74)
+                            ec_gold = ec_rim | h_hr_e | h_mn_e | (rc_e <= 0.14)
+                            ec_col[ec_gold] = [238.0, 196.0, 76.0]
+                            w_base[ec_g] = ec_col
+                            if preset.is_night or preset_key == "sunset":
+                                f_mat[wi[ec_g[ec_gold]]] = M_WINDOW_LIT
 
                     st_el_nave = (s_bi == id_st_el_nave) & (s_edg >= 1.8)
                     if st_el_nave.any():
                         en_i = np.nonzero(st_el_nave)[0]
                         en_glob = si_l[en_i]
-                        clere = (sh_w[en_i] >= 9.5) & (sh_w[en_i] <= 12.2) & (((s_ul[en_i] % 2.8) >= 0.45))
+                        # M3.5 André M. Studer 1966 diagonal nave: oxidized copper cladding (Kupferblechverkleidung) & diagonal Tragrippen
+                        cop_band = (sh_w[en_i] >= 12.2) | ((s_ul[en_i] % 3.6) < 0.42)
+                        cop_pat = cop_band & ((np.floor(s_ul[en_i] * 0.5).astype(np.int32) & 1) == 0)
+                        w_base[en_glob[cop_band]] = [88.0, 82.0, 76.0]
+                        w_base[en_glob[cop_pat]] = [108.0, 118.0, 106.0]
+                        diag_rib = (((s_ul[en_i] * 0.72 + sh_w[en_i] * 0.68) % 3.4) < 0.28) & (sh_w[en_i] >= 3.6)
+                        diag_lit = (((s_ul[en_i] * 0.72 + sh_w[en_i] * 0.68) % 3.4) >= 0.28) & (((s_ul[en_i] * 0.72 + sh_w[en_i] * 0.68) % 3.4) < 0.44) & (sh_w[en_i] >= 3.6)
+                        w_base[en_glob[diag_lit]] = [116.0, 112.0, 104.0]
+                        w_base[en_glob[diag_rib]] = [76.0, 72.0, 68.0]
+                        # v9.0 Recessed concrete-framed nave entrance portal with bronze double doors
+                        en_port = (np.abs(s_dc[en_i]) <= 1.8) & (sh_w[en_i] >= 0.15) & (sh_w[en_i] <= 3.4)
+                        if en_port.any():
+                            ep_g = en_glob[en_port]
+                            in_bd = (np.abs(s_dc[en_i[en_port]]) <= 1.25) & (sh_w[en_i[en_port]] <= 2.9)
+                            w_base[ep_g] = np.where(in_bd[:, None], [72.0, 62.0, 54.0], [116.0, 114.0, 110.0])
+                        # M3.5 8-bay Fra Roberto Pasotti stained-glass palette (sapphire, ruby-rose, golden-amber, emerald)
+                        clere = (sh_w[en_i] >= 9.5) & (sh_w[en_i] <= 12.2) & (((s_ul[en_i] % 2.2) >= 0.35))
                         if clere.any():
                             cg_idx = en_glob[clere]
-                            w_base[cg_idx] = [255.0, 218.0, 128.0] if preset.is_night else [58.0, 82.0, 108.0]
-                            f_mat[wi[cg_idx]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
+                            c_bay = np.floor(s_ul[en_i[clere]] / 2.2).astype(np.int32) % 4
+                            sg_full = np.where(
+                                (c_bay == 0)[:, None], [54.0, 116.0, 216.0],
+                                np.where(
+                                    (c_bay == 1)[:, None], [216.0, 58.0, 66.0],
+                                    np.where((c_bay == 2)[:, None], [248.0, 196.0, 74.0], [56.0, 158.0, 104.0]),
+                                ),
+                            ).astype(np.float32)
+                            if preset.is_night or preset_key == "sunset":
+                                w_base[cg_idx] = sg_full
+                                f_mat[wi[cg_idx]] = M_WINDOW_LIT
+                            else:
+                                w_base[cg_idx] = sg_full * 0.58
+                                f_mat[wi[cg_idx]] = M_WINDOW_DAY
 
                 # B2b. F13 Bespoke Civic & Historic Landmarks (style 9: Bahnhof, Gemeindehaus, C.F. Meyer, Sanatorium, Seebad!)
                 is_civic = w_sty == 9
@@ -5147,48 +6301,125 @@ def render_diorama(
                         w_base[bi_b[bh_b < 1.2]] = [168.0, 164.0, 154.0]
                         quoin_b = (be_b < 0.48) & ((np.floor(c_z[m_bhf] * 1.4).astype(np.int32) & 1) == 0)
                         w_base[bi_b[quoin_b]] = [194.0, 186.0, 170.0]
-                        # Blue-and-white SBB station fascia board at h_rel in [3.4, 4.1]
+                        # Blue-and-white SBB station fascia board ("Kilchberg") at h_rel in [3.4, 4.1]
                         fascia_b = (bh_b >= 3.4) & (bh_b <= 4.1) & (be_b >= 0.8)
-                        w_base[bi_b[fascia_b]] = [26.0, 72.0, 148.0]
-                        w_base[bi_b[fascia_b & (bh_b >= 3.62) & (bh_b <= 3.88) & (((bu_b * 1.4) % 1.0) >= 0.25)]] = [244.0, 244.0, 240.0]
-                        # Arched ground-floor station waiting-room portals + upper windows
+                        w_base[bi_b[fascia_b]] = [18.0, 56.0, 138.0]
+                        fascia_txt = fascia_b & (bh_b >= 3.62) & (bh_b <= 3.88) & (((bu_b * 1.4) % 1.0) >= 0.25)
+                        w_base[bi_b[fascia_txt]] = [248.0, 248.0, 244.0]
+                        if preset.is_night:
+                            f_mat[wi[bi_b[fascia_txt]]] = M_WINDOW_LIT
+                        # v9.0 Projecting Jura-stone window sills & dark walnut gable bargeboards
+                        w_base[bi_b[(bh_b >= 4.70) & (bh_b < 4.90) & (be_b >= 1.0)]] = [234.0, 230.0, 220.0]
+                        w_base[bi_b[c_z[m_bhf] >= (c_eave[m_bhf] - 0.15)]] = [78.0, 54.0, 38.0]
+                        # M3.5 Baumgartner Partner dark-red aluminum louvered shutters + light-stone surrounds flanking upper windows
+                        up_surr = (bh_b >= 4.78) & (c_z[m_bhf] <= (c_eave[m_bhf] - 0.4)) & (be_b >= 0.95) & (((bh_b - 4.9) % 3.2) <= 1.78) & (((bu_b % 3.2) >= 0.72) & ((bu_b % 3.2) <= 2.28))
+                        w_base[bi_b[up_surr]] = [228.0, 224.0, 214.0]
+                        up_shut = (
+                            (bh_b >= 4.9) & (c_z[m_bhf] <= (c_eave[m_bhf] - 0.5)) & (be_b >= 0.85)
+                            & (((bh_b - 4.9) % 3.2) <= 1.65)
+                            & ((((bu_b % 3.2) >= 0.42) & ((bu_b % 3.2) < 0.85)) | (((bu_b % 3.2) > 2.15) & ((bu_b % 3.2) <= 2.58)))
+                        )
+                        if up_shut.any():
+                            us_i = bi_b[up_shut]
+                            us_c = np.full((len(us_i), 3), [122.0, 42.0, 42.0], dtype=np.float32)
+                            us_c[((bh_b[up_shut] * 5.0) % 1.0) < 0.25] *= 0.84
+                            w_base[us_i] = us_c
+                        # Arched ground-floor station waiting-room portals + upper windows with white mullions
                         gf_arch = (bh_b >= 0.65) & (bh_b <= 3.05) & (be_b >= 1.1) & (((bu_b % 3.4) >= 0.65) & ((bu_b % 3.4) <= 2.55))
                         up_win = (bh_b >= 4.9) & (c_z[m_bhf] <= (c_eave[m_bhf] - 0.5)) & (be_b >= 1.1) & (((bh_b - 4.9) % 3.2) <= 1.65) & (((bu_b % 3.2) >= 0.85) & ((bu_b % 3.2) <= 2.15))
                         b_win = gf_arch | up_win
                         if b_win.any():
                             bw_g = bi_b[b_win]
+                            bmull = np.abs((bu_b[b_win] % 3.2) - 1.50) < 0.08
                             if preset.is_night or (preset_key == "sunset" and gf_arch.any()):
                                 lit_b = np.full(len(bw_g), preset.is_night, dtype=np.bool_) | gf_arch[b_win]
-                                w_base[bw_g] = np.where(lit_b[:, None], [255.0, 224.0, 144.0], [46.0, 62.0, 84.0])
-                                f_mat[wi[bw_g]] = np.where(lit_b, M_WINDOW_LIT, M_WINDOW_DAY)
+                                bw_col = np.where(lit_b[:, None], [255.0, 224.0, 144.0], [46.0, 62.0, 84.0]).astype(np.float32)
+                                bw_col[bmull] = [234.0, 230.0, 220.0]
+                                w_base[bw_g] = bw_col
+                                f_mat[wi[bw_g]] = np.where(lit_b & (~bmull), M_WINDOW_LIT, M_WINDOW_DAY)
                             else:
-                                w_base[bw_g] = [44.0, 66.0, 92.0]
-                                f_mat[wi[bw_g]] = M_WINDOW_DAY
+                                bw_col = np.full((len(bw_g), 3), [44.0, 66.0, 92.0], dtype=np.float32)
+                                bw_col[bmull] = [234.0, 230.0, 220.0]
+                                w_base[bw_g] = bw_col
+                                f_mat[wi[bw_g[~bmull]]] = M_WINDOW_DAY
 
-                    # 2. Gemeindehaus Kilchberg (Alte Landstrasse 110 / 110a)
-                    m_gem = (c_bi == id_gem_main) | (c_bi == id_gem_wing)
+                    # 1b. v9.0 Schulhaus Dorfstrasse (id=1709)
+                    m_sd = c_bi == id_schul_dorf
+                    if m_sd.any():
+                        bi_sd = ci_l[m_sd]
+                        sdh, sdu, sde, sdtd, sddc = c_h[m_sd], c_ul[m_sd], c_edg[m_sd], c_td[m_sd], c_dc[m_sd]
+                        w_base[bi_sd[sdh < 2.2]] = [178.0, 172.0, 160.0]
+                        w_base[bi_sd[sdtd < 0.65]] = [236.0, 232.0, 222.0]
+                        sd_port = (sdh >= 0.2) & (sdh <= 3.1) & (np.abs(sddc) <= 1.35)
+                        w_base[bi_sd[sd_port]] = [82.0, 56.0, 40.0]
+                        sd_win = (sdh >= 2.6) & (sdtd >= 1.2) & (sde >= 1.1) & (((sdh - 2.6) % 3.4) <= 1.95) & (((sdu % 3.4) >= 0.75) & ((sdu % 3.4) <= 2.35))
+                        if sd_win.any():
+                            sw_sd = bi_sd[sd_win]
+                            smull = (np.abs((sdu[sd_win] % 3.4) - 1.55) < 0.08) | (np.abs(((sdh[sd_win] - 2.6) % 3.4) - 0.98) < 0.08)
+                            scol_sd = np.full((len(sw_sd), 3), [255.0, 218.0, 130.0] if preset.is_night else [44.0, 66.0, 92.0], dtype=np.float32)
+                            scol_sd[smull] = [234.0, 232.0, 224.0]
+                            w_base[sw_sd] = scol_sd
+                            f_mat[wi[sw_sd[~smull]]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
+
+                    # 2. Gemeindehaus & Schulhaus Alte Landstrasse (856, 60, 868, 437)
+                    m_gem = np.isin(c_bi, gem_all_arr)
                     if m_gem.any():
                         bi_g = ci_l[m_gem]
+                        g_bi = c_bi[m_gem]
                         gh_g, gu_g, ge_g, gtd_g, gdc_g = c_h[m_gem], c_ul[m_gem], c_edg[m_gem], c_td[m_gem], c_dc[m_gem]
                         w_base[bi_g[gh_g < 3.6]] = [184.0, 178.0, 166.0]  # Rusticated Jura-stone arcade plinth
                         w_base[bi_g[gtd_g < 0.75]] = [236.0, 232.0, 222.0]  # Bold civic cornice
+                        # v9.0 Carved limestone entrance portico framing
+                        g_port = (np.abs(gdc_g) <= 1.65) & (gh_g <= 3.6) & ((np.abs(gdc_g) >= 1.25) | (gh_g >= 3.15))
+                        w_base[bi_g[g_port]] = [226.0, 220.0, 208.0]
                         arcade = (gh_g >= 0.35) & (gh_g <= 3.0) & (ge_g >= 1.5) & (((gu_g % 4.0) >= 0.9) & ((gu_g % 4.0) <= 2.9))
                         civ_w = (gh_g >= 4.4) & (gtd_g >= 1.4) & (ge_g >= 1.2) & (((gh_g - 4.4) % 3.4) <= 1.85) & (((gu_g % 3.4) >= 0.85) & ((gu_g % 3.4) <= 2.25))
                         g_win = arcade | civ_w
                         if g_win.any():
                             gw_g = bi_g[g_win]
-                            w_base[gw_g] = [255.0, 218.0, 130.0] if preset.is_night else [44.0, 64.0, 88.0]
-                            f_mat[wi[gw_g]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
-                        # Subtle Swiss red-and-white civic crest banner flanking main entry
-                        crest_g = (c_bi[m_gem] == id_gem_main) & (np.abs(gdc_g) <= 0.75) & (gh_g >= 3.8) & (gh_g <= 5.6)
-                        if crest_g.any():
-                            cg_i = bi_g[crest_g]
-                            w_base[cg_i] = [208.0, 38.0, 38.0]
-                            cross_g = (np.abs(gdc_g[crest_g]) <= 0.22) & (gh_g[crest_g] >= 4.35) & (gh_g[crest_g] <= 5.05)
-                            w_base[cg_i[cross_g]] = [246.0, 246.0, 242.0]
+                            gmull = civ_w[g_win] & ((np.abs((gu_g[g_win] % 3.4) - 1.55) < 0.08) | (np.abs(((gh_g[g_win] - 4.4) % 3.4) - 0.92) < 0.08))
+                            gcol_w = np.full((len(gw_g), 3), [255.0, 218.0, 130.0] if preset.is_night else [44.0, 64.0, 88.0], dtype=np.float32)
+                            gcol_w[gmull] = [236.0, 234.0, 226.0]
+                            w_base[gw_g] = gcol_w
+                            f_mat[wi[gw_g[~gmull]]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
+                        # M3.5 Dark-bronze "GEMEINDEHAUS" fascia lintel + paired Swiss & authentic Kilchberg coat-of-arms shields
+                        g_fascia = (g_bi == id_gem_main) & (np.abs(gdc_g) <= 2.40) & (gh_g >= 3.25) & (gh_g <= 3.70)
+                        if g_fascia.any():
+                            w_base[bi_g[g_fascia]] = [58.0, 54.0, 48.0]
+                            g_ftxt = g_fascia & (gh_g >= 3.40) & (gh_g <= 3.58) & (np.abs(gdc_g) <= 1.85) & (((gu_g % 0.42) < 0.24))
+                            w_base[bi_g[g_ftxt]] = [236.0, 232.0, 220.0]
+                        crest_ch = (g_bi == id_gem_main) & (gdc_g >= -1.15) & (gdc_g <= -0.35) & (gh_g >= 3.85) & (gh_g <= 5.35)
+                        if crest_ch.any():
+                            cch_i = bi_g[crest_ch]
+                            w_base[cch_i] = [208.0, 38.0, 38.0]
+                            dx_ch = gdc_g[crest_ch] + 0.75
+                            dz_ch = gh_g[crest_ch] - 4.60
+                            cross_ch = ((np.abs(dx_ch) <= 0.12) & (np.abs(dz_ch) <= 0.45)) | ((np.abs(dz_ch) <= 0.14) & (np.abs(dx_ch) <= 0.30))
+                            w_base[cch_i[cross_ch]] = [246.0, 246.0, 242.0]
+                        crest_kb = (g_bi == id_gem_main) & (gdc_g >= 0.35) & (gdc_g <= 1.15) & (gh_g >= 3.85) & (gh_g <= 5.35)
+                        if crest_kb.any():
+                            ckb_i = bi_g[crest_kb]
+                            w_base[ckb_i] = [26.0, 95.0, 180.0]  # Authentic Kilchberg azure #1a5fb4
+                            dx_kb = gdc_g[crest_kb] - 0.75
+                            dz_kb = gh_g[crest_kb] - 4.60
+                            petal_kb = ((np.abs(dx_kb) <= 0.11) & (np.abs(dz_kb) <= 0.36)) | ((np.abs(dz_kb) <= 0.13) & (np.abs(dx_kb) <= 0.32))
+                            w_base[ckb_i[petal_kb]] = [244.0, 246.0, 248.0]
+                            w_base[ckb_i[np.hypot(dx_kb, dz_kb) <= 0.13]] = [242.0, 196.0, 48.0]
+                        # v9.0 Civic gable clock dial high on central facade of Gemeindehaus (856) & Schulhaus (868)
+                        r_gck = np.hypot(gdc_g, gtd_g - 1.65)
+                        on_gck = ((g_bi == id_gem_main) | (g_bi == id_schul_al_868)) & (r_gck <= 0.85)
+                        if on_gck.any():
+                            gck_i = bi_g[on_gck]
+                            rc_g = r_gck[on_gck]
+                            ux_g = gdc_g[on_gck]
+                            uz_g = -(gtd_g[on_gck] - 1.65)
+                            gck_gold = (rc_g >= 0.65) | (rc_g <= 0.12) | ((np.abs(ux_g) <= 0.08) & (uz_g >= 0.0) & (uz_g <= 0.52)) | ((np.abs(uz_g) <= 0.08) & (ux_g >= 0.0) & (ux_g <= 0.40))
+                            w_base[gck_i] = np.where(gck_gold[:, None], [238.0, 196.0, 76.0], [26.0, 32.0, 46.0])
+                            if preset.is_night or preset_key == "sunset":
+                                f_mat[wi[gck_i[gck_gold]]] = M_WINDOW_LIT
 
-                    # 3. C.F. Meyer-Haus (Alte Landstrasse 170 + pin villa)
-                    m_cfm = (c_bi == id_cfm_1033) | (c_bi == id_cfm_1722)
+                    # 3. C.F. Meyer-Haus (Alte Landstrasse 170 ONLY — decoupled from Schwellestrasse 7!)
+                    m_cfm = c_bi == id_cfm_1033
                     if m_cfm.any():
                         bi_m = ci_l[m_cfm]
                         mh_m, mu_m, me_m, mdc_m = c_h[m_cfm], c_ul[m_cfm], c_edg[m_cfm], c_dc[m_cfm]
@@ -5200,36 +6431,73 @@ def render_diorama(
                         m_gew = m_valid & (m_in_fl >= 0.26) & (m_in_fl <= 0.80) & (np.abs(m_bay) <= 0.68)
                         m_shut = m_valid & (m_in_fl >= 0.30) & (m_in_fl <= 0.76) & (np.abs(m_bay) > 0.60) & (np.abs(m_bay) <= 0.96)
                         m_pane = m_valid & (m_in_fl >= 0.30) & (m_in_fl <= 0.76) & (np.abs(m_bay) <= 0.56)
-                        w_base[bi_m[m_gew]] = [232.0, 228.0, 218.0]
-                        w_base[bi_m[m_shut]] = [46.0, 94.0, 62.0]  # Deep forest-green louvered shutters
+                        w_base[bi_m[m_gew]] = [236.0, 232.0, 222.0]
+                        if m_shut.any():
+                            ms_i = bi_m[m_shut]
+                            ms_c = np.full((len(ms_i), 3), [42.0, 92.0, 58.0], dtype=np.float32)
+                            ms_c[(mh_m[m_shut] % 0.22) < 0.06] *= 0.80  # Horizontal louver ticks
+                            w_base[ms_i] = ms_c
+                        # v9.0 Terracotta geranium window boxes beneath every window sill!
+                        m_gbox = m_valid & (m_in_fl >= 0.21) & (m_in_fl < 0.30) & (np.abs(m_bay) <= 0.56)
+                        if m_gbox.any():
+                            gb_i = bi_m[m_gbox]
+                            gb_fl = m_in_fl[m_gbox]
+                            gb_h = (np.floor(mu_m[m_gbox] * 5.0).astype(np.int32)) & 3
+                            gb_col = np.where((gb_fl < 0.25)[:, None], [146.0, 82.0, 54.0], np.where((gb_h < 2)[:, None], [218.0, 48.0, 48.0], [48.0, 102.0, 46.0])).astype(np.float32)
+                            w_base[gb_i] = gb_col
                         if m_pane.any():
                             mp_g = bi_m[m_pane]
                             w_base[mp_g] = [255.0, 218.0, 130.0] if preset.is_night else [46.0, 68.0, 94.0]
                             f_mat[wi[mp_g]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
+                        # v9.0 Carved stone portal pediment/lintel over walnut door + M3.5 stone entrance stairs & Laube balcony
+                        ped_m = (mh_m >= 2.55) & (mh_m <= 3.15) & (np.abs(mdc_m) <= 0.96)
+                        w_base[bi_m[ped_m]] = [226.0, 220.0, 206.0]
                         portal_m = (mh_m >= 0.15) & (mh_m <= 2.55) & (np.abs(mdc_m) <= 0.72)
                         w_base[bi_m[portal_m]] = [82.0, 54.0, 38.0]
+                        stair_m = (mh_m >= 0.0) & (mh_m <= 1.2) & (np.abs(mdc_m) <= 1.25)
+                        if stair_m.any():
+                            st_i = bi_m[stair_m]
+                            is_tread = (mh_m[stair_m] % 0.28) < 0.08
+                            w_base[st_i] = np.where(is_tread[:, None], [168.0, 162.0, 150.0], [204.0, 198.0, 186.0])
+                        laube_m = (c_nx[m_cfm] > 0.45) & (mh_m >= 3.1) & (mh_m <= 4.3) & (np.abs(mdc_m) <= 2.4)
+                        if laube_m.any():
+                            lb_i = bi_m[laube_m]
+                            lb_h = mh_m[laube_m]
+                            lb_c = np.where((lb_h < 3.35)[:, None], [118.0, 84.0, 56.0], np.where((lb_h > 4.15)[:, None], [96.0, 68.0, 44.0], [46.0, 50.0, 56.0])).astype(np.float32)
+                            w_base[lb_i] = lb_c
 
                     # 4. Sanatorium Kilchberg (Historic 1906 Pavilion Hospital Campus — Plate 06 Hero!)
                     m_san = np.isin(c_bi, san_ids_arr)
                     if m_san.any():
                         bi_s = ci_l[m_san]
+                        s_bi_m = c_bi[m_san]
                         sh_s, su_s, se_s, snx_s = c_h[m_san], c_ul[m_san], c_edg[m_san], c_nx[m_san]
                         w_base[bi_s[sh_s < 3.2]] = [174.0, 168.0, 156.0]  # Rusticated stone ground base
                         belt_s = (sh_s >= 3.0) & ((sh_s % 3.6) < 0.32)
                         w_base[bi_s[belt_s]] = [234.0, 230.0, 218.0]
-                        # East/lake-facing sunlit patient verandas & loggias with wrought-iron balustrades!
+                        # v9.0 Decorative timber roof eave brackets
+                        w_base[bi_s[(c_td[m_san] < 0.65) & ((su_s % 1.1) < 0.24)]] = [92.0, 66.0, 46.0]
+                        # M3.5 Gründerzeit Haus A/B central sandstone risalit & mansard dormer trim
+                        san_ris = ((s_bi_m == id_san_633) | (s_bi_m == id_san_521)) & (np.abs(c_dc[m_san]) <= 4.2) & (c_td[m_san] < 2.2)
+                        w_base[bi_s[san_ris]] = [234.0, 228.0, 214.0]
+                        w_base[bi_s[san_ris & (c_td[m_san] < 1.1) & (np.abs(c_dc[m_san]) <= 1.4)]] = [62.0, 68.0, 76.0]
+                        # East/lake-facing sunlit patient verandas & arched loggias with wrought-iron balustrades!
                         s_fl = np.floor(sh_s / 3.6).astype(np.int32)
                         s_inz = (sh_s - s_fl * 3.6) / 3.6
                         s_bay = (su_s % 4.0) - 2.0
                         veranda = (snx_s > 0.45) & (s_fl >= 1) & (se_s >= 1.2) & (c_td[m_san] >= 1.2) & (np.abs(s_bay) <= 1.45)
                         v_rec = veranda & (s_inz >= 0.38) & (s_inz <= 0.82)
                         v_bal = veranda & (s_inz >= 0.10) & (s_inz < 0.38)
+                        v_arch = veranda & (s_inz > 0.72) & (s_inz <= 0.86) & (((s_bay / 1.45) ** 2 + ((s_inz - 0.72) / 0.14) ** 2) > 1.0)
                         w_base[bi_s[v_rec]] = [86.0, 82.0, 78.0]
                         w_base[bi_s[v_bal]] = [58.0, 62.0, 68.0]  # Wrought-iron balustrade
+                        w_base[bi_s[v_arch]] = [232.0, 226.0, 214.0]  # Arched stone loggia heads
+                        # v9.0 Ivory stone window surrounds & sills
+                        s_surr = (se_s >= 1.0) & (c_td[m_san] >= 1.1) & (s_inz >= 0.26) & (s_inz <= 0.83) & (np.abs(s_bay) <= 0.76)
+                        w_base[bi_s[s_surr]] = [234.0, 230.0, 220.0]
                         s_win = (se_s >= 1.1) & (c_td[m_san] >= 1.2) & (s_inz >= 0.32) & (s_inz <= 0.78) & (np.abs(s_bay) <= 0.62)
                         if s_win.any():
                             sw_g = bi_s[s_win]
-                            s_lit = preset.is_night and (((np.floor(su_s[s_win] / 4.0).astype(np.int32) + s_fl[s_win]) & 1) == 0)
                             if preset.is_night:
                                 lit_m_s = (((np.floor(su_s[s_win] / 4.0).astype(np.int32) ^ s_fl[s_win]) & 1) == 0)
                                 w_base[sw_g] = np.where(lit_m_s[:, None], [255.0, 220.0, 134.0], [34.0, 48.0, 72.0])
@@ -5237,6 +6505,14 @@ def render_diorama(
                             else:
                                 w_base[sw_g] = [48.0, 70.0, 96.0]
                                 f_mat[wi[sw_g]] = M_WINDOW_DAY
+                        # v9.0 Classical pedimented entrance porte-cochère on main pavilions (633, 521, 483)
+                        san_pc = np.isin(s_bi_m, san_main_arr) & (sh_s >= 0.2) & (sh_s <= 4.0) & (np.abs(c_dc[m_san]) <= 2.1)
+                        if san_pc.any():
+                            pc_i = bi_s[san_pc]
+                            pc_dc = np.abs(c_dc[m_san][san_pc])
+                            pc_h = sh_s[san_pc]
+                            is_col_ped = (pc_h >= 3.25) | (pc_dc >= 1.65) | (np.abs(pc_dc - 0.75) < 0.16)
+                            w_base[pc_i] = np.where(is_col_ped[:, None], [228.0, 224.0, 212.0], [68.0, 66.0, 64.0])
 
                     # 5. Seebad Kilchberg Timber Badi Bathhouse & Kiosk (Plate 05 Hero!)
                     m_sb = np.isin(c_bi, seebad_ids_arr)
@@ -5257,6 +6533,124 @@ def render_diorama(
                             k_str = (np.floor(sbu[kiosk_aw] * 3.5).astype(np.int32) & 1) == 0
                             w_base[ka_i] = np.where(k_str[:, None], [242.0, 242.0, 238.0], [42.0, 106.0, 168.0])
 
+                    # 6. v9.0 Hallenbad Hochweid (1448 pool hall with B > G aquamarine clerestory, 1628 entry wing)
+                    m_hb = (c_bi == id_hb_pool) | (c_bi == id_hb_entry)
+                    if m_hb.any():
+                        bi_hb = ci_l[m_hb]
+                        hb_bi = c_bi[m_hb]
+                        hbh, hbu, hbe, hbtd = c_h[m_hb], c_ul[m_hb], c_edg[m_hb], c_td[m_hb]
+                        w_base[bi_hb[hbh < 1.1]] = [142.0, 146.0, 148.0]
+                        w_base[bi_hb[hbtd < 0.72]] = [236.0, 238.0, 234.0]
+                        # M3.5 Crisp dark soffit shadow line directly beneath cantilevered 1970s flat roof slab
+                        w_base[bi_hb[(hbtd >= 0.72) & (hbtd < 1.05)]] *= 0.68
+                        hb_glass = (hb_bi == id_hb_pool) & (hbh >= 1.8) & (hbh <= 6.8) & (hbe >= 1.0)
+                        if hb_glass.any():
+                            hg_i = bi_hb[hb_glass]
+                            hb_mull = ((hbu[hb_glass] % 2.6) < 0.18) | (np.abs(hbh[hb_glass] - 4.3) < 0.14)
+                            aqua_c = [72.0, 172.0, 198.0] if preset.is_night else ([96.0, 178.0, 198.0] if preset_key == "sunset" else [74.0, 158.0, 184.0])
+                            w_base[hg_i] = np.where(hb_mull[:, None], [54.0, 58.0, 64.0], aqua_c)
+                            f_mat[wi[hg_i[~hb_mull]]] = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WINDOW_DAY
+                        hb_ewin = (hb_bi == id_hb_entry) & (hbh >= 1.6) & (hbh <= 8.5) & (hbe >= 1.0) & (((hbh - 1.6) % 3.2) <= 1.55)
+                        if hb_ewin.any():
+                            he_i = bi_hb[hb_ewin]
+                            w_base[he_i] = [255.0, 218.0, 132.0] if preset.is_night else [52.0, 74.0, 98.0]
+                            f_mat[wi[he_i]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
+
+                    # 7. v9.0 Broelberggut Estate (979, 1678, 1332) & Octagonal Tempelchen Pavilion (1074)
+                    m_br = (c_bi == id_broel_manor) | np.isin(c_bi, broel_outb_arr) | (c_bi == id_broel_temp)
+                    if m_br.any():
+                        bi_br = ci_l[m_br]
+                        br_bi = c_bi[m_br]
+                        brh, bru, bre, brtd, brdc = c_h[m_br], c_ul[m_br], c_edg[m_br], c_td[m_br], c_dc[m_br]
+                        is_tmp = br_bi == id_broel_temp
+                        is_man = ~is_tmp
+                        w_base[bi_br[is_man & ((bre < 0.50) | ((brh >= 2.8) & ((brh % 3.4) < 0.24)))]] = [212.0, 206.0, 190.0]
+                        br_fl = (brh % 3.4) / 3.4
+                        br_bay = (bru % 3.6) - 1.8
+                        br_val = is_man & (bre >= 1.0) & (brtd >= 1.0) & (brh >= 0.8)
+                        w_base[bi_br[br_val & (br_fl >= 0.26) & (br_fl <= 0.80) & (np.abs(br_bay) <= 0.68)]] = [236.0, 232.0, 222.0]
+                        w_base[bi_br[br_val & (br_fl >= 0.30) & (br_fl <= 0.76) & (np.abs(br_bay) > 0.60) & (np.abs(br_bay) <= 0.96)]] = [44.0, 88.0, 58.0]
+                        br_pane = br_val & (br_fl >= 0.30) & (br_fl <= 0.76) & (np.abs(br_bay) <= 0.56)
+                        if br_pane.any():
+                            bp_i = bi_br[br_pane]
+                            w_base[bp_i] = [255.0, 220.0, 132.0] if (preset.is_night or preset_key == "sunset") else [46.0, 68.0, 94.0]
+                            f_mat[wi[bp_i]] = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WINDOW_DAY
+                        w_base[bi_br[is_man & (brh >= 0.15) & (brh <= 2.9) & (np.abs(brdc) <= 0.88)]] = [78.0, 54.0, 38.0]
+                        # Tempelchen octagonal pavilion: classical cornice + arched French doors
+                        w_base[bi_br[is_tmp & (brtd < 0.55)]] = [222.0, 218.0, 206.0]
+                        tmp_fd = is_tmp & (brh >= 0.3) & (brh <= 3.4) & (np.abs(brdc) <= 0.95)
+                        if tmp_fd.any():
+                            tf_i = bi_br[tmp_fd]
+                            tmull = (np.abs(brdc[tmp_fd]) < 0.08) | ((brh[tmp_fd] % 0.85) < 0.08)
+                            w_base[tf_i] = np.where(tmull[:, None], [238.0, 236.0, 228.0], [255.0, 222.0, 136.0] if (preset.is_night or preset_key == "sunset") else [54.0, 76.0, 102.0])
+                            f_mat[wi[tf_i[~tmull]]] = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WINDOW_DAY
+
+                    # 8. v9.0 Villa Spinnergut (1601, 1132) & TC Kilchberg Timber Clubhouse (1287)
+                    m_sp = (c_bi == id_spin_villa) | (c_bi == id_spin_pav) | (c_bi == id_tc_club)
+                    if m_sp.any():
+                        bi_sp = ci_l[m_sp]
+                        sp_bi = c_bi[m_sp]
+                        sph, spu, spe, sptd, spdc = c_h[m_sp], c_ul[m_sp], c_edg[m_sp], c_td[m_sp], c_dc[m_sp]
+                        is_tc = sp_bi == id_tc_club
+                        is_sv = ~is_tc
+                        w_base[bi_sp[is_sv & (sph < 3.4)]] = [178.0, 172.0, 158.0]
+                        w_base[bi_sp[is_sv & ((spe < 0.50) | (sptd < 0.65))]] = [232.0, 228.0, 216.0]
+                        w_base[bi_sp[is_sv & (np.abs(spdc) <= 1.8) & (sph <= 4.2) & ((np.abs(spdc) >= 1.3) | (sph >= 3.5))]] = [226.0, 220.0, 206.0]
+                        sp_win = is_sv & (spe >= 1.1) & (sptd >= 1.1) & (sph >= 1.2) & (((sph - 1.2) % 3.5) <= 1.85) & (((spu % 3.6) >= 0.9) & ((spu % 3.6) <= 2.3))
+                        if sp_win.any():
+                            sw_sp = bi_sp[sp_win]
+                            w_base[sw_sp] = [255.0, 220.0, 134.0] if preset.is_night else [46.0, 68.0, 94.0]
+                            f_mat[wi[sw_sp]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
+                        # M3.5 Villa Spinnergut (1914) lake-facing ground-floor glazed conservatory bay
+                        sp_cons = (sp_bi == id_spin_villa) & (c_nx[m_sp] > 0.35) & (sph >= 0.85) & (sph <= 3.35) & (np.abs(spdc) <= 2.4)
+                        if sp_cons.any():
+                            sc_i = bi_sp[sp_cons]
+                            sc_mull = ((spu[sp_cons] % 1.15) < 0.14) | (np.abs(sph[sp_cons] - 2.15) < 0.12)
+                            w_base[sc_i] = np.where(sc_mull[:, None], [236.0, 234.0, 226.0], [255.0, 220.0, 134.0] if (preset.is_night or preset_key == "sunset") else [66.0, 98.0, 122.0])
+                            f_mat[wi[sc_i[~sc_mull]]] = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WINDOW_DAY
+                        # TC Kilchberg cedar timber clubhouse
+                        w_base[bi_sp[is_tc & ((sph % 0.42) < 0.10)]] *= 0.84
+                        w_base[bi_sp[is_tc & ((sptd < 0.50) | (spe < 0.32))]] = [236.0, 234.0, 226.0]
+                        tc_win = is_tc & (sph >= 0.9) & (sph <= 2.9) & (spe >= 0.8) & (((spu % 2.8) >= 0.45) & ((spu % 2.8) <= 2.25))
+                        if tc_win.any():
+                            tw_tc = bi_sp[tc_win]
+                            w_base[tw_tc] = [255.0, 218.0, 130.0] if (preset.is_night or preset_key == "sunset") else [52.0, 74.0, 96.0]
+                            f_mat[wi[tw_tc]] = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WINDOW_DAY
+
+                    # 9. v9.0 Villa Sulzergut (1617, 1338)
+                    m_sz = np.isin(c_bi, sulzergut_villas_arr)
+                    if m_sz.any():
+                        bi_sz = ci_l[m_sz]
+                        szh, szu, sze, sztd, szdc = c_h[m_sz], c_ul[m_sz], c_edg[m_sz], c_td[m_sz], c_dc[m_sz]
+                        w_base[bi_sz[(sze < 0.48) | ((szh >= 2.9) & ((szh % 3.3) < 0.24))]] = [214.0, 208.0, 194.0]
+                        sz_fl = (szh % 3.3) / 3.3
+                        sz_bay = (szu % 3.6) - 1.8
+                        sz_val = (sze >= 1.0) & (sztd >= 1.0) & (szh >= 0.8)
+                        w_base[bi_sz[sz_val & (sz_fl >= 0.26) & (sz_fl <= 0.80) & (np.abs(sz_bay) <= 0.68)]] = [234.0, 230.0, 220.0]
+                        w_base[bi_sz[sz_val & (sz_fl >= 0.30) & (sz_fl <= 0.76) & (np.abs(sz_bay) > 0.60) & (np.abs(sz_bay) <= 0.96)]] = [54.0, 92.0, 78.0]
+                        sz_pane = sz_val & (sz_fl >= 0.30) & (sz_fl <= 0.76) & (np.abs(sz_bay) <= 0.56)
+                        if sz_pane.any():
+                            sp_sz = bi_sz[sz_pane]
+                            w_base[sp_sz] = [255.0, 220.0, 132.0] if preset.is_night else [46.0, 68.0, 94.0]
+                            f_mat[wi[sp_sz]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
+                        w_base[bi_sz[(szh <= 3.1) & (np.abs(szdc) <= 1.25)]] = [224.0, 218.0, 204.0]
+
+                    # 10. v9.0 Stockengut Historic Hilltop Barns (807, 77)
+                    m_st = np.isin(c_bi, stock_barns_arr)
+                    if m_st.any():
+                        bi_st = ci_l[m_st]
+                        sth, stu, stdc = c_h[m_st], c_ul[m_st], c_dc[m_st]
+                        w_base[bi_st[sth < 2.2]] = [168.0, 162.0, 150.0]
+                        w_base[bi_st[(sth >= 2.2) & ((stu % 0.48) < 0.10)]] *= 0.84
+                        b_door_st = (sth >= 0.1) & (sth <= 3.0) & (np.abs(stdc) <= 1.65)
+                        w_base[bi_st[b_door_st]] = [68.0, 48.0, 34.0]
+                        # M3.5 Diagonal X-brace timber trim on barn doors + Hofladen timber lintel
+                        x_brace = b_door_st & (np.abs(np.abs(stdc) - np.abs(sth - 1.55)) < 0.16)
+                        w_base[bi_st[x_brace]] = [96.0, 68.0, 46.0]
+                        w_base[bi_st[(sth >= 3.0) & (sth <= 3.35) & (np.abs(stdc) <= 1.85)]] = [146.0, 98.0, 62.0]
+                        w_base[bi_st[(sth >= 4.2) & (sth <= 5.8) & (np.abs(stdc) <= 0.90)]] = [64.0, 44.0, 32.0]
+                        w_base[bi_st[c_z[m_st] >= (c_eave[m_st] - 0.15)]] = [72.0, 48.0, 34.0]
+
                 # B3. Small Outbuildings, Boathouses, Garages & Bendlikon Pavilion (style 6)
                 is_outb = w_sty == 6
                 if is_outb.any():
@@ -5270,10 +6664,37 @@ def render_diorama(
                     odb = w_dbin[oi]
                     bend_gable = (o_bi == id_bend_pav) & (oz > (oeave - 0.15))
                     w_base[oi[bend_gable]] = [224.0, 222.0, 216.0]
+                    # v9.0 Bendlikon Pavilion crisp white timber veranda trim & warm evening lantern glow
+                    bend_trim = (o_bi == id_bend_pav) & (oh < 3.4) & (((np.abs(odc) % 1.8) < 0.18) | (np.abs(oh - 3.2) < 0.18))
+                    w_base[oi[bend_trim]] = [234.0, 232.0, 224.0]
                     bend_win = (o_bi == id_bend_pav) & (oz <= (oeave - 0.35)) & (oh >= 1.0) & (oh <= 3.1) & (np.abs(odc) <= 2.2)
-                    w_base[oi[bend_win]] = [56.0, 78.0, 98.0]
+                    if bend_win.any():
+                        bw_p = oi[bend_win]
+                        w_base[bw_p] = [255.0, 214.0, 122.0] if (preset.is_night or preset_key == "sunset") else [56.0, 78.0, 98.0]
+                        f_mat[wi[bw_p]] = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WINDOW_DAY
 
-                    reg_outb = o_bi != id_bend_pav
+                    # v9.0 Lakeside Boathouses (Sulzergut, Mönchhof, Morfanlage): walnut siding, Swiss chalet trim & arched boat bays
+                    is_lboat = np.isin(o_bi, lakeside_boats_arr)
+                    if is_lboat.any():
+                        lbi = oi[is_lboat]
+                        lb_bi = o_bi[is_lboat]
+                        lbh, lbu, lbdc, lbtd = oh[is_lboat], u_local[lbi], odc[is_lboat], top_dist[lbi]
+                        w_base[lbi[(lbu % 0.45) < 0.10]] *= 0.82
+                        w_base[lbi[lbtd < 0.42]] = [234.0, 232.0, 226.0]
+                        w_base[lbi[(lbh >= 0.1) & (lbh <= 2.45) & (np.abs(lbdc) <= 1.35)]] = [46.0, 34.0, 26.0]
+                        # M3.5 Sulzergut Swiss chalet carved timber balcony/veranda trim & scalloped bargeboard eaves
+                        is_sz_ch = np.isin(lb_bi, sulzergut_chalet_boats_arr)
+                        if is_sz_ch.any():
+                            w_base[lbi[is_sz_ch & (lbtd < 0.52)]] = [238.0, 236.0, 228.0]
+                            ch_bal = is_sz_ch & (lbh >= 2.35) & (lbh <= 3.05)
+                            w_base[lbi[ch_bal]] = [126.0, 88.0, 58.0]
+                            w_base[lbi[ch_bal & ((lbu % 0.36) < 0.12)]] = [82.0, 56.0, 38.0]
+                        lb_loft = (lbh >= 2.8) & (lbh <= 3.7) & (np.abs(lbdc) <= 0.42)
+                        if lb_loft.any():
+                            w_base[lbi[lb_loft]] = [255.0, 216.0, 124.0] if preset.is_night else [52.0, 72.0, 94.0]
+                            f_mat[wi[lbi[lb_loft]]] = M_WINDOW_LIT if preset.is_night else M_WINDOW_DAY
+
+                    reg_outb = (o_bi != id_bend_pav) & (~is_lboat)
                     is_door_face = reg_outb & (((o_bi + odb) % 3) == 0) & (owlen >= 3.2)
                     gdoor = is_door_face & (np.abs(odc) <= 1.05) & (oh >= 0.08) & (oh <= 2.25)
                     tiny_w = reg_outb & (~is_door_face) & (owlen >= 3.6) & (np.abs(odc) <= 0.45) & (oh >= 1.15) & (oh <= 2.05)
@@ -5317,14 +6738,47 @@ def render_diorama(
                     bay_idx = np.floor(u_in_grid / bay_w).astype(np.int32)
                     bay_center_offset = u_in_grid - (bay_idx.astype(np.float32) + 0.5) * bay_w
 
-                    # F12: Selective Riegelhaus half-timbered historic Dorf/Lebern farmhouses (BEFORE windows!)
+                    # F12: Selective Riegelhaus half-timbered historic Dorf/Lebern farmhouses + v9.0 Hafenbeiz red Riegelhaus!
                     is_rieg = bldg_is_riegelhaus[r_bi_w]
                     if is_rieg.any():
                         r_horiz = (in_z < 0.08) | (np.abs(in_z - 0.30) < 0.05) | (np.abs(in_z - 0.78) < 0.05)
                         r_vert = (np.abs(bay_center_offset) > (bay_w * 0.44)) | (r_edg < 0.34)
                         r_diag = (r_edg < 1.35) & (np.abs((r_edg - 0.35) - (in_z * fl_h * 0.45)) < 0.14)
-                        w_base[ri_l[is_rieg & (r_horiz | r_vert)]] = [84.0, 54.0, 38.0]
-                        w_base[ri_l[is_rieg & r_diag]] = [88.0, 58.0, 40.0]
+                        is_hbz = np.isin(r_bi_w, hafenbeiz_ids_arr)
+                        is_ghus = r_bi_w == id_gotisch_hus
+                        w_base[ri_l[is_rieg & (~is_hbz) & (~is_ghus) & (r_horiz | r_vert)]] = [84.0, 54.0, 38.0]
+                        w_base[ri_l[is_rieg & (~is_hbz) & (~is_ghus) & r_diag]] = [88.0, 58.0, 40.0]
+                        w_base[ri_l[is_rieg & is_ghus & (r_horiz | r_vert | r_diag)]] = [76.0, 52.0, 36.0]  # Gotisch Hus dark oak Fachwerk
+                        w_base[ri_l[is_rieg & is_hbz & (r_horiz | r_vert | r_diag)]] = [152.0, 40.0, 36.0]  # Hafenbeiz oxblood-red Riegelhaus
+
+                    # v9.0 1899 Lindt Brick Wings (988, 1539): brick dentil cornice & steel loading-dock canopy
+                    is_brick_ns_r = (r_bi_w == id_lindt_brick_n) | (r_bi_w == id_lindt_brick_s)
+                    if is_brick_ns_r.any():
+                        bns_td = top_dist[ri_l]
+                        dentil_ns = is_brick_ns_r & (bns_td < 0.95) & (bns_td >= 0.40) & ((np.floor(r_uloc * 2.5).astype(np.int32) & 1) == 0)
+                        w_base[ri_l[dentil_ns]] = [216.0, 200.0, 162.0]
+                        w_base[ri_l[is_brick_ns_r & (r_h >= 3.55) & (r_h <= 4.05) & (r_edg >= 1.2)]] = [66.0, 72.0, 80.0]
+                        w_base[ri_l[is_brick_ns_r & (r_h >= 3.25) & (r_h < 3.55) & (r_edg >= 1.2)]] *= 0.72
+
+                    # v9.0 Dorf Barns (1490, 1726): board-and-batten timber siding, double barn doors & hayloft shutters
+                    if is_barn.any():
+                        w_base[ri_l[is_barn & ((r_uloc % 0.48) < 0.10)]] *= 0.84
+                        w_base[ri_l[is_barn & (fl_idx == 0) & (np.abs(r_dc) <= 1.55) & (r_h >= 0.1) & (r_h <= 2.9)]] = [74.0, 48.0, 34.0]
+                        w_base[ri_l[is_barn & (fl_idx == 1) & (np.abs(r_dc) <= 0.85) & (in_z >= 0.25) & (in_z <= 0.78)]] = [62.0, 42.0, 30.0]
+
+                    # v9.0 Villa Naville (1582, 1695), Schooren Porcelain Quarter (981, 1823), Chez Fritz (1598) & Lakeside Villas
+                    is_nav_w = (r_bi_w == id_nav_1582) | (r_bi_w == id_nav_1695)
+                    if is_nav_w.any():
+                        w_base[ri_l[is_nav_w & (r_h >= 2.8) & ((r_h % 3.05) < 0.24)]] = [236.0, 232.0, 222.0]
+                        w_base[ri_l[is_nav_w & (fl_idx == 0) & (np.abs(r_dc) <= 1.35) & (r_h <= 3.1)]] = [228.0, 222.0, 208.0]
+                    is_sch_w = (r_bi_w == id_sch_981) | (r_bi_w == id_sch_1823)
+                    if is_sch_w.any():
+                        w_base[ri_l[is_sch_w & (r_edg < 0.52) & ((np.floor(r_z * 1.4).astype(np.int32) & 1) == 0)]] = [198.0, 192.0, 180.0]
+                        w_base[ri_l[is_sch_w & (fl_idx == 0) & (np.abs(r_dc) <= 1.65) & (r_h >= 2.55) & (r_h <= 2.95)]] = [226.0, 222.0, 212.0]
+                        w_base[ri_l[is_sch_w & (fl_idx == 0) & (np.abs(r_dc) <= 1.35) & (r_h >= 0.1) & (r_h <= 2.65)]] = [78.0, 56.0, 42.0]
+                    is_lvilla = np.isin(r_bi_w, moenchhof_villas_arr) | np.isin(r_bi_w, morfanlage_villas_arr)
+                    if is_lvilla.any():
+                        w_base[ri_l[is_lvilla & (r_h >= 2.8) & ((r_h % 3.05) < 0.20)]] = [226.0, 222.0, 212.0]
 
                     # F12: Dark walnut Swiss timber gable bargeboards on pitched style 0 gables!
                     z_gable_roof = bldg_z1[r_bi_w] - (bldg_z1[r_bi_w] - r_eave) * np.clip(np.abs(r_dc) / np.maximum(1.0, 0.5 * r_wlen), 0.0, 1.0)
@@ -5460,19 +6914,22 @@ def render_diorama(
                         sh_g = ri_l[is_shutter]
                         sb_id = r_bi_w[is_shutter]
                         sh_mode = sb_id % 6
+                        is_nav_sh = (sb_id == id_nav_1582) | (sb_id == id_nav_1695)
+                        is_gh_sh = sb_id == id_gotisch_hus
+                        is_hbz_sh = np.isin(sb_id, hafenbeiz_ids_arr)
                         sh_col = np.select(
-                            [(sb_id == id_nav_1582) | (sb_id == id_nav_1695), sh_mode == 0, sh_mode == 1, sh_mode == 2, sh_mode == 3, sh_mode == 4],
-                            [166.0, 46.0, 62.0, 68.0, 126.0, 92.0],
+                            [is_nav_sh, is_gh_sh, is_hbz_sh, sh_mode == 0, sh_mode == 1, sh_mode == 2, sh_mode == 3, sh_mode == 4],
+                            [128.0, 46.0, 42.0, 46.0, 62.0, 68.0, 126.0, 92.0],
                             default=52.0,
                         )
                         sh_col_g = np.select(
-                            [(sb_id == id_nav_1582) | (sb_id == id_nav_1695), sh_mode == 0, sh_mode == 1, sh_mode == 2, sh_mode == 3, sh_mode == 4],
-                            [180.0, 86.0, 104.0, 124.0, 48.0, 66.0],
+                            [is_nav_sh, is_gh_sh, is_hbz_sh, sh_mode == 0, sh_mode == 1, sh_mode == 2, sh_mode == 3, sh_mode == 4],
+                            [162.0, 92.0, 86.0, 86.0, 104.0, 124.0, 48.0, 66.0],
                             default=94.0,
                         )
                         sh_col_b = np.select(
-                            [(sb_id == id_nav_1582) | (sb_id == id_nav_1695), sh_mode == 0, sh_mode == 1, sh_mode == 2, sh_mode == 3, sh_mode == 4],
-                            [198.0, 58.0, 162.0, 110.0, 46.0, 46.0],
+                            [is_nav_sh, is_gh_sh, is_hbz_sh, sh_mode == 0, sh_mode == 1, sh_mode == 2, sh_mode == 3, sh_mode == 4],
+                            [188.0, 58.0, 58.0, 58.0, 162.0, 110.0, 46.0, 46.0],
                             default=68.0,
                         )
                         w_base[sh_g] = np.stack([sh_col, sh_col_g, sh_col_b], axis=1)
@@ -5505,33 +6962,65 @@ def render_diorama(
                         p_inz = in_z[p_sub]
                         p_bco = bay_center_offset[p_sub]
                         p_zhi = z_hi[p_sub]
+                        p_sty = r_sty[p_sub]
                         hval = ((p_bi.astype(np.int64) * 73856093) ^ (p_fl.astype(np.int64) * 40503) ^ (p_bay.astype(np.int64) * 12289)) & 0xFF
+                        is_brick_munt = (p_sty == 3) & ((p_bi == id_lindt_brick_n) | (p_bi == id_lindt_brick_s) | ((p_bi == id_lindt_main) & (r_n[p_sub] >= 1241403.0)))
+                        bm_grid = is_brick_munt & (
+                            (np.abs(p_inz - 0.52) < 0.04) | (np.abs(p_inz - 0.68) < 0.04)
+                            | (np.abs(p_bco) < 0.07) | (np.abs(np.abs(p_bco) - 0.36) < 0.05)
+                        )
+                        is_tavern_lit = np.isin(p_bi, hafenbeiz_ids_arr) | ((p_bi == id_chez_fritz) & (p_fl == 0))
 
                         if preset.is_night:
-                            lit = hval < 138
+                            lit = (hval < 138) | is_tavern_lit
                             warm_alt = (hval & 3) == 0
                             lit_c = np.where(warm_alt[:, None], [255.0, 228.0, 148.0], [255.0, 192.0, 92.0])
-                            w_base[p_local] = np.where(lit[:, None], lit_c, [30.0, 42.0, 64.0])
-                            f_mat[p_global] = np.where(lit, M_WINDOW_LIT, M_WINDOW_DAY)
+                            pane_c = np.where(lit[:, None], lit_c, [30.0, 42.0, 64.0]).astype(np.float32)
+                            pane_c[bm_grid] = [98.0, 82.0, 62.0]
+                            w_base[p_local] = pane_c
+                            f_mat[p_global] = np.where(lit & (~bm_grid), M_WINDOW_LIT, M_WINDOW_DAY)
                         elif preset_key == "sunset":
-                            # F7: ~20% warm cozy dusk windows at Sunset (hval < 52)!
-                            lit_dusk = hval < 52
+                            # F7: ~20% warm cozy dusk windows at Sunset (hval < 52) + Hafenbeiz/Chez Fritz!
+                            lit_dusk = (hval < 52) | is_tavern_lit
                             mullion = np.abs(p_bco) < 0.08
                             upper_glint = p_inz > 0.56
                             pane_c = np.where(upper_glint[:, None], [118.0, 102.0, 118.0], [44.0, 46.0, 68.0]).astype(np.float32)
                             pane_c[p_inz > (p_zhi - 0.07)] *= 0.62  # Recessed upper window lintel shadow
                             pane_c[mullion] = [184.0, 174.0, 162.0]
                             pane_c[lit_dusk] = [255.0, 206.0, 114.0]
+                            pane_c[bm_grid] = [152.0, 142.0, 132.0]
                             w_base[p_local] = pane_c
-                            f_mat[p_global] = np.where(lit_dusk, M_WINDOW_LIT, M_WINDOW_DAY)
+                            f_mat[p_global] = np.where(lit_dusk & (~bm_grid), M_WINDOW_LIT, M_WINDOW_DAY)
                         else:
                             mullion = np.abs(p_bco) < 0.08
                             upper_glint = p_inz > 0.56
                             pane_c = np.where(upper_glint[:, None], [78.0, 108.0, 138.0], [38.0, 52.0, 72.0]).astype(np.float32)
                             pane_c[p_inz > (p_zhi - 0.07)] *= 0.62  # Recessed upper window lintel shadow
                             pane_c[mullion] = [188.0, 184.0, 176.0]
+                            pane_c[bm_grid] = [172.0, 168.0, 160.0]
                             w_base[p_local] = pane_c
                             f_mat[p_global] = M_WINDOW_DAY
+
+                    # v9.0 Villa Naville & Lakeside Villa wrought-iron balcony balustrades + Chez Fritz striped awning
+                    is_balc_v = (is_nav_w | is_lvilla) & (fl_idx >= 1) & active_bay & (in_z >= 0.08) & (in_z <= 0.32) & (np.abs(bay_center_offset) <= 0.92)
+                    if is_balc_v.any():
+                        w_base[ri_l[is_balc_v]] = [56.0, 60.0, 68.0]
+                    is_cf_awn = (r_bi_w == id_chez_fritz) & (r_h >= 2.55) & (r_h <= 3.05) & (r_edg >= 0.9)
+                    if is_cf_awn.any():
+                        cfa_i = ri_l[is_cf_awn]
+                        cfa_str = (np.floor(r_uloc[is_cf_awn] * 3.5).astype(np.int32) & 1) == 0
+                        w_base[cfa_i] = np.where(cfa_str[:, None], [240.0, 236.0, 226.0], [34.0, 58.0, 92.0])  # Mediterranean cream/navy
+                        f_mat[wi[cfa_i]] = M_WALL
+                    # M3.5 Hafenbeiz (id=243) ground-floor east-facing glass Wintergarten conservatory (strictly AFTER is_pane!)
+                    r_nx_w = norms_v[w_ft[ri_l], 0]
+                    is_hbz_wg = (r_bi_w == id_hafenbeiz_243) & (r_nx_w > 0.35) & (r_h >= 0.40) & (r_h <= 3.10) & (r_edg >= 0.65)
+                    if is_hbz_wg.any():
+                        wgi = ri_l[is_hbz_wg]
+                        wg_mull = ((r_uloc[is_hbz_wg] % 1.35) < 0.14) | (np.abs(r_h[is_hbz_wg] - 2.95) < 0.14) | (r_h[is_hbz_wg] < 0.65)
+                        wg_glass = [255.0, 212.0, 120.0] if (preset.is_night or preset_key == "sunset") else [74.0, 110.0, 134.0]
+                        w_base[wgi] = np.where(wg_mull[:, None], [236.0, 234.0, 228.0], wg_glass)
+                        f_mat[wi[wgi[wg_mull]]] = M_WALL
+                        f_mat[wi[wgi[~wg_mull]]] = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WINDOW_DAY
 
                     # F12: Sunlit Striped Swiss Sonnenstoren Sun Awnings on style 1 (Day & Sunset ONLY!)
                     if not preset.is_night:
@@ -5669,6 +7158,28 @@ def render_diorama(
                         obj_buf[iy[win], ix[win]] = sa["idx"] + 1
                         norm_buf[iy[win], ix[win]] = [0.25, -0.25, 0.93]
                         shadow_buf[iy[win], ix[win]] = False
+        # v9.0 Circular brushed-steel safety guardrail ring atop each tall Lindt cocoa silo
+        rc_sa = int(np.clip((N_MAX - sa["n"]) / GRID_RES, 0, GRID_H - 1))
+        cc_sa = int(np.clip((sa["e"] - E_MIN) / GRID_RES, 0, GRID_W - 1))
+        if active_mask[rc_sa, cc_sa]:
+            r_gr = min(2.4, sa["footprint_w"] * 0.44)
+            z_gr = sa["z_roof"] + 0.95
+            ang_gr = np.linspace(0.0, 2.0 * math.pi, 13)
+            es_gr = sa["e"] + r_gr * np.cos(ang_gr)
+            ns_gr = sa["n"] + r_gr * np.sin(ang_gr)
+            px_g, py_g, pd_g = camera.project(es_gr, ns_gr, np.full_like(es_gr, z_gr))
+            ix_g, iy_g = np.round(px_g + shift_x).astype(np.int32), np.round(py_g + shift_y).astype(np.int32)
+            vm_g = (ix_g >= 0) & (ix_g < W) & (iy_g >= 0) & (iy_g < H)
+            if vm_g.any():
+                ix_g, iy_g, pd_g = ix_g[vm_g], iy_g[vm_g], pd_g[vm_g]
+                win_g = pd_g < zbuf[iy_g, ix_g]
+                if win_g.any():
+                    zbuf[iy_g[win_g], ix_g[win_g]] = pd_g[win_g]
+                    rgb_buf[iy_g[win_g], ix_g[win_g]] = [178.0, 184.0, 192.0]
+                    mat_buf[iy_g[win_g], ix_g[win_g]] = M_WALL
+                    obj_buf[iy_g[win_g], ix_g[win_g]] = sa["idx"] + 1
+                    norm_buf[iy_g[win_g], ix_g[win_g]] = [0.25, -0.25, 0.93]
+                    shadow_buf[iy_g[win_g], ix_g[win_g]] = False
 
     # F11: 3D Rooftop Brick Chimneys with Twin Terracotta Pots & LiDAR-Verified Flat-Roof Superstructures!
     for b in scene.buildings:
@@ -5796,6 +7307,114 @@ def render_diorama(
                 hw_box * 0.55, (122.0, 126.0, 134.0), bi_r + 1, M_WALL,
             )
 
+    # v9.0 Landmark 3D Rooftop Finials & Heimatstil Roof-Ridge Bell Cupolas (strictly crop_box_lv95 inset >= 2.0m + active_mask!)
+    def _draw_finial_seg(fe0, fn0, fz0, fe1, fn1, fz1, fcol, fmat=M_WALL, foid=244950, thick=False):
+        if crop_box_lv95 is not None:
+            if not (
+                crop_box_lv95[0] + 2.0 <= min(fe0, fe1) and max(fe0, fe1) <= crop_box_lv95[2] - 2.0
+                and crop_box_lv95[1] + 2.0 <= min(fn0, fn1) and max(fn0, fn1) <= crop_box_lv95[3] - 2.0
+            ):
+                return
+        rf0 = int(np.clip((N_MAX - 0.5 * (fn0 + fn1)) / GRID_RES, 0, GRID_H - 1))
+        cf0 = int(np.clip((0.5 * (fe0 + fe1) - E_MIN) / GRID_RES, 0, GRID_W - 1))
+        if not active_mask[rf0, cf0]:
+            return
+        dist_f = math.sqrt((fe1 - fe0) ** 2 + (fn1 - fn0) ** 2 + (fz1 - fz0) ** 2)
+        ns_f = max(2, int(math.ceil(dist_f / max(0.14, camera.mpp * 0.55))) + 1)
+        tf = np.linspace(0.0, 1.0, ns_f, dtype=np.float64)
+        px_f, py_f, pd_f = camera.project(fe0 + (fe1 - fe0) * tf, fn0 + (fn1 - fn0) * tf, fz0 + (fz1 - fz0) * tf)
+        ix_f, iy_f = np.round(px_f + shift_x).astype(np.int32), np.round(py_f + shift_y).astype(np.int32)
+        vm_f = (ix_f >= 0) & (ix_f < W) & (iy_f >= 0) & (iy_f < H)
+        if not vm_f.any():
+            return
+        ix_f, iy_f, pd_f = ix_f[vm_f], iy_f[vm_f], pd_f[vm_f]
+        for ox, oy in (((0, 0), (1, 0)) if thick else ((0, 0),)):
+            tx, ty = np.clip(ix_f + ox, 0, W - 1), np.clip(iy_f + oy, 0, H - 1)
+            win_f = pd_f < zbuf[ty, tx]
+            if win_f.any():
+                zbuf[ty[win_f], tx[win_f]] = pd_f[win_f]
+                rgb_buf[ty[win_f], tx[win_f]] = fcol
+                mat_buf[ty[win_f], tx[win_f]] = fmat
+                obj_buf[ty[win_f], tx[win_f]] = foid
+                norm_buf[ty[win_f], tx[win_f]] = [0.25, -0.25, 0.93]
+                shadow_buf[ty[win_f], tx[win_f]] = False
+
+    # 1. Reformierte Kirche Gilded Spire Cross & Wetterhahn (oid=244950, excluded from occ_m)
+    if id_ref_kirche >= 0:
+        b_rk = scene.buildings[id_ref_kirche]
+        rk_e, rk_n, rk_z0 = 2683413.0, 1241287.7, float(b_rk["z_roof"])
+        g_mat = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WALL
+        _draw_finial_seg(rk_e, rk_n, rk_z0 - 0.3, rk_e, rk_n, rk_z0 + 3.2, [246.0, 208.0, 84.0], fmat=g_mat, foid=244950)
+        _draw_finial_seg(rk_e, rk_n, rk_z0 + 0.3, rk_e, rk_n, rk_z0 + 0.65, [252.0, 218.0, 96.0], fmat=g_mat, foid=244950, thick=True)
+        _draw_finial_seg(rk_e, rk_n - 0.85, rk_z0 + 2.15, rk_e, rk_n + 0.85, rk_z0 + 2.15, [246.0, 208.0, 84.0], fmat=g_mat, foid=244950)
+        _draw_finial_seg(rk_e, rk_n - 0.35, rk_z0 + 3.25, rk_e, rk_n + 0.45, rk_z0 + 3.35, [252.0, 218.0, 96.0], fmat=g_mat, foid=244950, thick=True)
+        _draw_finial_seg(rk_e, rk_n + 0.30, rk_z0 + 3.35, rk_e, rk_n + 0.45, rk_z0 + 3.55, [252.0, 218.0, 96.0], fmat=g_mat, foid=244950)
+
+    # 2. Kath. Kirche St. Elisabeth Slender Metallic Bell-Tower Cross (oid=244951, excluded from occ_m)
+    if id_st_el_twr >= 0:
+        b_se = scene.buildings[id_st_el_twr]
+        se_e, se_n, se_z0 = float(b_se["e"]), float(b_se["n"]), float(b_se["z_roof"])
+        _draw_finial_seg(se_e, se_n, se_z0 - 0.2, se_e, se_n, se_z0 + 2.8, [208.0, 214.0, 222.0], foid=244951)
+        _draw_finial_seg(se_e, se_n - 0.75, se_z0 + 1.95, se_e, se_n + 0.75, se_z0 + 1.95, [208.0, 214.0, 222.0], foid=244951)
+
+    # 3. Lindt Smokestack Slender Lightning Rod Finial (oid=244952, excluded from occ_m)
+    if id_lindt_chim >= 0:
+        b_lc = scene.buildings[id_lindt_chim]
+        lc_e, lc_n, lc_z0 = float(b_lc["e"]), float(b_lc["n"]), float(b_lc["z_roof"])
+        _draw_finial_seg(lc_e, lc_n, lc_z0 - 0.2, lc_e, lc_n, lc_z0 + 2.1, [184.0, 152.0, 118.0], foid=244952)
+        _draw_finial_seg(lc_e, lc_n, lc_z0 + 2.1, lc_e, lc_n, lc_z0 + 2.6, [224.0, 228.0, 232.0], foid=244952)
+
+    # 3b. M3.5 Iconic Rooftop Illuminated "LINDT & SPRÜNGLI" Sign on Historic Factory id=1642 (oid=244954 EXCLUDED from occ_m; NEVER touches id=1443!)
+    if id_lindt_main >= 0:
+        b_lm = scene.buildings[id_lindt_main]
+        lm_z0 = float(b_lm["z_roof"])
+        ls_e = 2684223.5
+        _draw_finial_seg(ls_e, 1241366.0, lm_z0 + 0.3, ls_e, 1241398.0, lm_z0 + 0.3, [58.0, 62.0, 68.0], fmat=M_WALL, foid=244954)
+        _draw_finial_seg(ls_e, 1241366.0, lm_z0 + 2.4, ls_e, 1241398.0, lm_z0 + 2.4, [58.0, 62.0, 68.0], fmat=M_WALL, foid=244954)
+        for st_n in (1241366.5, 1241372.5, 1241379.0, 1241385.5, 1241391.5, 1241397.5):
+            _draw_finial_seg(ls_e, st_n, lm_z0 - 0.2, ls_e, st_n, lm_z0 + 2.5, [58.0, 62.0, 68.0], fmat=M_WALL, foid=244954)
+        ls_col = [255.0, 228.0, 136.0] if (preset.is_night or preset_key == "sunset") else [242.0, 204.0, 96.0]
+        ls_mat = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WALL
+        # 15 capital letter strokes ("L I N D T  &  S P R Ü N G L I") along east parapet
+        letter_ns = (
+            1241368.0, 1241369.8, 1241371.6, 1241373.4, 1241375.2,
+            1241378.2,
+            1241381.2, 1241383.0, 1241384.8, 1241386.6, 1241388.4, 1241390.2, 1241392.0, 1241393.8, 1241395.6,
+        )
+        for ln_c in letter_ns:
+            _draw_finial_seg(ls_e + 0.12, ln_c, lm_z0 + 0.5, ls_e + 0.12, ln_c, lm_z0 + 2.4, ls_col, fmat=ls_mat, foid=244954, thick=True)
+
+    # 4. Gemeindehaus (856) & Schulhaus Alte Landstrasse (868) Heimatstil Roof-Ridge Bell Cupolas
+    for b_cup_id in (id_gem_main, id_schul_al_868):
+        if b_cup_id < 0:
+            continue
+        b_cup = scene.buildings[b_cup_id]
+        ce_u, cn_u, cz_u = float(b_cup["e"]), float(b_cup["n"]), float(b_cup["z_roof"])
+        if crop_box_lv95 is not None and not (
+            crop_box_lv95[0] + 2.0 <= ce_u <= crop_box_lv95[2] - 2.0
+            and crop_box_lv95[1] + 2.0 <= cn_u <= crop_box_lv95[3] - 2.0
+        ):
+            continue
+        rc_u = int(np.clip((N_MAX - cn_u) / GRID_RES, 0, GRID_H - 1))
+        cc_u = int(np.clip((ce_u - E_MIN) / GRID_RES, 0, GRID_W - 1))
+        if not active_mask[rc_u, cc_u]:
+            continue
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, ce_u, cn_u, cz_u - 0.6, cz_u + 1.6, 0.95, (226.0, 220.0, 206.0), b_cup_id + 1, M_WALL)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, ce_u + 0.55, cn_u, cz_u + 0.3, cz_u + 1.3, 0.35, (42.0, 46.0, 52.0), b_cup_id + 1, M_WALL)
+        _draw_finial_seg(ce_u + 0.58, cn_u, cz_u + 0.72, ce_u + 0.58, cn_u, cz_u + 0.98, [238.0, 196.0, 76.0], fmat=M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WALL, foid=244953)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, ce_u, cn_u, cz_u + 1.6, cz_u + 2.3, 1.05, (74.0, 86.0, 82.0), b_cup_id + 1, M_WALL)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, ce_u, cn_u, cz_u + 2.3, cz_u + 3.0, 0.55, (74.0, 86.0, 82.0), b_cup_id + 1, M_WALL)
+        _draw_3d_box_column(camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf, ce_u, cn_u, cz_u + 3.0, cz_u + 3.45, 0.22, (74.0, 86.0, 82.0), b_cup_id + 1, M_WALL)
+        _draw_finial_seg(ce_u, cn_u, cz_u + 3.4, ce_u, cn_u, cz_u + 4.2, [236.0, 194.0, 72.0], foid=244953)
+
+    # 5. M3.5 Broelberggut Octagonal Tempelchen (1074) Gilded Finial Spire (oid=244960 EXCLUDED from occ_m!)
+    if id_broel_temp >= 0:
+        b_bt = scene.buildings[id_broel_temp]
+        bt_e, bt_n, bt_z0 = float(b_bt["e"]), float(b_bt["n"]), float(b_bt["z_roof"])
+        bt_mat = M_WINDOW_LIT if (preset.is_night or preset_key == "sunset") else M_WALL
+        _draw_finial_seg(bt_e, bt_n, bt_z0 - 0.15, bt_e, bt_n, bt_z0 + 1.15, [236.0, 194.0, 72.0], fmat=bt_mat, foid=244960)
+        _draw_finial_seg(bt_e, bt_n, bt_z0 + 0.35, bt_e, bt_n, bt_z0 + 0.60, [248.0, 212.0, 88.0], fmat=bt_mat, foid=244960, thick=True)
+
     # -------------------------------------------------------------------------
     # STAGE 4: Sculpted 90s Pixel-Art 3D Trees & Trimmed Garden Hedges!
     # -------------------------------------------------------------------------
@@ -5887,11 +7506,24 @@ def render_diorama(
     if preset_key in ("night", "sunset"):
         up_scale = 1.0 if preset.is_night else 0.25
         up_targets = (
-            (id_ref_kirche,  np.array([112.0, 78.0, 34.0], dtype=np.float32), 0.55),
-            (id_lindt_hoc,   np.array([118.0, 84.0, 38.0], dtype=np.float32), 0.42),
-            (id_lindt_chim,  np.array([98.0,  66.0, 28.0], dtype=np.float32), 0.50),
-            (id_st_el_twr,   np.array([94.0,  64.0, 28.0], dtype=np.float32), 0.45),
-            (id_bhf_stn,     np.array([76.0,  52.0, 22.0], dtype=np.float32), 0.35),
+            (id_ref_kirche,   np.array([112.0, 78.0, 34.0], dtype=np.float32), 0.55),
+            (id_lindt_hoc,    np.array([118.0, 84.0, 38.0], dtype=np.float32), 0.42),
+            (id_lindt_chim,   np.array([98.0,  66.0, 28.0], dtype=np.float32), 0.50),
+            (id_st_el_twr,    np.array([94.0,  64.0, 28.0], dtype=np.float32), 0.45),
+            (id_bhf_stn,      np.array([76.0,  52.0, 22.0], dtype=np.float32), 0.35),
+            # v9.0 heritage & civic uplighting additions (all sunset G > B; Hallenbad aquamarine B > G)
+            (id_gem_main,     np.array([96.0,  68.0, 30.0], dtype=np.float32), 0.45),
+            (id_schul_al_868, np.array([84.0,  60.0, 26.0], dtype=np.float32), 0.36),
+            (id_cfm_1033,     np.array([96.0,  68.0, 30.0], dtype=np.float32), 0.44),
+            (lm.get("sanatorium_633", -1), np.array([92.0, 66.0, 30.0], dtype=np.float32), 0.42),
+            (lm.get("sanatorium_521", -1), np.array([86.0, 62.0, 28.0], dtype=np.float32), 0.38),
+            (lm.get("sanatorium_483", -1), np.array([82.0, 58.0, 26.0], dtype=np.float32), 0.36),
+            (id_hb_pool,      np.array([22.0,  72.0, 92.0], dtype=np.float32), 0.38),
+            (lm.get("moenchhof_hafenbeiz_243", -1), np.array([94.0, 64.0, 26.0], dtype=np.float32), 0.40),
+            (lm.get("moenchhof_hafenbeiz_843", -1), np.array([94.0, 64.0, 26.0], dtype=np.float32), 0.40),
+            (id_broel_manor,  np.array([88.0,  62.0, 28.0], dtype=np.float32), 0.38),
+            (id_broel_temp,   np.array([92.0,  66.0, 30.0], dtype=np.float32), 0.42),
+            (id_spin_villa,   np.array([84.0,  60.0, 26.0], dtype=np.float32), 0.36),
         )
         for bid_u, tint_u, strength_u in up_targets:
             if bid_u < 0:
@@ -6184,7 +7816,12 @@ def _apply_pixel_art_outlines_float(
         rgb_buf[iy_t, ix_t] *= np.array([0.82, 0.87, 0.85], dtype=np.float32) if not is_night else 0.86
 
     island_fg = mat_buf > M_DROP_SHADOW
-    island_border = island_fg & (~ndimage.binary_erosion(island_fg, iterations=1, border_value=0))
+    island_border = (
+        island_fg
+        & (~ndimage.binary_erosion(island_fg, iterations=1, border_value=0))
+        & (~bldg_edge)
+        & (~tree_world_edge)
+    )
     if island_border.any():
         by, bx = np.nonzero(island_border)
         rgb_buf[by, bx] *= 0.44

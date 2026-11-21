@@ -31,6 +31,14 @@ DETAIL_PLATES = (
     "06_sanatorium_ridge.webp",
 )
 
+NEW_DETAIL_PLATES_V9 = (
+    "07_st_elisabeth_church.webp",
+    "08_cf_meyer_haus.webp",
+    "09_gemeindehaus_alte_landstrasse.webp",
+    "10_stockengut_ridge_farm.webp",
+)
+ALL_DETAIL_PLATES_V9 = DETAIL_PLATES + NEW_DETAIL_PLATES_V9
+
 AUDIO_FILES = (
     "bells.mp3",
     "birds.mp3",
@@ -56,6 +64,21 @@ REQUIRED_LANDMARK_IDS = (
     "sulzergut_park",
 )
 
+NEW_LANDMARK_IDS_V9 = (
+    "gemeindehaus_alte_landstr",
+    "stockengut_farm",
+    "hallenbad_hochweid",
+    "broelberggut_estate",
+    "villa_spinnergut_tc",
+    "morfanlage_promenade",
+)
+ALL_LANDMARK_IDS_V9 = REQUIRED_LANDMARK_IDS + NEW_LANDMARK_IDS_V9
+REQUIRED_VIGNETTE_KEYS_V9 = (
+    "sanatorium_ridge",
+    "moenchhof_horn",
+    "sulzergut_park",
+) + NEW_LANDMARK_IDS_V9
+
 REQUIRED_ROAD_IDS = (
     "seestrasse_sb",
     "seestrasse_nb",
@@ -77,6 +100,7 @@ BADWEG_UV = (0.58400, 0.57963)
 BAHNHOF_PLATFORM_UV = (0.5617, 0.5006)
 LINDT_HOC_ID = 1443
 BADWEG_PIER_ID = 4
+CF_MEYER_HAUS_LV95 = (2683714.0, 1241442.0)  # Swiss KGS-Nr. 7525 Alte Landstrasse 170
 
 
 @functools.lru_cache(maxsize=4)
@@ -113,7 +137,7 @@ def load_depth_rgb() -> np.ndarray:
         return np.asarray(im.convert("RGB"), dtype=np.uint8)
 
 
-@functools.lru_cache(maxsize=8)
+@functools.lru_cache(maxsize=16)
 def load_plate_rgb(filename: str) -> np.ndarray:
     path = ASSETS_DIR / filename
     with Image.open(path) as im:
@@ -176,6 +200,56 @@ def get_landmark_uv(lm: Dict[str, Any]) -> Tuple[float, float]:
     if "uv" in lm and isinstance(lm["uv"], (list, tuple)) and len(lm["uv"]) >= 2:
         return float(lm["uv"][0]), float(lm["uv"][1])
     return float(lm["u"]), float(lm["v"])
+
+
+def count_unique_rgb_colors(arr: np.ndarray) -> int:
+    """Exact count of unique RGB colors in an (H, W, 3) uint8 image."""
+    packed = (
+        (arr[..., 0].astype(np.uint32) << 16)
+        | (arr[..., 1].astype(np.uint32) << 8)
+        | arr[..., 2].astype(np.uint32)
+    ).ravel()
+    if packed.size >= 500_000:
+        lut = np.zeros(1 << 24, dtype=np.bool_)
+        lut[packed] = True
+        return int(lut.sum())
+    return int(np.unique(packed).size)
+
+
+_VIGNETTE_VECTOR_KEYS = frozenset(
+    {"half_l", "half_w", "lat", "dx", "dy", "du", "dv", "size", "offset"}
+)
+
+
+def _is_num(x: Any) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def extract_vignette_uv_anchors(
+    val: Any,
+    prefix: str = "",
+) -> List[Tuple[str, float, float]]:
+    """Recursively extract [u, v] anchor pairs from an ambient.vignettes entry.
+
+    Skips relative offset/vector fields (half_l, half_w, lat, dx, dy, du, dv, size, offset)
+    so signed basis vectors are never misread as UV coordinates.
+    """
+    out: List[Tuple[str, float, float]] = []
+    if isinstance(val, dict):
+        if "u" in val and "v" in val and _is_num(val["u"]) and _is_num(val["v"]):
+            out.append((prefix or "uv", float(val["u"]), float(val["v"])))
+        for k, v in val.items():
+            if k in _VIGNETTE_VECTOR_KEYS or k in ("u", "v"):
+                continue
+            sub_prefix = f"{prefix}.{k}" if prefix else str(k)
+            out.extend(extract_vignette_uv_anchors(v, sub_prefix))
+    elif isinstance(val, (list, tuple)):
+        if len(val) == 2 and _is_num(val[0]) and _is_num(val[1]):
+            out.append((prefix or "uv", float(val[0]), float(val[1])))
+        else:
+            for idx, item in enumerate(val):
+                out.extend(extract_vignette_uv_anchors(item, f"{prefix}[{idx}]"))
+    return out
 
 
 def rec709_luma(rgb: np.ndarray) -> np.ndarray:

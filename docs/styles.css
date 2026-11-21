@@ -259,6 +259,7 @@ body.sidebar-collapsed .sidebar {
 .lm-pin:hover {
   transform: translate(-50%, -108%) scale(1.05);
   background: #2b384e;
+  z-index: 6;
 }
 
 .loupe-canvas {
@@ -824,6 +825,10 @@ body[data-mode="night"] .viewport {
   background: #3a3220;
   border-color: #ffd37a;
   color: #ffe9b8;
+  z-index: 5;
+}
+.lm-pin.decluttered {
+  display: none;
 }
 .lm-item.active {
   box-shadow: inset 3px 0 0 var(--accent-gold);

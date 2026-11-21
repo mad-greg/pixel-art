@@ -14,10 +14,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests.lib.assets_helper import (
+    ASSETS_DIR,
     CANVAS_H,
     CANVAS_W,
     DETAIL_PLATES,
     LINDT_HOC_ID,
+    NEW_DETAIL_PLATES_V9,
     OVERVIEW_H,
     OVERVIEW_W,
     PRESETS,
@@ -25,6 +27,7 @@ from tests.lib.assets_helper import (
     compute_sky_reference,
     distance_to_exterior_sky_m,
     entropy_32b,
+    extract_vignette_uv_anchors,
     filter_dilated_components,
     find_interior_components,
     get_day_island_and_exterior_masks,
@@ -432,6 +435,33 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
         self.assertGreaterEqual(float(np.std(p_luma)), 25.0, "Plate 01 Lindt center std_luma < 25.0")
         self.assertGreaterEqual(entropy_32b(p_luma), 2.8, "Plate 01 Lindt center entropy < 2.8")
 
+    @test_meta("T2.FA1.10", "v9.0 plates 07..10 zero floating sky clusters & visual richness (std>=20, ent>=2.5)")
+    def test_10_new_plates_no_floating_and_richness(self) -> None:
+        missing = [fname for fname in NEW_DETAIL_PLATES_V9 if not (ASSETS_DIR / fname).is_file()]
+        self.assertEqual(missing, [], f"Missing v9.0 detail plates: {', '.join(missing)}")
+        for fname in NEW_DETAIL_PLATES_V9:
+            arr = load_plate_rgb(fname)
+            comps = find_interior_components(
+                arr,
+                tol=18,
+                margin_top=110,
+                margin_bot=90,
+                margin_lr=24,
+                min_raw_2x=4,
+                min_dilated_2x=45,
+            )
+            self.assertEqual(
+                len(comps),
+                1,
+                f"{fname} has {len(comps) - 1} floating sky clusters",
+            )
+            body = arr[110:-90, 24:-24, :]
+            luma = rec709_luma(body)
+            std_l = float(np.std(luma))
+            ent = entropy_32b(luma)
+            self.assertGreaterEqual(std_l, 20.0, f"{fname} body std_luma={std_l:.2f} < 20.0")
+            self.assertGreaterEqual(ent, 2.5, f"{fname} body entropy={ent:.2f} < 2.5")
+
 
 class TestTier2FA2GeospatialBounds(unittest.TestCase):
     """FA2 Boundary & Corner Cases: Road Kinks, Occlusion, Edge-to-Edge, Geometry Bounds."""
@@ -623,6 +653,74 @@ class TestTier2FA2GeospatialBounds(unittest.TestCase):
             violations,
             [],
             f"Network graph DEM/water/UV violations: {'; '.join(violations)}",
+        )
+
+    @test_meta("T2.FA2.08", "All 16 landmarks in island_2x, min separation duv>=0.045 & cf_meyer_haus anchor <=0.02 UV")
+    def test_08_v9_16_landmarks_separation_and_cf_meyer_alignment(self) -> None:
+        lms = load_interactive_json().get("landmarks", [])
+        self.assertGreaterEqual(len(lms), 16, f"Expected >=16 landmarks, got {len(lms)}")
+
+        island_2x = get_day_island_and_exterior_masks()["island_2x"]
+        h2, w2 = island_2x.shape
+        uvs = []
+        for lm in lms:
+            lid = str(lm.get("id", "?"))
+            u, v = get_landmark_uv(lm)
+            self.assertTrue(0.0 <= u <= 1.0 and 0.0 <= v <= 1.0, f"Landmark {lid} UV out of [0,1]: {(u, v)}")
+            x2 = min(w2 - 1, max(0, int(round(u * (w2 - 1)))))
+            y2 = min(h2 - 1, max(0, int(round(v * (h2 - 1)))))
+            self.assertTrue(
+                bool(island_2x[y2, x2]),
+                f"Landmark {lid} UV ({u:.5f}, {v:.5f}) falls outside island_2x mask",
+            )
+            uvs.append((lid, u, v))
+
+        sep_violations = []
+        for i in range(len(uvs)):
+            id1, u1, v1 = uvs[i]
+            for j in range(i + 1, len(uvs)):
+                id2, u2, v2 = uvs[j]
+                duv = math.hypot(u1 - u2, v1 - v2)
+                if duv < 0.045:
+                    sep_violations.append(f"{id1}<->{id2}: duv={duv:.5f} < 0.045")
+        self.assertEqual(
+            sep_violations,
+            [],
+            f"Landmark pairwise UV separation violations: {'; '.join(sep_violations)}",
+        )
+
+        cf = next((lm for lm in lms if lm.get("id") == "cf_meyer_haus"), None)
+        self.assertIsNotNone(cf, "cf_meyer_haus landmark missing")
+        cf_u, cf_v = get_landmark_uv(cf)
+
+        anim = load_animations_json()
+        vigs = anim.get("ambient", {}).get("vignettes")
+        self.assertIsInstance(vigs, dict, "ambient.vignettes must be a dict")
+        cf_vig = vigs.get("cf_meyer_haus")
+        self.assertIsNotNone(cf_vig, "ambient.vignettes['cf_meyer_haus'] missing")
+        cf_anchors = extract_vignette_uv_anchors(cf_vig, prefix="cf_meyer_haus")
+        self.assertGreater(len(cf_anchors), 0, "ambient.vignettes['cf_meyer_haus'] has no UV anchor")
+        min_vig_duv = min(math.hypot(au - cf_u, av - cf_v) for _, au, av in cf_anchors)
+        self.assertLessEqual(
+            min_vig_duv,
+            0.02,
+            f"cf_meyer_haus vignette anchor is {min_vig_duv:.5f} UV from landmark (>0.02)",
+        )
+
+        fountains = anim.get("ambient", {}).get("fountains", [])
+        cf_fnt = next((f for f in fountains if "meyer" in str(f.get("name", "")).lower()), None)
+        self.assertIsNotNone(cf_fnt, "C.F. Meyer-Haus fountain entry missing from ambient.fountains")
+        if "uv" in cf_fnt and isinstance(cf_fnt["uv"], (list, tuple)) and len(cf_fnt["uv"]) >= 2:
+            fu, fv = cf_fnt["uv"][0], cf_fnt["uv"][1]
+        else:
+            fu, fv = cf_fnt.get("u"), cf_fnt.get("v")
+        self.assertIsNotNone(fu, "C.F. Meyer-Haus fountain missing u coordinate")
+        self.assertIsNotNone(fv, "C.F. Meyer-Haus fountain missing v coordinate")
+        fnt_duv = math.hypot(float(fu) - cf_u, float(fv) - cf_v)
+        self.assertLessEqual(
+            fnt_duv,
+            0.02,
+            f"C.F. Meyer-Haus fountain ({fu}, {fv}) is {fnt_duv:.5f} UV from landmark (>0.02)",
         )
 
 

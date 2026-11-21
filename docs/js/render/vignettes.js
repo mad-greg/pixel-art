@@ -298,6 +298,261 @@ export function drawShorelineWaves(ctx, cam, depthMgr, shoreline, worldW, worldH
   ctx.restore();
 }
 
+function getZurichClockTime(tSec, mode) {
+  // Preset-authentic Kilchberg (CET/CEST) base clock times:
+  //   day = 14:22:00, sunset = 19:42:00, night = 22:15:00
+  // Strictly deterministic time derivation (zero wall-clock or RNG calls).
+  const baseSec = mode === 'night'
+    ? (22 * 3600 + 15 * 60)
+    : (mode === 'sunset' ? (19 * 3600 + 42 * 60) : (14 * 3600 + 22 * 60));
+  const totalSec = (((baseSec + tSec) % 86400) + 86400) % 86400;
+  const hr = Math.floor(totalSec / 3600) % 24;
+  const min = Math.floor((totalSec % 3600) / 60);
+  const sec = totalSec % 60;
+  return { hr, min, sec };
+}
+
+function drawSwissClockDial(ctx, cx, cy, rDial, s, tSec, mode, style = 'civic', detailAlpha = 1.0) {
+  if (rDial < 1.8) return;
+  const isNight = mode === 'night';
+  const isSunset = mode === 'sunset';
+  const { hr, min, sec } = getZurichClockTime(tSec, mode);
+  const minAng = ((min + sec / 60) / 60) * Math.PI * 2 - Math.PI * 0.5;
+  const hrAng = (((hr % 12) + min / 60) / 12) * Math.PI * 2 - Math.PI * 0.5;
+
+  ctx.save();
+  if (style === 'sbb') {
+    // 1944 Hans Hilfiker SBB Bahnhofsuhr: white face, black baton markers/hands, red lollipop second hand
+    // Authentic 58.5 s sweep + 1.5 s pause at 12 o'clock
+    const sbbSec = sec < 58.5 ? (sec / 58.5) * 60 : 0;
+    const sAng = (sbbSec / 60) * Math.PI * 2 - Math.PI * 0.5;
+    if (isNight || isSunset) {
+      const g = ctx.createRadialGradient(cx, cy, rDial * 0.4, cx, cy, rDial * 2.1);
+      g.addColorStop(0, isNight ? 'rgba(248, 250, 252, 0.34)' : 'rgba(248, 250, 252, 0.18)');
+      g.addColorStop(1, 'rgba(248, 250, 252, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rDial * 2.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#f8fafc';
+    ctx.beginPath();
+    ctx.arc(cx, cy, rDial, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = Math.max(0.75, 0.65 * s);
+    ctx.stroke();
+
+    if (detailAlpha > 0.05 && rDial >= 3.2) {
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineCap = 'butt';
+      for (let ti = 0; ti < 12; ti++) {
+        const ta = (ti / 12) * Math.PI * 2 - Math.PI * 0.5;
+        const major = (ti % 3) === 0;
+        ctx.lineWidth = Math.max(0.65, (major ? 0.65 : 0.35) * s);
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ta) * rDial * (major ? 0.66 : 0.76), cy + Math.sin(ta) * rDial * (major ? 0.66 : 0.76));
+        ctx.lineTo(cx + Math.cos(ta) * rDial * 0.90, cy + Math.sin(ta) * rDial * 0.90);
+        ctx.stroke();
+      }
+    }
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineCap = 'butt';
+    ctx.lineWidth = Math.max(1.0, 0.95 * s);
+    ctx.beginPath();
+    ctx.moveTo(cx - Math.cos(hrAng) * rDial * 0.14, cy - Math.sin(hrAng) * rDial * 0.14);
+    ctx.lineTo(cx + Math.cos(hrAng) * rDial * 0.54, cy + Math.sin(hrAng) * rDial * 0.54);
+    ctx.stroke();
+    ctx.lineWidth = Math.max(0.85, 0.72 * s);
+    ctx.beginPath();
+    ctx.moveTo(cx - Math.cos(minAng) * rDial * 0.16, cy - Math.sin(minAng) * rDial * 0.16);
+    ctx.lineTo(cx + Math.cos(minAng) * rDial * 0.80, cy + Math.sin(minAng) * rDial * 0.80);
+    ctx.stroke();
+    // Iconic red lollipop second hand
+    const lx = cx + Math.cos(sAng) * rDial * 0.68;
+    const ly = cy + Math.sin(sAng) * rDial * 0.68;
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = Math.max(0.6, 0.45 * s);
+    ctx.beginPath();
+    ctx.moveTo(cx - Math.cos(sAng) * rDial * 0.20, cy - Math.sin(sAng) * rDial * 0.20);
+    ctx.lineTo(lx, ly);
+    ctx.stroke();
+    ctx.fillStyle = '#dc2626';
+    ctx.beginPath();
+    ctx.arc(lx, ly, Math.max(0.95, rDial * 0.14), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  // 'church' or 'civic' dark-slate/navy dial with gilded bezel, Roman ticks & gold hands
+  const isChurch = style === 'church';
+  ctx.fillStyle = isChurch ? (isNight ? '#1c2a42' : '#162030') : (isNight ? '#1d273b' : '#1a202e');
+  ctx.beginPath();
+  ctx.arc(cx, cy, rDial, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = isNight ? '#ffe38a' : (isChurch ? '#f4cf58' : '#eec44c');
+  ctx.lineWidth = Math.max(0.85, (isChurch ? 0.95 : 0.75) * s);
+  ctx.stroke();
+
+  if (detailAlpha > 0.05 && rDial >= 3.0) {
+    ctx.strokeStyle = isNight ? 'rgba(255, 227, 138, 0.88)' : 'rgba(244, 207, 88, 0.85)';
+    ctx.lineWidth = Math.max(0.6, 0.42 * s);
+    for (let ti = 0; ti < 12; ti++) {
+      const ta = (ti / 12) * Math.PI * 2 - Math.PI * 0.5;
+      const inner = (ti % 3) === 0 ? 0.68 : 0.76;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ta) * rDial * inner, cy + Math.sin(ta) * rDial * inner);
+      ctx.lineTo(cx + Math.cos(ta) * rDial * 0.90, cy + Math.sin(ta) * rDial * 0.90);
+      ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = isNight ? '#ffe38a' : '#f4cf58';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(1.1, (isChurch ? 1.35 : 0.95) * s);
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(hrAng) * rDial * 0.56, cy + Math.sin(hrAng) * rDial * 0.56);
+  ctx.stroke();
+  ctx.lineWidth = Math.max(0.9, (isChurch ? 1.05 : 0.75) * s);
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(minAng) * rDial * 0.84, cy + Math.sin(minAng) * rDial * 0.84);
+  ctx.stroke();
+  ctx.fillStyle = '#fff5cc';
+  const hSz = Math.max(1.4, Math.round(rDial * 0.22));
+  ctx.fillRect(Math.round(cx - hSz * 0.5), Math.round(cy - hSz * 0.5), hSz, hSz);
+  ctx.restore();
+}
+
+function drawSignPlaque(ctx, x, y, text, s, alpha, opts = {}) {
+  if (alpha <= 0.01) return;
+  const fontPx = Math.max(8, Math.round((opts.baseFontPx || 2.3) * s));
+  const padX = Math.max(3, Math.round((opts.padX || 1.6) * s));
+  const padY = Math.max(1.5, Math.round((opts.padY || 0.85) * s));
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  ctx.font = `700 ${fontPx}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(text).width;
+  const bw = Math.round(tw + padX * 2);
+  const bh = Math.round(fontPx + padY * 2);
+  ctx.translate(Math.round(x), Math.round(y));
+  if (opts.rotRad) ctx.rotate(opts.rotRad);
+  if (opts.glowCol) {
+    ctx.shadowColor = opts.glowCol;
+    ctx.shadowBlur = Math.max(3, 2.2 * s);
+  }
+  ctx.fillStyle = opts.bg || '#1e2430';
+  ctx.fillRect(-Math.round(bw * 0.5), -Math.round(bh * 0.5), bw, bh);
+  if (opts.border) {
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = opts.border;
+    ctx.lineWidth = Math.max(0.8, 0.35 * s);
+    ctx.strokeRect(-Math.round(bw * 0.5) + 0.5, -Math.round(bh * 0.5) + 0.5, bw - 1, bh - 1);
+  }
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = opts.fg || '#f8fafc';
+  ctx.fillText(text, 0, 0.5);
+  ctx.restore();
+}
+
+function drawRotatedSignText(ctx, x, y, text, s, alpha, rotRad, opts = {}) {
+  if (alpha <= 0.01) return;
+  const fontPx = Math.max(8, Math.round((opts.baseFontPx || 3.0) * s));
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  ctx.translate(Math.round(x), Math.round(y));
+  if (rotRad) ctx.rotate(rotRad);
+  ctx.font = `700 ${fontPx}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Crisp 1px dark drop shadow
+  ctx.fillStyle = opts.shadow || 'rgba(15, 18, 24, 0.85)';
+  ctx.fillText(text, Math.max(1, 0.35 * s), Math.max(1, 0.45 * s));
+  if (opts.glowCol) {
+    ctx.shadowColor = opts.glowCol;
+    ctx.shadowBlur = Math.max(4, 2.8 * s);
+  }
+  ctx.fillStyle = opts.fg || '#f2c94c';
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+function drawLanternGlow(ctx, sx, sy, r, isNight, warmRgb = '255, 224, 146', coreHex = '#fff1c2', coreAlpha = 0.90) {
+  if (r < 1.5) return;
+  const grad = ctx.createRadialGradient(sx, sy, Math.max(0.5, r * 0.10), sx, sy, r);
+  grad.addColorStop(0, `rgba(${warmRgb}, ${(isNight ? 0.42 : 0.24).toFixed(2)})`);
+  grad.addColorStop(0.55, `rgba(${warmRgb}, ${(isNight ? 0.16 : 0.08).toFixed(2)})`);
+  grad.addColorStop(1, `rgba(${warmRgb}, 0)`);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(sx, sy, r * 1.12, r * 0.74, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const cSz = Math.max(1.5, Math.round(r * 0.18));
+  ctx.fillStyle = coreHex;
+  ctx.globalAlpha = isNight ? coreAlpha : coreAlpha * 0.72;
+  ctx.fillRect(Math.round(sx - cSz * 0.5), Math.round(sy - cSz * 0.5), cSz, cSz);
+  ctx.globalAlpha = 1.0;
+}
+
+function drawWaterLapRings(ctx, depthMgr, toX, toY, u, v, s, tSec, isNight, isSunset, phaseOff = 0, count = 2) {
+  if (depthMgr.isWaterMaskReady() && !depthMgr.isWaterUV(u, v)) return;
+  const wx = toX(u);
+  const wy = toY(v);
+  const colRgb = isNight ? '156, 206, 238' : (isSunset ? '255, 224, 182' : '232, 248, 255');
+  ctx.lineWidth = Math.max(0.8, 0.85 * s);
+  for (let i = 0; i < count; i++) {
+    const prog = (((tSec * 0.42 + phaseOff + i / count) % 1) + 1) % 1;
+    const rx = (2.0 + prog * 6.8) * s;
+    const ry = rx * 0.52;
+    const alpha = (1.0 - prog) * (isNight ? 0.34 : 0.44);
+    if (alpha <= 0.03) continue;
+    ctx.strokeStyle = `rgba(${colRgb}, ${alpha.toFixed(2)})`;
+    ctx.beginPath();
+    ctx.ellipse(wx, wy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawSwissOrMuniFlag(ctx, cam, fx, fy, wScale, wind, phaseIdx, isNight, kind = 'swiss') {
+  const waveStep = Math.floor(wind.wavePhase) % 4;
+  const billow = Math.min(1.25, Math.max(0.75, wind.strength * 1.3));
+  const fPhase = (waveStep + phaseIdx) % 4;
+  const dy1 = (fPhase === 1 ? -1 : (fPhase === 3 ? 1 : 0)) * billow * wScale;
+  const dy2 = (fPhase === 2 ? -1 : (fPhase === 0 ? 1 : 0)) * billow * wScale;
+  const poleCol = isNight ? '#8a99b2' : '#d8dce2';
+  const finialCol = isNight ? '#c8a852' : '#f2ca52';
+  const whiteCross = isNight ? '#cfd6e2' : '#f8f6f0';
+
+  if (kind === 'kilchberg') {
+    // Authentic Kilchberg (ZH) municipal Wappen: azure #1a5fb4 + 4-petal white flower #f4f6f8 + gold center #f2c430
+    drawPixelRectWorld(ctx, cam, fx, fy - 14 * wScale, 1.5, 15, poleCol, wScale);
+    drawPixelRectWorld(ctx, cam, fx - 0.3 * wScale, fy - 15 * wScale, 2.0, 1.4, finialCol, wScale);
+    const kAzure = isNight ? '#12427e' : '#1a5fb4';
+    const kPetal = isNight ? '#cfd6e2' : '#f4f6f8';
+    const kGold = isNight ? '#c49d28' : '#f2c430';
+    drawPixelRectWorld(ctx, cam, fx + 1.5 * wScale, fy - 14 * wScale, 3, 6.0, kAzure, wScale);
+    drawPixelRectWorld(ctx, cam, fx + 4.2 * wScale, fy - 14 * wScale + dy1, 3.2, 6.0, kAzure, wScale);
+    drawPixelRectWorld(ctx, cam, fx + 7.2 * wScale, fy - 14 * wScale + dy2, 2.8, 6.0, kAzure, wScale);
+    drawPixelRectWorld(ctx, cam, fx + 4.9 * wScale, fy - 13.0 * wScale + dy1, 1.5, 4.0, kPetal, wScale);
+    drawPixelRectWorld(ctx, cam, fx + 3.7 * wScale, fy - 11.7 * wScale + dy1, 3.9, 1.5, kPetal, wScale);
+    drawPixelRectWorld(ctx, cam, fx + 4.9 * wScale, fy - 11.7 * wScale + dy1, 1.5, 1.5, kGold, wScale);
+    return;
+  }
+
+  drawPixelRectWorld(ctx, cam, fx, fy - 15 * wScale, 1.5, 16, poleCol, wScale);
+  drawPixelRectWorld(ctx, cam, fx - 0.3 * wScale, fy - 16 * wScale, 2.1, 1.6, finialCol, wScale);
+  const segY0 = fy - 14.5 * wScale;
+  const redFlag = isNight ? '#9e2828' : '#d62c28';
+  drawPixelRectWorld(ctx, cam, fx + 1.5 * wScale, segY0, 3, 6, redFlag, wScale);
+  drawPixelRectWorld(ctx, cam, fx + 4.2 * wScale, segY0 + dy1, 3.2, 6, redFlag, wScale);
+  drawPixelRectWorld(ctx, cam, fx + 7.2 * wScale, segY0 + dy2, 2.8, 6, redFlag, wScale);
+  drawPixelRectWorld(ctx, cam, fx + 4.6 * wScale, segY0 + dy1 + 1.2 * wScale, 1.4, 3.6, whiteCross, wScale);
+  drawPixelRectWorld(ctx, cam, fx + 3.4 * wScale, segY0 + dy1 + 2.3 * wScale, 3.8, 1.4, whiteCross, wScale);
+}
+
 /**
  * Ambient village effects: Swiss & Kilchberg waving flags, Lindt Hochkamin steam,
  * village chimney smoke (SW->NE wind-coherent), Dorfbrunnen fountains, and Lake Zurich gulls.
@@ -309,43 +564,15 @@ export function drawAmbientEffects(ctx, cam, animData, livingCounts, worldW, wor
   const isNight = mode === 'night';
   const isSunset = mode === 'sunset';
   const wind = getWindVector(tSec);
-  const waveStep = Math.floor(wind.wavePhase) % 4;
-  const billow = Math.min(1.25, Math.max(0.75, wind.strength * 1.3));
 
   for (let fIdx = 0; fIdx < (animData.ambient.swiss_flags || []).length; fIdx++) {
     const fl = animData.ambient.swiss_flags[fIdx];
     const fx = fl.uv[0] * worldW;
     const fy = fl.uv[1] * worldH;
-    const fPhase = (waveStep + fIdx) % 4;
-    drawPixelRectWorld(ctx, cam, fx, fy - 15 * wScale, 1.5, 16, isNight ? '#8a99b2' : '#d8dce2', wScale);
-    drawPixelRectWorld(ctx, cam, fx - 0.3 * wScale, fy - 16 * wScale, 2.1, 1.6, isNight ? '#c8a852' : '#f2ca52', wScale);
-    const segY0 = fy - 14.5 * wScale;
-    const dy1 = (fPhase === 1 ? -1 : (fPhase === 3 ? 1 : 0)) * billow * wScale;
-    const dy2 = (fPhase === 2 ? -1 : (fPhase === 0 ? 1 : 0)) * billow * wScale;
-    const redFlag = isNight ? '#9e2828' : '#d62c28';
-    const whiteCross = isNight ? '#cfd6e2' : '#f8f6f0';
-    drawPixelRectWorld(ctx, cam, fx + 1.5 * wScale, segY0, 3, 6, redFlag, wScale);
-    drawPixelRectWorld(ctx, cam, fx + 4.2 * wScale, segY0 + dy1, 3.2, 6, redFlag, wScale);
-    drawPixelRectWorld(ctx, cam, fx + 7.2 * wScale, segY0 + dy2, 2.8, 6, redFlag, wScale);
-    drawPixelRectWorld(ctx, cam, fx + 4.6 * wScale, segY0 + dy1 + 1.2 * wScale, 1.4, 3.6, whiteCross, wScale);
-    drawPixelRectWorld(ctx, cam, fx + 3.4 * wScale, segY0 + dy1 + 2.3 * wScale, 3.8, 1.4, whiteCross, wScale);
+    drawSwissOrMuniFlag(ctx, cam, fx, fy, wScale, wind, fIdx, isNight, 'swiss');
 
     if (fIdx === 3) {
-      const kx = fx + 13 * wScale;
-      const ky = fy + 2 * wScale;
-      const kPhase = (waveStep + 2) % 4;
-      const kdy1 = (kPhase === 1 ? -1 : (kPhase === 3 ? 1 : 0)) * billow * wScale;
-      const kdy2 = (kPhase === 2 ? -1 : (kPhase === 0 ? 1 : 0)) * billow * wScale;
-      drawPixelRectWorld(ctx, cam, kx, ky - 14 * wScale, 1.5, 15, isNight ? '#8a99b2' : '#d8dce2', wScale);
-      const kTop = isNight ? '#9c2c2c' : '#cc2e2a';
-      const kGold = isNight ? '#b59238' : '#e8be42';
-      drawPixelRectWorld(ctx, cam, kx + 1.5 * wScale, ky - 14 * wScale, 3, 3.4, kTop, wScale);
-      drawPixelRectWorld(ctx, cam, kx + 4.2 * wScale, ky - 14 * wScale + kdy1, 3.2, 3.4, kTop, wScale);
-      drawPixelRectWorld(ctx, cam, kx + 7.2 * wScale, ky - 14 * wScale + kdy2, 2.8, 3.4, kTop, wScale);
-      drawPixelRectWorld(ctx, cam, kx + 1.5 * wScale, ky - 10.6 * wScale, 3, 2.6, kGold, wScale);
-      drawPixelRectWorld(ctx, cam, kx + 4.2 * wScale, ky - 10.6 * wScale + kdy1, 3.2, 2.6, kGold, wScale);
-      drawPixelRectWorld(ctx, cam, kx + 7.2 * wScale, ky - 10.6 * wScale + kdy2, 2.8, 2.6, kGold, wScale);
-      drawPixelRectWorld(ctx, cam, kx + 4.8 * wScale, ky - 13.4 * wScale + kdy1, 1.6, 3.8, whiteCross, wScale);
+      drawSwissOrMuniFlag(ctx, cam, fx + 13 * wScale, fy + 2 * wScale, wScale, wind, 2, isNight, 'kilchberg');
     }
   }
 
@@ -505,11 +732,14 @@ export function drawKilchbergDetails(
   fixedAnimTime = null,
   opts = {},
 ) {
-  const { scale, offsetX, offsetY, width: canvasW, height: canvasH } = cam;
+  const { scale, offsetX, offsetY, width: canvasW, height: canvasH, dpr = 1 } = cam;
   const isNight = mode === 'night';
   const isSunset = mode === 'sunset';
   const hasDynamicPeds = !!opts.hasDynamicPeds;
   const s = scale * wScale;
+  const effCssScale = s / Math.max(1, dpr);
+  const detailAlpha = Math.max(0, Math.min(1, (effCssScale - 1.1) / 0.3));
+  const plaqueAlpha = Math.max(0, Math.min(1, (effCssScale - 1.3) / 0.4));
   const toX = (u) => u * worldW * scale + offsetX;
   const toY = (v) => v * worldH * scale + offsetY;
   const vig = (animData && animData.ambient && animData.ambient.vignettes) || {};
@@ -533,53 +763,28 @@ export function drawKilchbergDetails(
   ctx.save();
 
   // =========================================================================
-  // 1. REFORMIERTE KIRCHE KILCHBERG — Live Swiss Tower Clock + Circling Swifts
+  // 1. REFORMIERTE KIRCHE KILCHBERG — Live Swiss Tower Clock, Wetterhahn & Memorials
   // =========================================================================
   const rkClock = (vig.reformierte_kirche && vig.reformierte_kirche.clock) || [0.29037, 0.31779];
   const rkSpire = (vig.reformierte_kirche && vig.reformierte_kirche.spire) || [0.29037, 0.30554];
-  if (boxInView(rkClock[0] - 0.006, rkSpire[1] - 0.008, rkClock[0] + 0.006, rkClock[1] + 0.007)) {
+  if (boxInView(rkClock[0] - 0.006, rkSpire[1] - 0.008, rkClock[0] + 0.007, rkClock[1] + 0.009)) {
     const cx = toX(rkClock[0]);
     const cy = toY(rkClock[1]);
-    let hr; let min; let sec;
-    if (fixedAnimTime !== null) {
-      hr = 14; min = 20 + Math.floor(fixedAnimTime / 60); sec = fixedAnimTime % 60;
-    } else {
-      const now = new Date();
-      const zh = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Zurich' }));
-      hr = zh.getHours(); min = zh.getMinutes(); sec = zh.getSeconds();
-    }
     const rDial = 6.2 * s;
     if (rDial >= 2.2) {
-      ctx.fillStyle = isNight ? '#1c2a42' : '#162030';
-      ctx.beginPath();
-      ctx.arc(cx, cy, rDial, 0, Math.PI * 2);
-      ctx.fill();
-      if (isNight) {
-        ctx.strokeStyle = 'rgba(255,220,120,0.45)';
-        ctx.lineWidth = Math.max(1.0, 1.1 * s);
-        ctx.stroke();
-      }
-      const minAng = ((min + sec / 60) / 60) * Math.PI * 2 - Math.PI * 0.5;
-      const hrAng = (((hr % 12) + min / 60) / 12) * Math.PI * 2 - Math.PI * 0.5;
-      ctx.strokeStyle = isNight ? '#ffe38a' : '#f4cf58';
-      ctx.lineCap = 'round';
-      ctx.lineWidth = Math.max(1.2, 1.5 * s);
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + Math.cos(hrAng) * rDial * 0.56, cy + Math.sin(hrAng) * rDial * 0.56);
-      ctx.stroke();
-      ctx.lineWidth = Math.max(1.0, 1.15 * s);
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + Math.cos(minAng) * rDial * 0.84, cy + Math.sin(minAng) * rDial * 0.84);
-      ctx.stroke();
-      ctx.fillStyle = '#fff5cc';
-      ctx.fillRect(Math.round(cx - 0.7 * s), Math.round(cy - 0.7 * s), Math.max(1.5, Math.round(1.4 * s)), Math.max(1.5, Math.round(1.4 * s)));
+      drawSwissClockDial(ctx, cx, cy, rDial, s, tSec, mode, 'church', detailAlpha);
     }
 
     if (!isNight) {
       const spX = toX(rkSpire[0]);
       const spY = toY(rkSpire[1]);
+      // Gilded Wetterhahn sun-glint sparkle at 2x-4x zoom
+      const wGlint = Math.pow(0.5 + 0.5 * Math.sin(tSec * 1.9 + 0.5), 5);
+      if (detailAlpha > 0.01 && wGlint > 0.20) {
+        ctx.fillStyle = `rgba(255, 248, 196, ${(0.85 * wGlint * detailAlpha).toFixed(2)})`;
+        const gs = Math.max(2, Math.round(2.4 * s));
+        ctx.fillRect(Math.round(spX - gs * 0.5), Math.round(spY - gs * 0.5), gs, gs);
+      }
       ctx.fillStyle = isSunset ? '#2e2230' : '#26303d';
       for (let b = 0; b < 4; b++) {
         const ang = tSec * (0.95 + b * 0.13) + b * 1.62;
@@ -591,6 +796,46 @@ export function drawKilchbergDetails(
         ctx.fillRect(Math.round(bx), Math.round(by), px, px);
         ctx.fillRect(Math.round(bx + px), Math.round(by + fl * px * 0.6), px * 2, px);
       }
+    }
+
+    // Stained-glass nave lancet glow + cemetery stone gate lanterns & Thomas Mann / C.F. Meyer memorial candles
+    if ((isSunset || isNight) && s >= 0.32) {
+      const lancetCols = [
+        { rgb: '251, 191, 36', hex: '#fde68a' },
+        { rgb: '248, 113, 113', hex: '#fecaca' },
+        { rgb: '96, 165, 250', hex: '#bfdbfe' },
+      ];
+      for (let li = 0; li < lancetCols.length; li++) {
+        const lx = toX(rkClock[0] + 0.0014 + li * 0.0011);
+        const ly = toY(rkClock[1] + 0.0030 + li * 0.0005);
+        const flick = 0.86 + 0.14 * Math.sin(tSec * 2.4 + li * 1.7);
+        const rw = Math.max(1.8, 2.2 * s);
+        const rh = Math.max(3.5, 4.8 * s);
+        const grad = ctx.createRadialGradient(lx, ly, 0.8 * s, lx, ly, 7.5 * s);
+        grad.addColorStop(0, `rgba(${lancetCols[li].rgb}, ${((isNight ? 0.44 : 0.26) * flick).toFixed(2)})`);
+        grad.addColorStop(1, `rgba(${lancetCols[li].rgb}, 0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(lx, ly, 7.5 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = lancetCols[li].hex;
+        ctx.fillRect(Math.round(lx - rw * 0.5), Math.round(ly - rh * 0.5), Math.round(rw), Math.round(rh));
+      }
+      if (s >= 0.35) {
+        drawLanternGlow(ctx, toX(rkClock[0] + 0.0036), toY(rkClock[1] + 0.0062), 8.0 * s, isNight);
+        drawLanternGlow(ctx, toX(rkClock[0] + 0.0050), toY(rkClock[1] + 0.0054), 8.0 * s, isNight);
+      }
+      if (plaqueAlpha > 0.01) {
+        const cFlick = 0.80 + 0.20 * Math.sin(tSec * 5.2);
+        drawLanternGlow(ctx, toX(0.2918), toY(0.3238), 3.8 * s * cFlick, isNight, '255, 207, 112', '#ffcf70', 0.85 * plaqueAlpha);
+        drawLanternGlow(ctx, toX(0.2925), toY(0.3228), 3.8 * s * cFlick, isNight, '255, 207, 112', '#ffcf70', 0.85 * plaqueAlpha);
+      }
+    }
+    if (plaqueAlpha > 0.01) {
+      const dfGl = 0.5 + 0.5 * Math.sin(tSec * 3.4);
+      ctx.fillStyle = `rgba(218, 246, 255, ${(0.65 * dfGl * plaqueAlpha).toFixed(2)})`;
+      const dfSz = Math.max(1.5, Math.round(1.6 * s));
+      ctx.fillRect(Math.round(toX(0.2932) - dfSz * 0.5), Math.round(toY(0.3188) - dfSz * 0.5), dfSz, dfSz);
     }
   }
 
@@ -641,6 +886,43 @@ export function drawKilchbergDetails(
       ctx.fill();
     }
 
+    // Curved rotunda facade uplights & entrance canopy bar (sunset/night)
+    if ((isSunset || isNight) && s >= 0.30) {
+      const uplightDu = [-0.0022, -0.0008, 0.0008, 0.0022];
+      for (let ui = 0; ui < uplightDu.length; ui++) {
+        const ux = toX(lindtAtrium[0] + uplightDu[ui]);
+        const uy = toY(lindtAtrium[1] + 0.0016);
+        const coneH = 9.5 * s;
+        const grad = ctx.createRadialGradient(ux, uy, 0.8 * s, ux, uy - coneH * 0.45, coneH);
+        grad.addColorStop(0, isNight ? 'rgba(255, 218, 126, 0.40)' : 'rgba(255, 210, 122, 0.24)');
+        grad.addColorStop(1, 'rgba(255, 210, 122, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(ux, uy - coneH * 0.35, 4.2 * s, coneH * 0.75, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const ex = toX(lindtPlaza[0]);
+      const ey = toY(lindtPlaza[1] - 0.0018);
+      const cw = Math.max(6, 12 * s);
+      const ch = Math.max(1.5, 2.0 * s);
+      ctx.fillStyle = isNight ? 'rgba(255, 232, 168, 0.82)' : 'rgba(255, 224, 152, 0.54)';
+      ctx.fillRect(Math.round(ex - cw * 0.5), Math.round(ey - ch * 0.5), Math.round(cw), Math.round(ch));
+    }
+
+    // Daytime/sunset rotunda mullion specular glass glints (strictly below DOP10 roof)
+    if (!isNight && s >= 0.35) {
+      for (let gi = 0; gi < 2; gi++) {
+        const pulse = Math.pow(0.5 + 0.5 * Math.sin(tSec * 1.1 + gi * 2.4), 4);
+        if (pulse < 0.15) continue;
+        const gx = toX(lindtAtrium[0] + (gi === 0 ? -0.0013 : 0.0013));
+        const gy = toY(lindtAtrium[1] + 0.0007);
+        const gw = Math.max(1.5, 1.8 * s);
+        const gh = Math.max(3, 5.2 * s);
+        ctx.fillStyle = `rgba(255, 250, 232, ${(0.55 * pulse).toFixed(2)})`;
+        ctx.fillRect(Math.round(gx - gw * 0.5), Math.round(gy - gh * 0.5), Math.round(gw), Math.round(gh));
+      }
+    }
+
     // Legacy static Lindt plaza walkers (suppressed when dynamic M4 pedestrians.js is active)
     if (!hasDynamicPeds) {
       const plazaOffsets = [
@@ -665,6 +947,58 @@ export function drawKilchbergDetails(
           drawMiniPerson(targetCtx, toX(wu), toY(wv), s, coat, pants, hairs[i % hairs.length], isNight, tSec * 7.5 + i * 1.9, w.bag, canvasW, canvasH);
         }, 2.0);
       }
+    }
+
+    // M3.5 Crisp 2x-4x zoom overlays on Lindt Home of Chocolate & Schokoladenplatz (strictly below DOP10 roof!)
+    if (detailAlpha > 0.01) {
+      // Golden whisk glint atop 9.3m chocolate fountain
+      const wGl = 0.65 + 0.35 * Math.sin(tSec * 4.6);
+      ctx.fillStyle = `rgba(255, 248, 200, ${(0.88 * wGl * detailAlpha).toFixed(2)})`;
+      ctx.fillRect(Math.round(fx - 1.1 * s), Math.round(fy - colH * 0.65), Math.max(2, Math.round(2.2 * s)), Math.max(2, Math.round(1.6 * s)));
+      // Curved golden capital facade lettering "LINDT HOME OF CHOCOLATE"
+      drawRotatedSignText(ctx, toX(0.3784), toY(0.6433), 'LINDT HOME OF CHOCOLATE', s, detailAlpha, -8 * Math.PI / 180, {
+        baseFontPx: 2.8,
+        fg: (isNight || isSunset) ? '#ffe89c' : '#f7d560',
+        glowCol: (isNight || isSunset) ? 'rgba(255, 214, 102, 0.65)' : null,
+      });
+      // Enea Schokoladenplatz Jura-stone benches & cream café parasols
+      const benches = [[0.3772, 0.6502], [0.3786, 0.6512], [0.3798, 0.6505]];
+      ctx.fillStyle = isNight ? '#7a7872' : '#d2ccc0';
+      for (let bi = 0; bi < benches.length; bi++) {
+        const bx = toX(benches[bi][0]);
+        const by = toY(benches[bi][1]);
+        ctx.fillRect(Math.round(bx - 1.8 * s), Math.round(by - 0.6 * s), Math.max(3, Math.round(3.6 * s)), Math.max(1.5, Math.round(1.2 * s)));
+      }
+      if (!isNight) {
+        const parasols = [[0.3796, 0.6494], [0.3806, 0.6502]];
+        for (let pi = 0; pi < parasols.length; pi++) {
+          const px = toX(parasols[pi][0]);
+          const py = toY(parasols[pi][1]);
+          ctx.fillStyle = 'rgba(24, 28, 32, 0.28)';
+          ctx.beginPath();
+          ctx.ellipse(px + 0.8 * s, py + 1.0 * s, 2.8 * s, 1.6 * s, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#efe9dc';
+          ctx.beginPath();
+          ctx.ellipse(px, py, 2.6 * s, 1.5 * s, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  // 2b. M3.5 LINDT & SPRÜNGLI HISTORIC FACTORY (id=1642) — Rooftop Illuminated Sign & Live Wall Clock
+  if (boxInView(0.364, 0.664, 0.382, 0.688)) {
+    if (isNight || isSunset) {
+      drawLanternGlow(ctx, toX(0.3738), toY(0.6710), 16.0 * s, isNight, '255, 214, 102', '#ffe89c', 0.45);
+    }
+    if (detailAlpha > 0.01) {
+      drawRotatedSignText(ctx, toX(0.3738), toY(0.6710), 'LINDT & SPRÜNGLI', s, detailAlpha, -22 * Math.PI / 180, {
+        baseFontPx: 3.6,
+        fg: (isNight || isSunset) ? '#ffe89c' : '#f2c94c',
+        glowCol: (isNight || isSunset) ? 'rgba(255, 214, 102, 0.78)' : null,
+      });
+      drawSwissClockDial(ctx, toX(0.3692), toY(0.6805), 3.4 * s, s, tSec, mode, 'civic', detailAlpha);
     }
   }
 
@@ -919,7 +1253,7 @@ export function drawKilchbergDetails(
   // =========================================================================
   const seebadPool = (vig.seebad_kilchberg && vig.seebad_kilchberg.pool) || [0.40901, 0.70921];
   const seebadJetty = (vig.seebad_kilchberg && vig.seebad_kilchberg.jetty) || [[0.4126, 0.71361], [0.4216, 0.7232]];
-  if (boxInView(seebadPool[0] - 0.010, seebadPool[1] - 0.012, seebadJetty[1][0] + 0.008, seebadJetty[1][1] + 0.010)) {
+  if (boxInView(0.390, 0.672, seebadJetty[1][0] + 0.008, seebadJetty[1][1] + 0.010)) {
     const poolX = toX(seebadPool[0]);
     const poolY = toY(seebadPool[1]);
     if (isNight) {
@@ -1002,6 +1336,56 @@ export function drawKilchbergDetails(
           ctx.fillRect(Math.round(lx - px * 0.5), Math.round(ly - px * 0.6), Math.max(2, Math.round(px * 1.2)), Math.max(2, Math.round(px * 1.1)));
         }
       }
+
+      // Diving splash/ripple rings off 3m Sprungturm jetty tip (isWaterUV-strict)
+      if (s >= 0.30) {
+        drawWaterLapRings(
+          ctx, depthMgr, toX, toY,
+          seebadJetty[1][0] + 0.0018, seebadJetty[1][1] + 0.0018,
+          s, tSec, isNight, isSunset, 0.15, 2,
+        );
+        const splashU = 0.4222;
+        const splashV = 0.7235;
+        if (!depthMgr.isWaterMaskReady() || depthMgr.isWaterUV(splashU, splashV)) {
+          drawWaterLapRings(ctx, depthMgr, toX, toY, splashU, splashV, s * 1.05, tSec, isNight, isSunset, 0.58, 3);
+        }
+      }
+    }
+
+    // M3.5 Crisp 2x-4x Seebad Kilchberg timber fascia sign + Chez Fritz awning & deck string-lights
+    if (detailAlpha > 0.01) {
+      drawSignPlaque(ctx, toX(0.3954), toY(0.7062), 'SEEBAD KILCHBERG', s, detailAlpha, {
+        bg: '#5c3d24',
+        border: '#d6c4a4',
+        fg: '#f8f4e8',
+        baseFontPx: 2.1,
+      });
+    }
+    if ((isSunset || isNight) && s >= 0.35) {
+      for (let cf = 0; cf < 4; cf++) {
+        drawLanternGlow(ctx, toX(0.4212 + cf * 0.0007), toY(0.6774 + cf * 0.0002), 4.2 * s, isNight, '255, 214, 134', '#fff0be', 0.82);
+      }
+    }
+    if (plaqueAlpha > 0.01) {
+      drawSignPlaque(ctx, toX(0.4222), toY(0.6762), 'CHEZ FRITZ', s, plaqueAlpha, {
+        bg: '#223a5c',
+        border: '#f0ece2',
+        fg: '#f8f4ea',
+        baseFontPx: 1.9,
+      });
+    }
+
+    // Schooren porcelain quarter / kiln courtyard warm lantern (sunset/night)
+    if ((isSunset || isNight) && s >= 0.30) {
+      drawLanternGlow(
+        ctx,
+        toX(seebadPool[0] - 0.0055),
+        toY(seebadPool[1] - 0.0068),
+        10.5 * s,
+        isNight,
+        '255, 198, 128',
+        '#ffe4b5',
+      );
     }
   }
 
@@ -1052,6 +1436,49 @@ export function drawKilchbergDetails(
           ctx.lineTo(x1 + hOff, y1 - 1.5 * s);
           ctx.stroke();
         }
+      }
+
+      const bpPier = (vig.bendlikon_pier && vig.bendlikon_pier.pier) || [0.5841, 0.57859];
+      const bpBeacon = (vig.bendlikon_pier && vig.bendlikon_pier.beacon) || [0.587, 0.57838];
+      // Pier festoon string lanterns swaying gently in the lake breeze (sunset/night)
+      if ((isSunset || isNight) && s >= 0.30) {
+        for (let bi = 0; bi < 5; bi++) {
+          const f = bi / 4;
+          const sway = Math.sin(wind.wavePhase * 0.6 + bi) * 0.4 * s;
+          const bx = toX(bpPier[0] + (bpBeacon[0] - bpPier[0]) * f) + sway;
+          const by = toY(bpPier[1] + (bpBeacon[1] - bpPier[1]) * f) - 2.2 * s;
+          drawLanternGlow(ctx, bx, by, 5.2 * s, isNight, '255, 214, 132', '#fff0b8', 0.88);
+        }
+      }
+      // Piling water-lap rings along pier lakeside edge (all modes, isWaterUV-strict)
+      if (s >= 0.32) {
+        for (let pk = 0; pk < 3; pk++) {
+          drawWaterLapRings(
+            ctx, depthMgr, toX, toY,
+            bpPier[0] + 0.0008 + pk * 0.0010, bpPier[1] + 0.0018 + pk * 0.0004,
+            s * 0.85, tSec, isNight, isSunset, pk * 0.31, 2,
+          );
+        }
+      }
+      // M3.5 Crisp 2x-4x ZSG "KILCHBERG ZH" pier fascia plaque, glowing timetable vitrine & night pier reflection
+      if (detailAlpha > 0.01) {
+        drawSignPlaque(ctx, toX(0.5844), toY(0.5776), 'KILCHBERG ZH', s, detailAlpha, {
+          bg: '#164896',
+          border: '#f8fafc',
+          fg: '#ffffff',
+          baseFontPx: 2.3,
+          glowCol: isNight ? 'rgba(96, 165, 250, 0.55)' : null,
+        });
+        if (isSunset || isNight) {
+          drawLanternGlow(ctx, toX(0.5836), toY(0.5789), 4.5 * s, isNight, '255, 240, 178', '#fffbeb', 0.88 * detailAlpha);
+        }
+      }
+      if ((isSunset || isNight) && (!depthMgr.isWaterMaskReady() || depthMgr.isWaterUV(bpPier[0] + 0.0016, bpPier[1] + 0.0024))) {
+        const rx = toX(bpPier[0] + 0.0016);
+        const ry = toY(bpPier[1] + 0.0024);
+        const sh = 0.72 + 0.28 * Math.sin(tSec * 2.9);
+        ctx.fillStyle = `rgba(255, 220, 140, ${((isNight ? 0.28 : 0.16) * sh).toFixed(2)})`;
+        ctx.fillRect(Math.round(rx - 1.4 * s), Math.round(ry - 1.0 * s), Math.max(2, Math.round(2.8 * s)), Math.max(4, Math.round(6.0 * s)));
       }
 
       // Legacy static pier passengers (suppressed when dynamic M4 pedestrians.js is active)
@@ -1448,7 +1875,7 @@ export function drawKilchbergDetails(
   }
 
   if (isSunset || isNight) {
-    const cfCenter = (vig.cf_meyer_haus && vig.cf_meyer_haus.center) || [0.48102, 0.42361];
+    const cfCenter = (vig.cf_meyer_haus && vig.cf_meyer_haus.center) || [0.35953, 0.44168];
     const terraces = [
       { u: 0.5818, v: 0.5768, r: 16 },
       { u: 0.4068, v: 0.7072, r: 15 },
@@ -1478,6 +1905,57 @@ export function drawKilchbergDetails(
     }
   }
 
+  // Dedicated C.F. Meyer-Haus (KGS-7525 Alte Landstrasse 170) study windows & garden lanterns
+  {
+    const cfVig = vig.cf_meyer_haus || {};
+    const cfCenter = cfVig.center || [0.35953, 0.44168];
+    const cfFountain = cfVig.fountain || [0.3574, 0.4461];
+    const cfPergola = cfVig.pergola || [0.35365, 0.43968];
+    const cfGate = cfVig.gate || [0.36007, 0.44773];
+    if (boxInView(cfPergola[0] - 0.005, cfPergola[1] - 0.005, cfGate[0] + 0.005, cfGate[1] + 0.005)) {
+      if ((isSunset || isNight) && s >= 0.30) {
+        const lampPulse = 0.90 + 0.10 * Math.sin(tSec * 1.8);
+        const wDu = [-0.0006, 0.0005];
+        for (let wi = 0; wi < wDu.length; wi++) {
+          const wx = toX(cfCenter[0] + wDu[wi]);
+          const wy = toY(cfCenter[1] - 0.0004);
+          const ww = Math.max(2, 2.8 * s);
+          const wh = Math.max(2.5, 3.4 * s);
+          ctx.fillStyle = `rgba(255, 222, 144, ${((isNight ? 0.84 : 0.56) * lampPulse).toFixed(2)})`;
+          ctx.fillRect(Math.round(wx - ww * 0.5), Math.round(wy - wh * 0.5), Math.round(ww), Math.round(wh));
+        }
+        // M3.5 Upper-floor Arbeitszimmer (poet's study) warm reading-lamp glow + mullion cross-bar
+        if (detailAlpha > 0.01) {
+          const sx = toX(cfCenter[0]);
+          const sy = toY(cfCenter[1] - 0.0006);
+          drawLanternGlow(ctx, sx, sy, 6.2 * s, isNight, '255, 226, 150', '#fff4cc', 0.86 * detailAlpha);
+          ctx.fillStyle = 'rgba(54, 42, 34, 0.65)';
+          ctx.fillRect(Math.round(sx - 0.35 * s), Math.round(sy - 1.5 * s), Math.max(1, Math.round(0.7 * s)), Math.max(2, Math.round(3.0 * s)));
+        }
+        drawLanternGlow(ctx, toX(cfGate[0]), toY(cfGate[1]), 7.5 * s, isNight);
+        drawLanternGlow(ctx, toX(cfPergola[0]), toY(cfPergola[1]), 8.5 * s, isNight, '255, 206, 132', '#ffe9b8');
+      }
+      if (plaqueAlpha > 0.01) {
+        drawSignPlaque(ctx, toX(cfGate[0]), toY(cfGate[1] - 0.0012), 'C. F. MEYER-HAUS · MUSEUM', s, plaqueAlpha, {
+          bg: '#362c24',
+          border: '#c8b074',
+          fg: '#e8d094',
+          baseFontPx: 1.85,
+        });
+      }
+      if (s >= 0.34) {
+        const gl = 0.5 + 0.5 * Math.sin(tSec * 3.1);
+        const fx = toX(cfFountain[0]);
+        const fy = toY(cfFountain[1]);
+        const sz = Math.max(1.5, 1.8 * s);
+        ctx.fillStyle = isNight
+          ? `rgba(186, 230, 253, ${(0.45 * gl).toFixed(2)})`
+          : `rgba(232, 248, 255, ${(0.62 * gl).toFixed(2)})`;
+        ctx.fillRect(Math.round(fx - sz * 0.5), Math.round(fy - sz * 0.5), Math.round(sz), Math.round(sz));
+      }
+    }
+  }
+
   // =========================================================================
   // 6. BAHNHOF KILCHBERG — Warm Platform Lamps (+ fallback commuters if no pedSim)
   // =========================================================================
@@ -1489,7 +1967,7 @@ export function drawKilchbergDetails(
   const platSw = bhVig.plat_sw || [0.55049, 0.50304];
   const platNe = bhVig.plat_ne || [0.56449, 0.49558];
   const bhFb = bhVig.footbridge || [[0.56281, 0.49120], [0.56679, 0.49719]];
-  if (boxInView(platSw[0] - 0.005, Math.min(platNe[1], bhFb[0][1]) - 0.004, Math.max(platNe[0], bhFb[1][0]) + 0.005, platSw[1] + 0.006)) {
+  if (boxInView(platSw[0] - 0.005, Math.min(platNe[1], bhFb[0][1]) - 0.006, Math.max(platNe[0], bhFb[1][0], 0.583) + 0.004, platSw[1] + 0.006)) {
     if (isNight || isSunset) {
       for (let l = 0; l < 5; l++) {
         const f = l / 4;
@@ -1506,6 +1984,72 @@ export function drawKilchbergDetails(
         ctx.beginPath();
         ctx.arc(lx, ly, gr, 0, Math.PI * 2);
         ctx.fill();
+      }
+      // Station house & Schulhaus Dorfstrasse warm evening windows
+      if (s >= 0.32) {
+        for (let swi = 0; swi < 3; swi++) {
+          const sx = toX(platSw[0] - 0.0012 + swi * 0.0012);
+          const sy = toY(platSw[1] - 0.0016 - swi * 0.0005);
+          const ww = Math.max(2, 2.6 * s);
+          const wh = Math.max(2.2, 3.0 * s);
+          ctx.fillStyle = isNight ? 'rgba(255, 224, 146, 0.78)' : 'rgba(255, 214, 140, 0.48)';
+          ctx.fillRect(Math.round(sx - ww * 0.5), Math.round(sy - wh * 0.5), Math.round(ww), Math.round(wh));
+        }
+      }
+    }
+
+    // Glowing blue SBB Perronanzeiger departure board & 1944 Hans Hilfiker SBB Bahnhofsuhr (strictly deterministic!)
+    if (s >= 0.35) {
+      const midU = 0.5 * (platSw[0] + platNe[0]);
+      const midV = 0.5 * (platSw[1] + platNe[1]) - 0.0006;
+      const bx = toX(midU);
+      const by = toY(midV);
+      if (inView(bx, by, 30)) {
+        const bw = Math.max(6, 8.2 * s);
+        const bh = Math.max(3, 3.8 * s);
+        if (isNight || isSunset) {
+          const bGrad = ctx.createRadialGradient(bx, by, 1 * s, bx, by, 9.5 * s);
+          bGrad.addColorStop(0, isNight ? 'rgba(59, 130, 246, 0.42)' : 'rgba(59, 130, 246, 0.22)');
+          bGrad.addColorStop(1, 'rgba(59, 130, 246, 0)');
+          ctx.fillStyle = bGrad;
+          ctx.beginPath();
+          ctx.arc(bx, by, 9.5 * s, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = isNight ? '#1d4ed8' : '#2563eb';
+        ctx.fillRect(Math.round(bx - bw * 0.5), Math.round(by - bh * 0.5), Math.round(bw), Math.round(bh));
+        if (detailAlpha > 0.01) {
+          const lineCode = (Math.floor(tSec / 18) % 2) === 0 ? 'S8  Zürich HB' : 'S24 Pfäffikon';
+          drawSignPlaque(ctx, bx, by, lineCode, s, detailAlpha, {
+            bg: '#0f2d7a',
+            border: '#93c5fd',
+            fg: '#f8fafc',
+            baseFontPx: 1.75,
+            padX: 1.2,
+            padY: 0.65,
+          });
+        } else {
+          ctx.fillStyle = '#f8fafc';
+          ctx.fillRect(Math.round(bx - bw * 0.38), Math.round(by - bh * 0.22), Math.max(2, Math.round(bw * 0.55)), Math.max(1, Math.round(0.8 * s)));
+          ctx.fillStyle = '#fde047';
+          ctx.fillRect(Math.round(bx - bw * 0.38), Math.round(by + bh * 0.06), Math.max(2, Math.round(bw * 0.40)), Math.max(1, Math.round(0.8 * s)));
+        }
+
+        // Mid-platform SBB Bahnhofsuhr with red lollipop second hand
+        const ckX = bx + bw * 0.68 + 1.8 * s;
+        const ckY = by;
+        drawSwissClockDial(ctx, ckX, ckY, 2.6 * s, s, tSec, mode, 'sbb', detailAlpha);
+      }
+      // M3.5 Iconic station-building SBB Bahnhofsuhr & crisp blue "Kilchberg" SBB platform nameboard at 2x-4x zoom
+      if (detailAlpha > 0.01) {
+        drawSwissClockDial(ctx, toX(0.5772), toY(0.4902), 3.6 * s, s, tSec, mode, 'sbb', detailAlpha);
+        drawSignPlaque(ctx, toX(0.5788), toY(0.4920), 'Kilchberg', s, detailAlpha, {
+          bg: '#003399',
+          border: '#f8fafc',
+          fg: '#ffffff',
+          baseFontPx: 2.3,
+          glowCol: isNight ? 'rgba(96, 165, 250, 0.5)' : null,
+        });
       }
     }
     if (!hasDynamicPeds) {
@@ -1580,6 +2124,555 @@ export function drawKilchbergDetails(
           ctx.fillStyle = 'rgba(255, 236, 176, 0.86)';
           ctx.fillRect(Math.round(sx - gSz * 0.5), Math.round(sy - 3.5 * s), gSz, gSz);
         }
+      }
+    }
+  }
+
+  // =========================================================================
+  // 8. EXPANDED KILCHBERG LANDMARK VIGNETTES (v9.0 — ST. ELISABETH + 9 NEW)
+  // =========================================================================
+
+  // 8a. Katholische Kirche St. Elisabeth — Campanile uplight, live clock & 8-bay Fra Roberto Pasotti stained glass
+  {
+    const seBelfry = (vig.st_elisabeth && vig.st_elisabeth.belfry) || [0.41165, 0.32675];
+    const seApex = (vig.st_elisabeth && vig.st_elisabeth.apex) || [0.41165, 0.32232];
+    if (boxInView(seBelfry[0] - 0.008, seApex[1] - 0.006, seBelfry[0] + 0.008, seBelfry[1] + 0.022)) {
+      if ((isSunset || isNight) && s >= 0.28) {
+        const bx = toX(seBelfry[0]);
+        const by = toY(seBelfry[1]);
+        const ax = toX(seApex[0]);
+        const ay = toY(seApex[1]);
+        const tGrad = ctx.createLinearGradient(bx, by + 6 * s, ax, ay - 4 * s);
+        tGrad.addColorStop(0, isNight ? 'rgba(255, 224, 152, 0.32)' : 'rgba(255, 214, 146, 0.18)');
+        tGrad.addColorStop(1, 'rgba(255, 224, 152, 0)');
+        ctx.fillStyle = tGrad;
+        ctx.fillRect(Math.round(bx - 3.6 * s), Math.round(ay - 3 * s), Math.max(4, Math.round(7.2 * s)), Math.max(8, Math.round(by - ay + 9 * s)));
+        drawLanternGlow(ctx, ax, ay, 4.2 * s, isNight, '255, 232, 160', '#fef08a', 0.82);
+
+        // M3.5 8-bay Fra Roberto Pasotti stained-glass palette (sapphire, ruby-rose, golden-amber, emerald)
+        const pasottiCols = [
+          { rgb: '54, 116, 216', hex: '#3674d8' },
+          { rgb: '216, 58, 66', hex: '#d83a42' },
+          { rgb: '248, 196, 74', hex: '#f8c44a' },
+          { rgb: '56, 158, 104', hex: '#389e68' },
+        ];
+        for (let k = 0; k < 8; k++) {
+          const pc = pasottiCols[k % 4];
+          const gx = toX(seBelfry[0] - 0.0052 + k * 0.00105);
+          const gy = toY(seBelfry[1] + 0.0048 + k * 0.00035);
+          const pulse = 0.86 + 0.14 * Math.sin(tSec * 2.1 + k * 1.1);
+          const gRad = 5.4 * s;
+          const gGrad = ctx.createRadialGradient(gx, gy, 0.4 * s, gx, gy, gRad);
+          gGrad.addColorStop(0, `rgba(${pc.rgb}, ${((isNight ? 0.44 : 0.26) * pulse).toFixed(2)})`);
+          gGrad.addColorStop(1, `rgba(${pc.rgb}, 0)`);
+          ctx.fillStyle = gGrad;
+          ctx.beginPath();
+          ctx.arc(gx, gy, gRad, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = pc.hex;
+          ctx.fillRect(Math.round(gx - 1.0 * s), Math.round(gy - 1.6 * s), Math.max(2, Math.round(2.0 * s)), Math.max(2, Math.round(3.2 * s)));
+        }
+      }
+      if (detailAlpha > 0.01) {
+        drawSwissClockDial(ctx, toX(seBelfry[0]), toY(seBelfry[1] + 0.0024), 3.4 * s, s, tSec, mode, 'church', detailAlpha);
+      }
+      if (plaqueAlpha > 0.01) {
+        drawSignPlaque(ctx, toX(0.4092), toY(0.3442), 'ST. ELISABETH', s, plaqueAlpha, {
+          bg: '#3a342c',
+          border: '#c8a860',
+          fg: '#f2e4c2',
+          baseFontPx: 1.9,
+        });
+      }
+    }
+  }
+
+  // 8b. Sanatorium Kilchberg — Conservatory glints, Haus A veranda sconces & Portier-Loge plaque
+  {
+    const srVig = vig.sanatorium_ridge || {};
+    const srPav = srVig.pavilion || [0.67423, 0.30878];
+    const srPerg = srVig.pergola || [0.66334, 0.30145];
+    const srGh = Array.isArray(srVig.greenhouses) && srVig.greenhouses.length >= 2
+      ? srVig.greenhouses
+      : [[0.6325, 0.28051], [0.62729, 0.29552]];
+    if (boxInView(0.620, 0.274, 0.682, 0.318) && s >= 0.28) {
+      if (!isNight) {
+        for (let gi = 0; gi < srGh.length; gi++) {
+          const pulse = Math.pow(0.5 + 0.5 * Math.sin(tSec * 1.4 + gi * 2.3), 3);
+          if (pulse < 0.14) continue;
+          const gx = toX(srGh[gi][0]);
+          const gy = toY(srGh[gi][1]);
+          const gw = Math.max(3, 5.4 * s);
+          const gh = Math.max(1.5, 2.2 * s);
+          ctx.fillStyle = `rgba(244, 252, 255, ${(0.58 * pulse).toFixed(2)})`;
+          ctx.fillRect(Math.round(gx - gw * 0.5), Math.round(gy - gh * 0.5), Math.round(gw), Math.round(gh));
+        }
+      }
+      if (isSunset || isNight) {
+        drawLanternGlow(ctx, toX(srPav[0]), toY(srPav[1]), 14.0 * s, isNight, '255, 218, 144', '#fff0c4');
+        // M3.5 4 Haus A east-facade veranda sconces
+        const sconceDu = [-0.0018, -0.0006, 0.0006, 0.0018];
+        for (let si = 0; si < sconceDu.length; si++) {
+          drawLanternGlow(ctx, toX(srPav[0] + sconceDu[si]), toY(srPav[1] + sconceDu[si] * 0.35), 4.8 * s, isNight);
+        }
+        drawLanternGlow(ctx, toX(srPerg[0] - 0.0014), toY(srPerg[1] + 0.0005), 7.5 * s, isNight);
+        drawLanternGlow(ctx, toX(srPerg[0] + 0.0014), toY(srPerg[1] - 0.0005), 7.5 * s, isNight);
+        for (let gi = 0; gi < srGh.length; gi++) {
+          drawLanternGlow(ctx, toX(srGh[gi][0]), toY(srGh[gi][1]), 9.0 * s, isNight, '255, 230, 168', '#fef3c7', 0.62);
+        }
+      }
+      if (plaqueAlpha > 0.01) {
+        drawSignPlaque(ctx, toX(0.6710), toY(0.3118), 'SANATORIUM KILCHBERG · 1867', s, plaqueAlpha, {
+          bg: '#1b3b2b',
+          border: '#e8c668',
+          fg: '#f3dd9a',
+          baseFontPx: 1.8,
+        });
+      }
+    }
+  }
+
+  // 8c. Moenchhof & Horn — Hafenbeiz glow, swaying catenary Lichterketten, parasols & tavern sign
+  {
+    const mhVig = vig.moenchhof_horn || {};
+    const mhBeiz = mhVig.hafenbeiz || [0.84576, 0.32859];
+    const mhTerr = mhVig.terrace || [0.84725, 0.33443];
+    const mhBh = mhVig.boathouse || [0.85059, 0.33823];
+    const mhWater = mhVig.water || [0.85493, 0.34786];
+    if (boxInView(0.838, 0.320, 0.864, 0.356) && s >= 0.28) {
+      if (isSunset || isNight) {
+        drawLanternGlow(ctx, toX(mhBeiz[0]), toY(mhBeiz[1]), 11.0 * s, isNight, '255, 204, 124', '#ffe8b2');
+        // M3.5 Swaying catenary string of 7 warm golden Lichterketten beer-garden lanterns
+        const x0 = toX(mhTerr[0] - 0.0022);
+        const y0 = toY(mhTerr[1] - 0.0008);
+        const x1 = toX(mhTerr[0] + 0.0022);
+        const y1 = toY(mhTerr[1] + 0.0006);
+        const sag = (1.8 + 0.35 * Math.sin(wind.wavePhase * 0.7)) * s;
+        ctx.strokeStyle = 'rgba(42, 36, 30, 0.65)';
+        ctx.lineWidth = Math.max(0.7, 0.45 * s);
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.quadraticCurveTo(0.5 * (x0 + x1), 0.5 * (y0 + y1) + sag * 2, x1, y1);
+        ctx.stroke();
+        for (let fi = 0; fi < 7; fi++) {
+          const ft = fi / 6;
+          const omt = 1 - ft;
+          const fx = omt * omt * x0 + 2 * omt * ft * (0.5 * (x0 + x1)) + ft * ft * x1;
+          const fy = omt * omt * y0 + 2 * omt * ft * (0.5 * (y0 + y1) + sag * 2) + ft * ft * y1;
+          drawLanternGlow(ctx, fx, fy, 4.6 * s, isNight, '255, 216, 122', '#ffd87a', 0.88);
+        }
+        drawLanternGlow(ctx, toX(mhBh[0]), toY(mhBh[1]), 7.8 * s, isNight);
+        if (!depthMgr.isWaterMaskReady() || depthMgr.isWaterUV(mhWater[0], mhWater[1])) {
+          const rx = toX(mhWater[0]);
+          const ry = toY(mhWater[1]);
+          const shimmer = 0.72 + 0.28 * Math.sin(tSec * 2.8);
+          ctx.fillStyle = `rgba(255, 216, 138, ${((isNight ? 0.28 : 0.16) * shimmer).toFixed(2)})`;
+          ctx.fillRect(Math.round(rx - 1.5 * s), Math.round(ry - 1.0 * s), Math.max(2, Math.round(3.0 * s)), Math.max(4, Math.round(6.5 * s)));
+        }
+      }
+      if (detailAlpha > 0.01) {
+        if (!isNight) {
+          for (let pi = 0; pi < 3; pi++) {
+            const px = toX(mhTerr[0] - 0.0012 + pi * 0.0012);
+            const py = toY(mhTerr[1] - 0.0003 + (pi % 2) * 0.0008);
+            ctx.fillStyle = '#f2ede0';
+            ctx.beginPath();
+            ctx.ellipse(px, py, 2.4 * s, 1.4 * s, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        drawSignPlaque(ctx, toX(0.8458), toY(0.3270), 'HAFENBEIZ · MÖNCHHOF', s, detailAlpha, {
+          bg: '#982824',
+          border: '#f8f4ea',
+          fg: '#f8f4ea',
+          baseFontPx: 1.9,
+        });
+      }
+      drawWaterLapRings(ctx, depthMgr, toX, toY, mhWater[0], mhWater[1], s, tSec, isNight, isSunset, 0.22, 2);
+    }
+  }
+
+  // 8d. Sulzergut Park — Neoclassical villa glow, boathouse lanterns, Steintreppe ripples & park sign
+  {
+    const sgVig = vig.sulzergut_park || {};
+    const sgVilla = sgVig.villa || [0.31801, 0.78779];
+    const sgBh = Array.isArray(sgVig.boathouses) && sgVig.boathouses.length >= 2
+      ? sgVig.boathouses
+      : [[0.32419, 0.78018], [0.32144, 0.77127]];
+    const sgWater = sgVig.water || [0.33532, 0.79519];
+    if (boxInView(0.310, 0.764, 0.344, 0.804) && s >= 0.28) {
+      if (isSunset || isNight) {
+        drawLanternGlow(ctx, toX(sgVilla[0]), toY(sgVilla[1]), 13.5 * s, isNight, '255, 214, 136', '#ffedb8');
+        for (let bi = 0; bi < sgBh.length; bi++) {
+          drawLanternGlow(ctx, toX(sgBh[bi][0]), toY(sgBh[bi][1]), 7.2 * s, isNight);
+          const refU = sgBh[bi][0] + 0.0014;
+          const refV = sgBh[bi][1] + 0.0022;
+          if (!depthMgr.isWaterMaskReady() || depthMgr.isWaterUV(refU, refV)) {
+            const shb = 0.72 + 0.28 * Math.sin(tSec * 2.4 + bi * 1.6);
+            ctx.fillStyle = `rgba(255, 214, 136, ${((isNight ? 0.24 : 0.14) * shb).toFixed(2)})`;
+            ctx.fillRect(Math.round(toX(refU) - 1.1 * s), Math.round(toY(refV) - 0.8 * s), Math.max(2, Math.round(2.2 * s)), Math.max(3, Math.round(5.0 * s)));
+          }
+        }
+        if (!depthMgr.isWaterMaskReady() || depthMgr.isWaterUV(sgWater[0], sgWater[1])) {
+          const rx = toX(sgWater[0]);
+          const ry = toY(sgWater[1]);
+          const sh = 0.74 + 0.26 * Math.sin(tSec * 2.5 + 1.1);
+          ctx.fillStyle = `rgba(255, 214, 136, ${((isNight ? 0.24 : 0.14) * sh).toFixed(2)})`;
+          ctx.fillRect(Math.round(rx - 1.4 * s), Math.round(ry - 1.0 * s), Math.max(2, Math.round(2.8 * s)), Math.max(4, Math.round(6.0 * s)));
+        }
+      }
+      drawWaterLapRings(ctx, depthMgr, toX, toY, sgWater[0], sgWater[1], s, tSec, isNight, isSunset, 0.48, 2);
+      drawWaterLapRings(ctx, depthMgr, toX, toY, 0.3278, 0.7860, s * 0.85, tSec, isNight, isSunset, 0.12, 2);
+      if (plaqueAlpha > 0.01) {
+        drawSignPlaque(ctx, toX(0.3208), toY(0.7852), 'SULZERGUT · SEEPARK', s, plaqueAlpha, {
+          bg: '#1f3d2e',
+          border: '#c4d4c6',
+          fg: '#edf4ee',
+          baseFontPx: 1.85,
+        });
+      }
+    }
+  }
+
+  // 8e. Gemeindehaus & Schulhaus Alte Landstrasse — Dual Swiss + Kilchberg flags, live clocks, shields & fascia
+  {
+    const ghVig = vig.gemeindehaus_alte_landstr || {};
+    const ghCenter = ghVig.center || [0.5628, 0.36729];
+    const ghCupola = ghVig.cupola || [0.5628, 0.36138];
+    const ghFlagSwiss = ghVig.flag_swiss || [0.55929, 0.3772];
+    const ghFlagMuni = ghVig.flag_muni || [0.56104, 0.37876];
+    const ghSchul = ghVig.schulhaus || [0.53697, 0.37511];
+    if (boxInView(0.530, 0.355, 0.570, 0.386)) {
+      // Wind-coherent dual flags (all modes, authentic azure/4-petal/gold Kilchberg flag!)
+      drawSwissOrMuniFlag(ctx, cam, ghFlagSwiss[0] * worldW, ghFlagSwiss[1] * worldH, wScale, wind, 1, isNight, 'swiss');
+      drawSwissOrMuniFlag(ctx, cam, ghFlagMuni[0] * worldW, ghFlagMuni[1] * worldH, wScale, wind, 3, isNight, 'kilchberg');
+
+      if ((isSunset || isNight) && s >= 0.28) {
+        drawLanternGlow(ctx, toX(ghCenter[0]), toY(ghCenter[1]), 13.0 * s, isNight, '255, 222, 148', '#fff2c6');
+        drawLanternGlow(ctx, toX(ghCupola[0]), toY(ghCupola[1]), 6.8 * s, isNight, '255, 232, 168', '#fef08a', 0.92);
+        for (let ci = 0; ci < 3; ci++) {
+          const sx = toX(ghSchul[0] - 0.0014 + ci * 0.0014);
+          const sy = toY(ghSchul[1] + (ci - 1) * 0.0004);
+          const ww = Math.max(2, 2.8 * s);
+          const wh = Math.max(2.2, 3.0 * s);
+          ctx.fillStyle = isNight ? 'rgba(255, 224, 146, 0.78)' : 'rgba(255, 214, 140, 0.48)';
+          ctx.fillRect(Math.round(sx - ww * 0.5), Math.round(sy - wh * 0.5), Math.round(ww), Math.round(wh));
+        }
+      }
+      // M3.5 Crisp 2x-4x clocks on BOTH Gemeindehaus (110) & Schulhaus (120) + "GEMEINDEHAUS" fascia & paired shields
+      if (detailAlpha > 0.01) {
+        drawSwissClockDial(ctx, toX(ghCupola[0]), toY(ghCupola[1] + 0.0022), 3.0 * s, s, tSec, mode, 'civic', detailAlpha);
+        drawSwissClockDial(ctx, toX(ghSchul[0]), toY(ghSchul[1] - 0.0022), 3.0 * s, s, tSec, mode, 'civic', detailAlpha);
+        const gx = toX(0.5628);
+        const gy = toY(0.3660);
+        drawSignPlaque(ctx, gx, gy, 'GEMEINDEHAUS', s, detailAlpha, {
+          bg: '#3a3630',
+          border: '#d6cbb8',
+          fg: '#f5f1e6',
+          baseFontPx: 2.0,
+        });
+        // Miniature Swiss red/white + Kilchberg azure/4-petal/gold heraldic shields above fascia
+        const shW = Math.max(3, Math.round(2.6 * s));
+        const shH = Math.max(3.5, Math.round(3.1 * s));
+        const shY = Math.round(gy - 3.6 * s);
+        ctx.save();
+        ctx.globalAlpha *= detailAlpha;
+        // Left: Swiss shield
+        const sx0 = Math.round(gx - shW * 1.45);
+        ctx.fillStyle = '#d02626';
+        ctx.fillRect(sx0, shY, shW, shH);
+        ctx.fillStyle = '#f6f6f2';
+        ctx.fillRect(sx0 + Math.round(shW * 0.38), shY + Math.round(shH * 0.18), Math.max(1, Math.round(shW * 0.24)), Math.max(1, Math.round(shH * 0.64)));
+        ctx.fillRect(sx0 + Math.round(shW * 0.18), shY + Math.round(shH * 0.38), Math.max(1, Math.round(shW * 0.64)), Math.max(1, Math.round(shH * 0.24)));
+        // Right: Kilchberg azure shield with 4-petal white flower & gold center
+        const kx0 = Math.round(gx + shW * 0.45);
+        ctx.fillStyle = '#1a5fb4';
+        ctx.fillRect(kx0, shY, shW, shH);
+        ctx.fillStyle = '#f4f6f8';
+        ctx.fillRect(kx0 + Math.round(shW * 0.38), shY + Math.round(shH * 0.18), Math.max(1, Math.round(shW * 0.24)), Math.max(1, Math.round(shH * 0.64)));
+        ctx.fillRect(kx0 + Math.round(shW * 0.18), shY + Math.round(shH * 0.38), Math.max(1, Math.round(shW * 0.64)), Math.max(1, Math.round(shH * 0.24)));
+        ctx.fillStyle = '#f2c430';
+        ctx.fillRect(kx0 + Math.round(shW * 0.38), shY + Math.round(shH * 0.38), Math.max(1, Math.round(shW * 0.24)), Math.max(1, Math.round(shH * 0.24)));
+        ctx.restore();
+      }
+    }
+  }
+
+  // 8f. Stockengut Ridge Farm — Horned Grauvieh cattle, Hofladen striped awning & signage
+  {
+    const sfVig = vig.stockengut_farm || {};
+    const sfBarn = sfVig.barn || [0.51413, 0.20132];
+    const sfHof = sfVig.hofladen || [0.51102, 0.2083];
+    const sfSilos = sfVig.silos || [0.49311, 0.19621];
+    const sfGh = sfVig.greenhouse || [0.50479, 0.22103];
+    if (boxInView(0.486, 0.190, 0.522, 0.228) && s >= 0.28) {
+      if (!isNight) {
+        const gPulse = Math.pow(0.5 + 0.5 * Math.sin(tSec * 1.3 + 0.8), 3);
+        if (gPulse >= 0.14) {
+          const gx = toX(sfGh[0]);
+          const gy = toY(sfGh[1]);
+          ctx.fillStyle = `rgba(244, 252, 255, ${(0.54 * gPulse).toFixed(2)})`;
+          ctx.fillRect(Math.round(gx - 2.4 * s), Math.round(gy - 1.0 * s), Math.max(3, Math.round(4.8 * s)), Math.max(1.5, Math.round(2.0 * s)));
+        }
+        const sPulse = Math.pow(0.5 + 0.5 * Math.sin(tSec * 0.9 + 2.1), 4);
+        if (sPulse >= 0.18) {
+          const sx = toX(sfSilos[0]);
+          const sy = toY(sfSilos[1]);
+          ctx.fillStyle = `rgba(248, 250, 252, ${(0.52 * sPulse).toFixed(2)})`;
+          ctx.fillRect(Math.round(sx - 1.2 * s), Math.round(sy - 3.2 * s), Math.max(1.5, Math.round(1.6 * s)), Math.max(3, Math.round(4.4 * s)));
+        }
+        // M3.5 5 deterministic grazing horned Swiss Grauvieh cattle (silvery-taupe) in upland meadow
+        if (s >= 0.45) {
+          const cowOffsets = [
+            [-0.0082, -0.0034], [-0.0068, -0.0012], [-0.0054, 0.0014], [-0.0040, -0.0026], [-0.0032, 0.0008],
+          ];
+          for (let ci = 0; ci < cowOffsets.length; ci++) {
+            const cx = toX(sfBarn[0] + cowOffsets[ci][0]);
+            const cy = toY(sfBarn[1] + cowOffsets[ci][1]);
+            const bob = Math.sin(tSec * 0.7 + ci * 1.9) * 0.45 * s;
+            const bw = Math.max(3, Math.round(3.6 * s));
+            const bh = Math.max(2, Math.round(1.9 * s));
+            ctx.fillStyle = '#6e6962';
+            ctx.fillRect(Math.round(cx - bw * 0.4), Math.round(cy + bh * 0.3), Math.max(1, Math.round(bw * 0.8)), Math.max(1, Math.round(bh * 0.55)));
+            ctx.fillStyle = '#9b968e';
+            ctx.fillRect(Math.round(cx - bw * 0.5), Math.round(cy - bh * 0.5), bw, bh);
+            ctx.fillStyle = '#3c3834';
+            ctx.fillRect(Math.round(cx + bw * 0.45), Math.round(cy - bh * 0.25 + bob), Math.max(1.5, Math.round(1.2 * s)), Math.max(1.5, Math.round(1.2 * s)));
+            ctx.fillStyle = '#e8e2d4';
+            ctx.fillRect(Math.round(cx + bw * 0.5), Math.round(cy - bh * 0.6 + bob), Math.max(1.5, Math.round(1.1 * s)), Math.max(1, Math.round(0.6 * s)));
+          }
+        }
+      }
+      if (isSunset || isNight) {
+        drawLanternGlow(ctx, toX(sfHof[0]), toY(sfHof[1]), 9.5 * s, isNight, '255, 210, 134', '#ffebb8');
+        drawLanternGlow(ctx, toX(sfBarn[0]), toY(sfBarn[1]), 10.5 * s, isNight, '255, 198, 118', '#ffe4ad', 0.72);
+        drawLanternGlow(ctx, toX(sfGh[0]), toY(sfGh[1]), 7.8 * s, isNight, '255, 228, 162', '#fef3c7', 0.55);
+      }
+      if (detailAlpha > 0.01) {
+        const hx = toX(sfHof[0]);
+        const hy = toY(sfHof[1]);
+        const aw = Math.max(5, Math.round(6.4 * s));
+        const ah = Math.max(2, Math.round(2.0 * s));
+        for (let si = 0; si < 4; si++) {
+          ctx.fillStyle = (si % 2) === 0 ? '#2d5e3e' : '#f5efe2';
+          ctx.fillRect(Math.round(hx - aw * 0.5 + (si * aw) / 4), Math.round(hy - ah * 1.4), Math.max(1, Math.ceil(aw / 4)), ah);
+        }
+        drawSignPlaque(ctx, hx, hy - 3.6 * s, 'HOFLADEN', s, detailAlpha, {
+          bg: '#5c3d24',
+          border: '#e6d8be',
+          fg: '#f5efe2',
+          baseFontPx: 1.9,
+        });
+      }
+    }
+  }
+
+  // 8g. Hallenbad & Sportanlage Hochweid — Aquamarine caustic shimmer, "HALLENBAD" sign & track runners
+  {
+    const hhVig = vig.hallenbad_hochweid || {};
+    const hhPool = hhVig.pool_hall || [0.30529, 0.21504];
+    const hhEntry = hhVig.entry || [0.31328, 0.2032];
+    const hhTrack = hhVig.track || [0.32028, 0.23275];
+    if (boxInView(0.298, 0.196, 0.328, 0.240) && s >= 0.28) {
+      // Signature aquamarine pool-hall clerestory glass strip (all modes)
+      const px = toX(hhPool[0]);
+      const py = toY(hhPool[1]);
+      const aqPulse = 0.84 + 0.16 * Math.sin(tSec * 2.6);
+      const pw = Math.max(7, 13.5 * s);
+      const ph = Math.max(2, 3.0 * s);
+      if (isSunset || isNight) {
+        const aRad = 18 * s;
+        const aGrad = ctx.createRadialGradient(px, py, 1.5 * s, px, py, aRad);
+        aGrad.addColorStop(0, `rgba(56, 224, 232, ${((isNight ? 0.44 : 0.26) * aqPulse).toFixed(2)})`);
+        aGrad.addColorStop(1, 'rgba(32, 180, 200, 0)');
+        ctx.fillStyle = aGrad;
+        ctx.beginPath();
+        ctx.ellipse(px, py, aRad * 1.25, aRad * 0.72, -0.18, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = isNight
+        ? `rgba(103, 240, 246, ${(0.86 * aqPulse).toFixed(2)})`
+        : (isSunset ? `rgba(80, 232, 238, ${(0.64 * aqPulse).toFixed(2)})` : `rgba(56, 224, 232, ${(0.34 * aqPulse).toFixed(2)})`);
+      ctx.fillRect(Math.round(px - pw * 0.5), Math.round(py - ph * 0.5), Math.round(pw), Math.round(ph));
+      // M3.5 4 animated aquamarine water-caustic shimmer bands drifting across glass
+      for (let ci = 0; ci < 4; ci++) {
+        const drift = (((tSec * 0.24 + ci * 0.25) % 1) + 1) % 1;
+        const cx = px - pw * 0.42 + drift * pw * 0.84;
+        const cAlpha = Math.sin(drift * Math.PI) * (isNight ? 0.72 : 0.52);
+        ctx.fillStyle = `rgba(165, 248, 255, ${cAlpha.toFixed(2)})`;
+        ctx.fillRect(Math.round(cx), Math.round(py - ph * 0.38), Math.max(1.5, Math.round(1.4 * s)), Math.max(1.5, Math.round(ph * 0.76)));
+      }
+
+      if (isSunset || isNight) {
+        drawLanternGlow(ctx, toX(hhEntry[0]), toY(hhEntry[1]), 9.0 * s, isNight);
+      }
+      if (detailAlpha > 0.01) {
+        drawSignPlaque(ctx, toX(hhEntry[0]), toY(hhEntry[1] - 0.0012), 'HALLENBAD', s, detailAlpha, {
+          bg: '#2b343c',
+          border: '#7dd3fc',
+          fg: '#e8f6fa',
+          baseFontPx: 2.0,
+          glowCol: isNight ? 'rgba(103, 232, 249, 0.55)' : null,
+        });
+      }
+
+      // 2 deterministic runners jogging an elliptical loop on the red-ochre track (day/sunset)
+      if (!isNight && s >= 0.32) {
+        for (let r = 0; r < 2; r++) {
+          const ang = tSec * (0.48 + r * 0.08) + r * Math.PI;
+          const ru = hhTrack[0] + Math.cos(ang) * 0.0022;
+          const rv = hhTrack[1] + Math.sin(ang) * 0.0014;
+          drawMiniPerson(
+            ctx,
+            toX(ru), toY(rv), s * 0.84,
+            shadeHex(r === 0 ? '#ef4444' : '#38bdf8', 1.0, mode),
+            '#1e293b',
+            hairs[r],
+            false,
+            tSec * 10.5 + r * 2.1,
+            null,
+            canvasW,
+            canvasH,
+          );
+        }
+      }
+    }
+  }
+
+  // 8h. Broelberggut & Tempelchen — Manor windows, Tempelchen interior lantern & arched French-door light spills
+  {
+    const bbVig = vig.broelberggut_estate || {};
+    const bbManor = bbVig.manor || [0.30114, 0.48014];
+    const bbTemp = bbVig.tempelchen || [0.30338, 0.46359];
+    const bbTerr = bbVig.terrace || [0.30156, 0.48707];
+    if (boxInView(0.294, 0.456, 0.312, 0.494) && s >= 0.28) {
+      if (!isNight) {
+        const cPulse = Math.pow(0.5 + 0.5 * Math.sin(tSec * 1.15 + 1.5), 4);
+        if (cPulse >= 0.16) {
+          const tx = toX(bbTemp[0]);
+          const ty = toY(bbTemp[1]);
+          ctx.fillStyle = `rgba(255, 252, 240, ${(0.55 * cPulse).toFixed(2)})`;
+          ctx.fillRect(Math.round(tx - 1.4 * s), Math.round(ty - 1.4 * s), Math.max(2, Math.round(2.8 * s)), Math.max(2, Math.round(2.8 * s)));
+        }
+      }
+      if (isSunset || isNight) {
+        drawLanternGlow(ctx, toX(bbManor[0]), toY(bbManor[1]), 12.0 * s, isNight, '255, 218, 144', '#fff0c2');
+        const tPulse = 0.88 + 0.12 * Math.sin(tSec * 2.2);
+        drawLanternGlow(ctx, toX(bbTemp[0]), toY(bbTemp[1]), 11.5 * s * tPulse, isNight, '255, 217, 132', '#ffd984', 0.90);
+        // M3.5 3 subtle arched French-door light spills radiating onto the garden path
+        if (detailAlpha > 0.01) {
+          const tx = toX(bbTemp[0]);
+          const ty = toY(bbTemp[1]);
+          ctx.fillStyle = `rgba(255, 217, 132, ${((isNight ? 0.32 : 0.18) * detailAlpha).toFixed(2)})`;
+          for (let sp = -1; sp <= 1; sp++) {
+            ctx.beginPath();
+            ctx.ellipse(tx + sp * 2.4 * s, ty + 3.2 * s, 1.8 * s, 3.0 * s, sp * 0.25, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        drawLanternGlow(ctx, toX(bbTerr[0] - 0.0010), toY(bbTerr[1]), 7.0 * s, isNight);
+        drawLanternGlow(ctx, toX(bbTerr[0] + 0.0010), toY(bbTerr[1]), 7.0 * s, isNight);
+      }
+    }
+  }
+
+  // 8i. Villa Spinnergut & TC Kilchberg — Conservatory glow, "Matchball" terrace parasols, signage & court LEDs
+  {
+    const vsVig = vig.villa_spinnergut_tc || {};
+    const vsVilla = vsVig.villa || [0.15607, 0.3854];
+    const vsPav = vsVig.pavilion || [0.14832, 0.38804];
+    const vsClub = vsVig.clubhouse || [0.17162, 0.35526];
+    if (boxInView(0.142, 0.348, 0.178, 0.396) && s >= 0.28) {
+      if (!isNight) {
+        const vPulse = Math.pow(0.5 + 0.5 * Math.sin(tSec * 1.05 + 0.4), 4);
+        if (vPulse >= 0.18) {
+          const vx = toX(vsVilla[0]);
+          const vy = toY(vsVilla[1]);
+          ctx.fillStyle = `rgba(255, 250, 234, ${(0.52 * vPulse).toFixed(2)})`;
+          ctx.fillRect(Math.round(vx - 1.8 * s), Math.round(vy - 1.2 * s), Math.max(2, Math.round(3.6 * s)), Math.max(1.5, Math.round(2.4 * s)));
+        }
+        // M3.5 2 TC "Matchball" sun-terrace parasols
+        if (detailAlpha > 0.01) {
+          const pCols = ['#f4efe2', '#2e6e4e'];
+          for (let pi = 0; pi < 2; pi++) {
+            ctx.fillStyle = pCols[pi];
+            ctx.beginPath();
+            ctx.ellipse(toX(vsClub[0] - 0.0008 + pi * 0.0016), toY(vsClub[1] + 0.0012), 2.3 * s, 1.4 * s, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+      if (isSunset || isNight) {
+        drawLanternGlow(ctx, toX(vsVilla[0]), toY(vsVilla[1]), 13.0 * s, isNight, '255, 214, 138', '#ffedb8');
+        // M3.5 3-bay lake-facing conservatory glow on Villa Spinnergut
+        for (let cb = -1; cb <= 1; cb++) {
+          ctx.fillStyle = isNight ? 'rgba(255, 216, 136, 0.80)' : 'rgba(255, 216, 136, 0.48)';
+          ctx.fillRect(Math.round(toX(vsVilla[0] + cb * 0.0005) - 0.9 * s), Math.round(toY(vsVilla[1] + 0.0006) - 1.4 * s), Math.max(1.5, Math.round(1.8 * s)), Math.max(2, Math.round(2.8 * s)));
+        }
+        drawLanternGlow(ctx, toX(vsPav[0]), toY(vsPav[1]), 8.0 * s, isNight);
+        drawLanternGlow(ctx, toX(vsClub[0]), toY(vsClub[1]), 10.5 * s, isNight, '255, 224, 148', '#fff0c4');
+        // Subtle evening LED floodlight pools on 2 all-weather TC clay courts
+        if (isNight && Array.isArray(tcSrc)) {
+          for (let ci = 0; ci < Math.min(2, tcSrc.length); ci++) {
+            drawLanternGlow(ctx, toX(tcSrc[ci].c[0]), toY(tcSrc[ci].c[1]), 16.0 * s, true, '248, 250, 252', '#ffffff', 0.35);
+          }
+        }
+      }
+      if (detailAlpha > 0.01) {
+        drawSignPlaque(ctx, toX(vsClub[0]), toY(vsClub[1] - 0.0016), 'TC KILCHBERG · MATCHBALL', s, detailAlpha, {
+          bg: '#523824',
+          border: '#e8dec8',
+          fg: '#f5efe2',
+          baseFontPx: 1.8,
+        });
+      }
+    }
+  }
+
+  // 8j. Morfanlage & Lakeside Park — Promenade benches, boathouse lanterns & weeping-willow water ripples
+  {
+    const maVig = vig.morfanlage_promenade || {};
+    const maProm = maVig.promenade || [0.66234, 0.49478];
+    const maBh = Array.isArray(maVig.boathouses) && maVig.boathouses.length >= 2
+      ? maVig.boathouses
+      : [[0.67922, 0.48396], [0.67668, 0.48457]];
+    const maWater = maVig.water || [0.66879, 0.50459];
+    if (boxInView(0.654, 0.478, 0.686, 0.512) && s >= 0.28) {
+      if (isSunset || isNight) {
+        const bollardOff = [[-0.0024, 0.0012], [0, 0], [0.0024, -0.0012]];
+        for (let bi = 0; bi < bollardOff.length; bi++) {
+          drawLanternGlow(
+            ctx,
+            toX(maProm[0] + bollardOff[bi][0]),
+            toY(maProm[1] + bollardOff[bi][1]),
+            7.2 * s,
+            isNight,
+          );
+        }
+        for (let hi = 0; hi < maBh.length; hi++) {
+          drawLanternGlow(ctx, toX(maBh[hi][0]), toY(maBh[hi][1]), 7.6 * s, isNight);
+        }
+        if (!depthMgr.isWaterMaskReady() || depthMgr.isWaterUV(maWater[0], maWater[1])) {
+          const rx = toX(maWater[0]);
+          const ry = toY(maWater[1]);
+          const sh = 0.72 + 0.28 * Math.sin(tSec * 2.6 + 2.0);
+          ctx.fillStyle = `rgba(255, 218, 140, ${((isNight ? 0.26 : 0.14) * sh).toFixed(2)})`;
+          ctx.fillRect(Math.round(rx - 1.4 * s), Math.round(ry - 1.0 * s), Math.max(2, Math.round(2.8 * s)), Math.max(4, Math.round(6.0 * s)));
+        }
+      }
+      if (detailAlpha > 0.01) {
+        ctx.fillStyle = isNight ? '#5c422c' : '#9c7046';
+        for (let bni = 0; bni < 2; bni++) {
+          const bx = toX(maProm[0] - 0.0012 + bni * 0.0024);
+          const by = toY(maProm[1] + 0.0006 - bni * 0.0012);
+          ctx.fillRect(Math.round(bx - 1.6 * s), Math.round(by - 0.5 * s), Math.max(3, Math.round(3.2 * s)), Math.max(1.5, Math.round(1.0 * s)));
+        }
+      }
+      drawWaterLapRings(ctx, depthMgr, toX, toY, maWater[0], maWater[1], s, tSec, isNight, isSunset, 0.67, 2);
+      // M3.5 3 isWaterUV-strict weeping-willow leaf-tip ripple rings along the shady shoreline
+      const willowPts = [[0.6648, 0.5024], [0.6688, 0.5046], [0.6732, 0.4998]];
+      for (let wi = 0; wi < willowPts.length; wi++) {
+        drawWaterLapRings(ctx, depthMgr, toX, toY, willowPts[wi][0], willowPts[wi][1], s * 0.72, tSec, isNight, isSunset, 0.19 + wi * 0.29, 2);
       }
     }
   }

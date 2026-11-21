@@ -1,5 +1,5 @@
 /**
- * Tier 1 (Node CDP): FA3 Interactive Web App Feature Coverage (12 tests)
+ * Tier 1 (Node CDP): FA3 Interactive Web App Feature Coverage (14 tests)
  *                  + FA4 Live Spatial Audio Feature Coverage (3 tests).
  */
 
@@ -136,9 +136,9 @@ async function runTests(harness, test) {
       assert(tilesAt2x >= 1, `Expected HTTP 200 tile streaming at 2x zoom, observed ${tilesAt2x} tiles`);
     });
 
-    await test('T1.FA3.04', '10 landmarks render; clicking .lm-item flies & activates state', async () => {
+    await test('T1.FA3.04', 'Landmarks render (>=10); clicking .lm-item flies & activates state', async () => {
       const count = await tab.evaluate(`document.querySelectorAll('#landmark-list .lm-item').length`);
-      assert(count === 10, `Expected 10 landmarks in #landmark-list, got ${count}`);
+      assert(count >= 10, `Expected >= 10 landmarks in #landmark-list, got ${count}`);
 
       const before = await tab.captureCanvasSample();
       await tab.clickSelector('#landmark-list .lm-item:nth-child(2)');
@@ -488,6 +488,80 @@ async function runTests(harness, test) {
       assert(tab.localHttpErrors.length === 0, `Local HTTP errors (ES module 404s): ${tab.localHttpErrors.map((e) => `${e.status} ${e.url}`).join('; ')}`);
       assert(tab.localLoadFailures.length === 0, `Local load failures: ${tab.localLoadFailures.map((e) => `${e.errorText} ${e.url}`).join('; ')}`);
       assert(tab.exceptions.length === 0, `Runtime JS exceptions: ${tab.exceptions.join('; ')}`);
+    });
+
+    await test('T1.FA3.14', 'v9.0 sidebar renders >=16 stops with dynamic count tag & >=10 detail plates (07..10 modal opens cleanly)', async () => {
+      const snap = await tab.evaluate(`(() => {
+        const lmCount = document.querySelectorAll('#landmark-list .lm-item').length;
+        const stopTag = (document.querySelector('.tour-section .mono-tag')?.textContent || '').trim();
+        const cropCount = document.querySelectorAll('#crop-gallery .crop-thumb').length;
+        const cropSrcs = Array.from(document.querySelectorAll('#crop-gallery .crop-thumb img')).map(
+          (img) => img.getAttribute('src') || '',
+        );
+        return { lmCount, stopTag, cropCount, cropSrcs };
+      })()`);
+
+      // Preconditions first: fail cleanly on v8.0 with AssertionError (zero selector/timeout errors)
+      assert(snap.lmCount >= 16, `Expected >= 16 landmarks in #landmark-list (v9.0), got ${snap.lmCount}`);
+      assert(
+        new RegExp(`^${snap.lmCount}\\s+STOPS$`, 'i').test(snap.stopTag),
+        `Expected dynamic stop-count tag '${snap.lmCount} STOPS', got '${snap.stopTag}'`,
+      );
+      assert(snap.cropCount >= 10, `Expected >= 10 detail plates in #crop-gallery (v9.0), got ${snap.cropCount}`);
+
+      const expectedPlates = [
+        '01_lindt_home_of_chocolate.webp',
+        '02_reformierte_kirche_dorf.webp',
+        '03_bendlikon_harbor_pier.webp',
+        '04_bahnhof_kilchberg_weinberg.webp',
+        '05_schooren_seebad.webp',
+        '06_sanatorium_ridge.webp',
+        '07_st_elisabeth_church.webp',
+        '08_cf_meyer_haus.webp',
+        '09_gemeindehaus_alte_landstrasse.webp',
+        '10_stockengut_ridge_farm.webp',
+      ];
+      for (let i = 0; i < expectedPlates.length; i++) {
+        const src = snap.cropSrcs[i] || '';
+        assert(
+          src.includes(expectedPlates[i]),
+          `Plate index ${i} expected '${expectedPlates[i]}', got '${src}'`,
+        );
+      }
+
+      const prevExc = tab.exceptions.length;
+      const prevErr = tab.consoleErrors.length;
+      const prevHttp = tab.localHttpErrors.length;
+      const prevLoad = tab.localLoadFailures.length;
+
+      await tab.clickSelector('#crop-gallery .crop-thumb:nth-child(7)');
+      const modalReady = await tab.waitFor(
+        `(() => {
+          const ov = document.getElementById('modal-overlay');
+          const cv = document.getElementById('modal-canvas');
+          if (!ov || ov.classList.contains('hidden') || !cv || cv.width < 10 || cv.height < 10) return false;
+          const ctx = cv.getContext('2d');
+          const p = ctx.getImageData(Math.floor(cv.width / 2), Math.floor(cv.height / 2), 1, 1).data;
+          return (p[0] + p[1] + p[2]) > 0;
+        })()`,
+        { timeoutMs: 3000, intervalMs: 60 },
+      );
+      assert(modalReady, 'New v9.0 detail plate #7 modal failed to open or render pixels on #modal-canvas');
+
+      const modalTitle = await tab.evaluate(`(document.getElementById('modal-title')?.textContent || '').trim()`);
+      assert(modalTitle.length > 0, 'Plate #7 modal #modal-title is empty');
+
+      await tab.pressKey('Escape', 'Escape', 27);
+      await sleep(140);
+      const modalClosed = await tab.evaluate(
+        `Boolean(document.getElementById('modal-overlay')?.classList.contains('hidden'))`,
+      );
+      assert(modalClosed, 'Plate #7 modal did not close on Escape');
+
+      assert(tab.exceptions.length === prevExc, `New JS exceptions on plate #7 modal: ${tab.exceptions.slice(prevExc).join('; ')}`);
+      assert(tab.consoleErrors.length === prevErr, `New console errors on plate #7 modal: ${tab.consoleErrors.slice(prevErr).join('; ')}`);
+      assert(tab.localHttpErrors.length === prevHttp, `New HTTP errors on plate #7 modal: ${tab.localHttpErrors.slice(prevHttp).map((e) => `${e.status} ${e.url}`).join('; ')}`);
+      assert(tab.localLoadFailures.length === prevLoad, `New load failures on plate #7 modal: ${tab.localLoadFailures.slice(prevLoad).map((e) => `${e.errorText} ${e.url}`).join('; ')}`);
     });
   } finally {
     await harness.closeTab(tab);

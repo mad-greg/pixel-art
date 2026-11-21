@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import math
 import re
 import sys
 import unittest
@@ -16,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests.lib.assets_helper import (
+    ALL_DETAIL_PLATES_V9,
     ASSETS_DIR,
     AUDIO_DIR,
     AUDIO_FILES,
@@ -25,18 +27,23 @@ from tests.lib.assets_helper import (
     BAHNHOF_PLATFORM_UV,
     CANVAS_H,
     CANVAS_W,
+    CF_MEYER_HAUS_LV95,
     DATA_DIR,
     DETAIL_PLATES,
     DOCS_DIR,
     LINDT_HOC_ID,
+    NEW_LANDMARK_IDS_V9,
     OVERVIEW_H,
     OVERVIEW_W,
     PRESETS,
     REQUIRED_LANDMARK_IDS,
     REQUIRED_ROAD_IDS,
+    REQUIRED_VIGNETTE_KEYS_V9,
     TILES_DIR,
     count_depth_roof_small_hits,
+    count_unique_rgb_colors,
     distance_to_exterior_sky_m,
+    extract_vignette_uv_anchors,
     ffprobe_audio,
     get_landmark_uv,
     load_animations_json,
@@ -297,11 +304,31 @@ class TestTier1FA1Assets(unittest.TestCase):
             f"Expected >=3 ES modules under docs/js/, found {len(js_modules)}",
         )
 
+    @test_meta("T1.FA1.10", "All 10 detail plates 01..10_*.webp lossless VP8L >=2000x1400 <=256 colors")
+    def test_10_all_10_detail_plates_v9(self) -> None:
+        for fname in ALL_DETAIL_PLATES_V9:
+            p = ASSETS_DIR / fname
+            self.assertTrue(p.is_file(), f"Missing detail plate: {fname}")
+            self.assertEqual(webp_encoding_type(p), "VP8L", f"{fname} must be lossless VP8L")
+            with Image.open(p) as im:
+                self.assertEqual(im.mode, "RGB", f"{fname} mode {im.mode} != RGB")
+                w, h = im.size
+                self.assertGreaterEqual(w, 2000, f"{fname} width {w} < 2000")
+                self.assertGreaterEqual(h, 1400, f"{fname} height {h} < 1400")
+            arr = load_plate_rgb(fname)
+            body = arr[110:-90, 24:-24, :]
+            n_colors = count_unique_rgb_colors(body)
+            self.assertLessEqual(
+                n_colors,
+                256,
+                f"Detail plate {fname} body has {n_colors} colors > 256 SVGA cap",
+            )
+
 
 class TestTier1FA2GeospatialData(unittest.TestCase):
     """FA2: Geospatial Metadata, Landmarks, Living-World Routes & Guardrails."""
 
-    @test_meta("T1.FA2.01", "kilchberg_interactive.json schema, camera & 10 landmarks")
+    @test_meta("T1.FA2.01", "kilchberg_interactive.json schema, camera & >=10 landmarks (0..9 preserved)")
     def test_01_interactive_schema(self) -> None:
         data = load_interactive_json()
         self.assertEqual(data.get("canvas_width"), CANVAS_W)
@@ -314,7 +341,12 @@ class TestTier1FA2GeospatialData(unittest.TestCase):
         self.assertAlmostEqual(float(cam.get("z_exag", 0)), 1.16, places=3)
 
         lms = data.get("landmarks", [])
-        self.assertEqual(len(lms), 10, f"Expected 10 landmarks, got {len(lms)}")
+        self.assertGreaterEqual(len(lms), 10, f"Expected >=10 landmarks, got {len(lms)}")
+        self.assertEqual(
+            [lm.get("id") for lm in lms[:10]],
+            list(REQUIRED_LANDMARK_IDS),
+            "Original 10 REQUIRED_LANDMARK_IDS must be preserved at indices 0..9",
+        )
         by_id = {lm["id"]: lm for lm in lms}
         for lid in REQUIRED_LANDMARK_IDS:
             self.assertIn(lid, by_id, f"Missing required landmark ID: {lid}")
@@ -604,6 +636,59 @@ class TestTier1FA2GeospatialData(unittest.TestCase):
                 self.assertIn(k, sp, f"extra_sports {sp.get('id')} missing key '{k}'")
             self.assertGreater(float(sp["w_m"]), 0.0, f"extra_sports {sp['id']} w_m <= 0")
             self.assertGreater(float(sp["h_m"]), 0.0, f"extra_sports {sp['id']} h_m <= 0")
+
+    @test_meta("T1.FA2.10", "v9.0 >=16 landmarks, 0..9 preserved, 6 new IDs & cf_meyer_haus <=35m LV95")
+    def test_10_v9_16_landmarks_and_cf_meyer_haus(self) -> None:
+        lms = load_interactive_json().get("landmarks", [])
+        self.assertGreaterEqual(len(lms), 16, f"Expected >=16 landmarks, got {len(lms)}")
+        self.assertEqual(
+            [lm.get("id") for lm in lms[:10]],
+            list(REQUIRED_LANDMARK_IDS),
+            "Original 10 REQUIRED_LANDMARK_IDS must be preserved at indices 0..9",
+        )
+        by_id = {lm["id"]: lm for lm in lms if "id" in lm}
+        for lid in NEW_LANDMARK_IDS_V9:
+            self.assertIn(lid, by_id, f"Missing v9.0 landmark ID: {lid}")
+            lm = by_id[lid]
+            u, v = get_landmark_uv(lm)
+            self.assertTrue(
+                0.05 <= u <= 0.95 and 0.05 <= v <= 0.95,
+                f"v9.0 landmark {lid} UV out of [0.05, 0.95]: {(u, v)}",
+            )
+            if "px" in lm:
+                px, py = float(lm["px"][0]), float(lm["px"][1])
+                self.assertAlmostEqual(px, u * CANVAS_W, delta=2.0, msg=f"Landmark {lid} px[0] inconsistent with u")
+                self.assertAlmostEqual(py, v * CANVAS_H, delta=2.0, msg=f"Landmark {lid} px[1] inconsistent with v")
+
+        cf = by_id.get("cf_meyer_haus")
+        self.assertIsNotNone(cf, "cf_meyer_haus landmark missing")
+        self.assertIn("e", cf, "cf_meyer_haus missing LV95 easting 'e'")
+        self.assertIn("n", cf, "cf_meyer_haus missing LV95 northing 'n'")
+        dist_m = math.hypot(float(cf["e"]) - CF_MEYER_HAUS_LV95[0], float(cf["n"]) - CF_MEYER_HAUS_LV95[1])
+        self.assertLessEqual(
+            dist_m,
+            35.0,
+            f"cf_meyer_haus LV95 ({cf['e']}, {cf['n']}) is {dist_m:.1f} m from Alte Landstrasse 170 {CF_MEYER_HAUS_LV95} (>35m)",
+        )
+
+    @test_meta("T1.FA2.11", "v9.0 ambient.vignettes covers all 9 new/un-vignetted landmarks in [0,1] UV & <650KB")
+    def test_11_v9_vignette_anchors_and_size(self) -> None:
+        anim_path = DATA_DIR / "kilchberg_animations.json"
+        self.assertTrue(anim_path.is_file(), "Missing docs/data/kilchberg_animations.json")
+        sz = anim_path.stat().st_size
+        self.assertLess(sz, 650 * 1024, f"kilchberg_animations.json size {sz} >= 650 KB")
+
+        vigs = load_animations_json().get("ambient", {}).get("vignettes")
+        self.assertIsInstance(vigs, dict, "ambient.vignettes must be a dict")
+        for key in REQUIRED_VIGNETTE_KEYS_V9:
+            self.assertIn(key, vigs, f"Missing ambient.vignettes['{key}']")
+            anchors = extract_vignette_uv_anchors(vigs[key], prefix=key)
+            self.assertGreater(len(anchors), 0, f"ambient.vignettes['{key}'] has no valid UV anchors")
+            for label, u, v in anchors:
+                self.assertTrue(
+                    0.0 <= u <= 1.0 and 0.0 <= v <= 1.0,
+                    f"Vignette anchor {label} UV ({u}, {v}) out of [0, 1]",
+                )
 
 
 class TestTier1FA4AudioStatic(unittest.TestCase):

@@ -1,5 +1,5 @@
 /**
- * Tier 4 (Node CDP): 7 Real-World End-User Application Journeys (T4.01 - T4.07).
+ * Tier 4 (Node CDP): 8 Real-World End-User Application Journeys + Tier 5 Hardening (T4.01 - T4.13).
  */
 
 import {
@@ -762,6 +762,120 @@ async function runTests(harness, test) {
       assert(m1.tbScrollW <= m1.tbClientW && m1.tbLeft === 0,
         `Mobile .topbar shifted/overflowed after opening drawer: ${JSON.stringify(m1)}`);
       assert(tab.exceptions.length === 0, `T4.12 exceptions: ${tab.exceptions.join('; ')}`);
+    } finally {
+      await harness.closeTab(tab);
+    }
+  });
+
+  // ── T4.13: Journey 8 — Kilchberg Heritage & New Landmarks Tour (v9.0) ──
+  await test('T4.13', 'Journey 8: Kilchberg Heritage & New Landmarks Tour (7 landmarks, new plate Fly Here, tiles, zero clipping)', async () => {
+    const tab = await harness.openTab('/?mode=day&t=10', {
+      width: 1280,
+      height: 800,
+      dpr: 2,
+      waitReady: true,
+    });
+    try {
+      const tourIds = [
+        'cf_meyer_haus',
+        'gemeindehaus_alte_landstr',
+        'stockengut_farm',
+        'hallenbad_hochweid',
+        'broelberggut_estate',
+        'villa_spinnergut_tc',
+        'morfanlage_promenade',
+      ];
+
+      // Precondition check before clicking so v8.0 fails cleanly with AssertionError (zero selector timeout)
+      const presentIds = await tab.evaluate(
+        `Array.from(document.querySelectorAll('#landmark-list .lm-item')).map((el) => el.dataset.lmId || '')`,
+      );
+      const missingIds = tourIds.filter((id) => !presentIds.includes(id));
+      assert(
+        missingIds.length === 0,
+        `Missing v9.0 landmark items in #landmark-list (found ${presentIds.length}): ${missingIds.join(', ')}`,
+      );
+
+      // Navigate across all 7 heritage & new landmarks
+      tab.resetNetworkCounters();
+      for (const lmId of tourIds) {
+        await tab.clickSelector(`#landmark-list .lm-item[data-lm-id="${lmId}"]`);
+        await tab.waitForCameraSettled();
+        const dbg = await tab.getDebug();
+        assert(dbg && dbg.activeLandmark === lmId, `Expected activeLandmark='${lmId}', got '${dbg?.activeLandmark}'`);
+        const inspTitle = await tab.evaluate(`(document.getElementById('insp-title')?.textContent || '').trim()`);
+        assert(inspTitle.length > 0, `Inspector #insp-title empty after navigating to ${lmId}`);
+      }
+
+      const canvasSnap = await tab.captureCanvasSample('#diorama-canvas', 48, 27);
+      assert(canvasSnap.meanLuma > 5, `Canvas appears blank after Journey 8 tour (meanLuma=${canvasSnap.meanLuma.toFixed(2)})`);
+      assert(
+        tab.tileResponses.length >= 1,
+        `Expected HTTP 200 tile streaming during Journey 8 tour, got ${tab.tileResponses.length}`,
+      );
+
+      // Open a new v9.0 detail plate (08_cf_meyer_haus or 09_gemeindehaus_alte_landstrasse) and click Fly Here
+      const plateInfo = await tab.evaluate(`(() => {
+        const targets = [
+          { file: '08_cf_meyer_haus.webp', expectedLmId: 'cf_meyer_haus' },
+          { file: '09_gemeindehaus_alte_landstrasse.webp', expectedLmId: 'gemeindehaus_alte_landstr' },
+        ];
+        const thumbs = Array.from(document.querySelectorAll('#crop-gallery .crop-thumb'));
+        for (const t of targets) {
+          const el = thumbs.find((node) => (node.querySelector('img')?.getAttribute('src') || '').includes(t.file));
+          if (el) {
+            el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+            const r = el.getBoundingClientRect();
+            return { x: r.left + r.width / 2, y: r.top + r.height / 2, file: t.file, expectedLmId: t.expectedLmId };
+          }
+        }
+        return null;
+      })()`);
+      assert(Boolean(plateInfo), 'Missing new v9.0 detail plate thumbnail (08_cf_meyer_haus.webp or 09_gemeindehaus_alte_landstrasse.webp)');
+
+      await tab.clickPoint(plateInfo.x, plateInfo.y);
+      const modalOpen = await tab.waitFor(
+        `Boolean(!document.getElementById('modal-overlay')?.classList.contains('hidden') && (document.getElementById('modal-canvas')?.width || 0) > 50)`,
+        { timeoutMs: 3000, intervalMs: 60 },
+      );
+      assert(modalOpen, `Detail plate modal for ${plateInfo.file} did not open and paint #modal-canvas`);
+
+      await tab.clickSelector('#btn-modal-fly');
+      await tab.waitForCameraSettled();
+
+      const modalClosed = await tab.evaluate(
+        `Boolean(document.getElementById('modal-overlay')?.classList.contains('hidden'))`,
+      );
+      assert(modalClosed, 'Detail plate modal did not close after clicking #btn-modal-fly');
+
+      const dbgAfterFly = await tab.getDebug();
+      assert(
+        dbgAfterFly && dbgAfterFly.activeLandmark === plateInfo.expectedLmId,
+        `Expected Fly Here from ${plateInfo.file} to activate '${plateInfo.expectedLmId}', got '${dbgAfterFly?.activeLandmark}'`,
+      );
+
+      // Desktop layout zero clipping check
+      const clipped = await tab.evaluate(`(() => {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const sels = ['#topbar', '.workspace', '#viewport', '#hud-coords', '.nav-overlay', '#sidebar'];
+        const out = [];
+        for (const s of sels) {
+          const el = document.querySelector(s);
+          if (!el) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width <= 4 || r.height <= 4) continue;
+          if (r.bottom > vh + 1 || r.right > vw + 1) {
+            out.push(s + ' (' + Math.round(r.right) + 'x' + Math.round(r.bottom) + ' vs ' + vw + 'x' + vh + ')');
+          }
+        }
+        return out;
+      })()`);
+      assert(clipped.length === 0, `Journey 8 desktop layout clipped: ${clipped.join(', ')}`);
+
+      assert(tab.exceptions.length === 0, `T4.13 JS exceptions: ${tab.exceptions.join('; ')}`);
+      assert(tab.consoleErrors.length === 0, `T4.13 console errors: ${tab.consoleErrors.join('; ')}`);
+      assert(tab.localHttpErrors.length === 0, `T4.13 local HTTP errors: ${tab.localHttpErrors.map((e) => `${e.status} ${e.url}`).join('; ')}`);
     } finally {
       await harness.closeTab(tab);
     }

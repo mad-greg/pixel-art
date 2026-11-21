@@ -1,5 +1,5 @@
 /**
- * Tier 2 (Node CDP): FA3 Layout, Retina DPR, Zoom, Search & Malformed URL Bounds (6 tests)
+ * Tier 2 (Node CDP): FA3 Layout, Retina DPR, Zoom, Search, Pin Decluttering & Malformed URL Bounds (10 tests)
  *                  + FA4 Spatial Audio Boundary & Attenuation Invariants (5 tests).
  */
 
@@ -17,6 +17,19 @@ import {
 function rectsOverlap(a, b) {
   if (!a || !b) return false;
   return a.left < b.right - 1 && a.right > b.left + 1 && a.top < b.bottom - 1 && a.bottom > b.top + 1;
+}
+
+function severePinOverlap(a, b) {
+  const ix = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+  const iy = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+  if (ix <= 0 || iy <= 0) return null;
+  const interArea = ix * iy;
+  const minArea = Math.max(1, Math.min(a.width * a.height, b.width * b.height));
+  const frac = interArea / minArea;
+  if (frac > 0.20 || (ix > 8 && iy > 8)) {
+    return { ix, iy, frac };
+  }
+  return null;
 }
 
 async function runTests(harness, test) {
@@ -237,6 +250,140 @@ async function runTests(harness, test) {
 
       await desktop.clickSelector('#btn-mode-day');
       await sleep(160);
+    });
+
+    await test('T2.FA3.10', 'Zoom-aware overview pin decluttering, active-pin visibility & 16-landmark desktop/mobile layout bounds', async () => {
+      // Precondition first: fail cleanly on v8.0 with AssertionError
+      const counts = await desktop.evaluate(`({
+        lmCount: document.querySelectorAll('#landmark-list .lm-item').length,
+        cropCount: document.querySelectorAll('#crop-gallery .crop-thumb').length,
+      })`);
+      assert(counts.lmCount >= 16, `Expected >= 16 landmarks for v9.0 pin decluttering check, got ${counts.lmCount}`);
+      assert(counts.cropCount >= 10, `Expected >= 10 detail plates for v9.0 layout check, got ${counts.cropCount}`);
+
+      const collectVisiblePinsExpr = `(() => {
+        const vp = document.getElementById('viewport')?.getBoundingClientRect();
+        if (!vp) return [];
+        const out = [];
+        for (const el of document.querySelectorAll('#pins-layer .lm-pin')) {
+          const st = getComputedStyle(el);
+          if (st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) <= 0.05) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width <= 4 || r.height <= 4) continue;
+          if (r.right < vp.left || r.left > vp.right || r.bottom < vp.top || r.top > vp.bottom) continue;
+          out.push({
+            idx: el.dataset.lmIdx || '',
+            label: (el.textContent || '').trim(),
+            active: el.classList.contains('active'),
+            left: r.left,
+            top: r.top,
+            right: r.right,
+            bottom: r.bottom,
+            width: r.width,
+            height: r.height,
+          });
+        }
+        return out;
+      })()`;
+
+      // 1. Overview Fit (cssScale < 0.7): zero severe overlap among visible pins
+      await desktop.clickSelector('#btn-zoom-fit');
+      await desktop.waitForCameraSettled();
+      await sleep(120);
+
+      const dbgFit = await desktop.getDebug();
+      assert(dbgFit && typeof dbgFit.scale === 'number' && dbgFit.scale < 0.7, `Expected Fit cssScale < 0.7, got ${dbgFit?.scale}`);
+
+      const fitPins = await desktop.evaluate(collectVisiblePinsExpr);
+      assert(fitPins.length >= 1, `Expected >= 1 visible .lm-pin at overview Fit, got ${fitPins.length}`);
+      const fitOverlaps = [];
+      for (let i = 0; i < fitPins.length; i++) {
+        for (let j = i + 1; j < fitPins.length; j++) {
+          const ov = severePinOverlap(fitPins[i], fitPins[j]);
+          if (ov) {
+            fitOverlaps.push(
+              `'${fitPins[i].label}' <-> '${fitPins[j].label}' (${Math.round(ov.ix)}x${Math.round(ov.iy)}px, ${(ov.frac * 100).toFixed(0)}%)`,
+            );
+          }
+        }
+      }
+      assert(fitOverlaps.length === 0, `Severe .lm-pin overlap at overview Fit: ${fitOverlaps.join('; ')}`);
+
+      // 2. Zoomed-in (>= 1.45) on first new v9.0 landmark (#11, data-lm-idx="10")
+      await desktop.clickSelector('#landmark-list .lm-item:nth-child(11)');
+      await desktop.waitForCameraSettled();
+      await sleep(120);
+
+      const dbgZoom = await desktop.getDebug();
+      assert(dbgZoom && dbgZoom.scale >= 1.45, `Expected zoomed-in scale >= 1.45 on landmark #11, got ${dbgZoom?.scale}`);
+      assert(Boolean(dbgZoom.activeLandmark), `Expected activeLandmark set after clicking landmark #11`);
+
+      const zoomPins = await desktop.evaluate(collectVisiblePinsExpr);
+      const activeZoomPin = zoomPins.find((p) => p.active || p.idx === '10');
+      assert(Boolean(activeZoomPin), `Active landmark #11 pin not visible inside #viewport when zoomed in`);
+
+      // 3. Return to Fit: active landmark pin remains visible & zero severe overlap
+      await desktop.clickSelector('#btn-zoom-fit');
+      await desktop.waitForCameraSettled();
+      await sleep(120);
+
+      const fitPinsActive = await desktop.evaluate(collectVisiblePinsExpr);
+      const activeFitPin = fitPinsActive.find((p) => p.active || p.idx === '10');
+      assert(Boolean(activeFitPin), `Active landmark #11 pin not visible at overview Fit`);
+      const activeOverlaps = [];
+      for (let i = 0; i < fitPinsActive.length; i++) {
+        for (let j = i + 1; j < fitPinsActive.length; j++) {
+          const ov = severePinOverlap(fitPinsActive[i], fitPinsActive[j]);
+          if (ov) {
+            activeOverlaps.push(
+              `'${fitPinsActive[i].label}' <-> '${fitPinsActive[j].label}' (${Math.round(ov.ix)}x${Math.round(ov.iy)}px, ${(ov.frac * 100).toFixed(0)}%)`,
+            );
+          }
+        }
+      }
+      assert(activeOverlaps.length === 0, `Severe .lm-pin overlap at Fit with active pin: ${activeOverlaps.join('; ')}`);
+
+      // 4. Desktop 1280x800 zero clipping with 16 landmarks + 10 plates
+      const deskClip = await desktop.evaluate(`(() => {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const sels = ['#topbar', '.workspace', '#viewport', '#hud-coords', '.nav-overlay', '#minimap-box', '.dpad', '#sidebar'];
+        const clipped = [];
+        for (const s of sels) {
+          const el = document.querySelector(s);
+          if (!el) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width <= 4 || r.height <= 4) continue;
+          if (r.bottom > vh + 1 || r.right > vw + 1) {
+            clipped.push(s + ' (' + Math.round(r.right) + 'x' + Math.round(r.bottom) + ' vs ' + vw + 'x' + vh + ')');
+          }
+        }
+        return clipped;
+      })()`);
+      assert(deskClip.length === 0, `Desktop 1280x800 layout clipped with 16 landmarks/10 plates: ${deskClip.join(', ')}`);
+
+      // 5. Mobile 390x844 zero clipping with 16 landmarks + 10 plates (last test on Tab 1)
+      await desktop.resize(390, 844, 2, true);
+      await sleep(180);
+      const mobClip = await desktop.evaluate(`(() => {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const sels = ['#topbar', '.workspace', '#viewport', '#hud-coords', '.nav-overlay', '#sidebar'];
+        const clipped = [];
+        for (const s of sels) {
+          const el = document.querySelector(s);
+          if (!el) continue;
+          const st = getComputedStyle(el);
+          if (st.display === 'none' || st.visibility === 'hidden') continue;
+          const r = el.getBoundingClientRect();
+          if (r.width <= 4 || r.height <= 4 || r.left >= vw - 1) continue;
+          if (r.bottom > vh + 1 || r.right > vw + 1) {
+            clipped.push(s + ' (' + Math.round(r.right) + 'x' + Math.round(r.bottom) + ' vs ' + vw + 'x' + vh + ')');
+          }
+        }
+        return clipped;
+      })()`);
+      assert(mobClip.length === 0, `Mobile 390x844 layout clipped with 16 landmarks/10 plates: ${mobClip.join(', ')}`);
     });
   } finally {
     await harness.closeTab(desktop);
