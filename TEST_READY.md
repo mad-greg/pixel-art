@@ -1,58 +1,55 @@
-# TEST_READY — E2E Testing Track Signal (4-Tier Opaque-Box Suite Ready)
+# TEST_READY — Kilchberg v8.0 Opaque-Box E2E Suite
 
-**Status:** READY FOR FINAL MILESTONE (`M6`) EXECUTION  
-**Published:** 2026-11-20  
-**Methodology & Inventory:** [`TEST_INFRA.md`](./TEST_INFRA.md)  
-**Unified Runner:** `python3 tests/run_e2e.py --tier <1|2|3|4|all>`
-
----
-
-## 1. Suite Inventory (11 Files, 70 Tests Across 4 Tiers)
-
-| File | Tier | Coverage | Test Count |
-|---|---|---|---:|
-| `tests/run_e2e.py` | Runner | Unified CLI (`--tier 1\|2\|3\|4\|all\|1,2`, `--verbose`, `--json-report`, `--timeout`), exit `0`/`1`/`124`, atomic `os.killpg` teardown | — |
-| `tests/lib/report.py` | Lib | `TestCaseResult` / `TierResult`, `StructuredTestResult` (skips fail closed as `ERROR`), summary table & JSON report writer | — |
-| `tests/lib/assets_helper.py` | Lib | Zero-`scipy` `numpy`+`Pillow`+`ffprobe` loaders, `uint8` sky diffs, separable NumPy morphology, RLE 4-connected components, pixel-space road turn angles | — |
-| `tests/lib/cdp_harness.mjs` | Lib | Zero-dep Node 24 native `WebSocket` CDP driver for `/usr/bin/chromium` (no `--autoplay-policy` bypass; real trusted clicks; offline font CDN blocking; shared Chromium + isolated incognito contexts; `waitForCameraSettled()`; fast `forceClose()` teardown) | — |
-| `tests/tier1_assets_data.py` | Tier 1 | FA1 (7) + FA2 (8) + FA4 static (2): manifests, 234 lossless tiles, overviews, depth map, 6 plates, SVGA `<= 256` colors, interactive & animations schemas, Bendlikon `Badweg 1.1`, zero paragliders, 9 MP3s (`ffprobe`) | 17 |
-| `tests/tier1_browser_features.mjs` | Tier 1 | FA3 (12) + FA4 live (3): clean boot (0 JS/404 errors), lighting + `body[data-mode]`, zoom/tiles, landmarks, building click, address search, detail-plate modal + "Fly Here", Cinema (`H`/`Esc`), collapsible sidebar, compass/scale bar, share/postcard, `window.__dioramaDebug`, trusted audio unlock & layer mixer | 15 |
-| `tests/tier2_quality_bounds.py` | Tier 2 | FA1 (9) + FA2 (6): diurnal luminance ordering, per-preset CLUTs, tile seams, zero floating sky cars & depth occluders, zero floating plate sports props, spotless Lake Zurich shore, Sunset golden non-pink plaster (preserving F6 cool violet shadows), Night warm lantern pools, Lindt HoC 25 cm roof variance, zero road kinks `> 45°`, full road occlusion, endpoint/vessel/building bounds | 15 |
-| `tests/tier2_browser_bounds.mjs` | Tier 2 | FA3 (6) + FA4 (5): Desktop `1280×800` DPR=2 zero clipping/overlap & Retina backing store, Mobile `390×844` zero clipping, extreme zoom `Fit..8×`, empty search, malformed URL fallback, shore-strict wave attenuation vs overview/inland, paused-animation spatial audio updates, mute suspending `AudioContext`, rapid toggle stability | 11 |
-| `tests/tier3_combinations.mjs` | Tier 3 | 6 pairwise cross-feature suites (`T3.01`–`T3.06`): Lighting×Diurnal, Zoom/Tiles×Occlusion×Follow (`Train`/`Boat`/`Bus`), Search/Fly-To×Inspector×Modal "Fly Here", Lighting×Spatial Audio, URL Deep-Link×`?t=`×Permalink Round-Trip, Cinema/Sidebar×Resize/Minimap | 6 |
-| `tests/tier4_journeys.mjs` | Tier 4 | 6 real-world end-user journeys (`T4.01`–`T4.06`): Visitor Full Tour, Lindt HoC & Schooren Seebad Deep-Zoom, Commuter Transit Showcase, Resident Address Lookup, Spatial Soundscape Walk, Mobile Portrait Explorer | 6 |
-| **Total** | **Tiers 1–4** | **FA1 (`7+9`), FA2 (`8+6`), FA3 (`12+6`), FA4 (`5+5`), 6 Pairs, 6 Journeys** | **70** |
+**Status:** **READY** (Verified & Audited — 83 Opaque-Box E2E Tests across Tiers 1–4)
+**Date:** 2026-11-20
+**Owner:** E2E Testing Track (`e2e_orch_1`)
+**Suite Specification:** [TEST_INFRA.md](TEST_INFRA.md)
 
 ---
 
-## 2. Independent Verification Gate Evidence (Iteration 2 — Unanimous PASS)
+## 1. Readiness Summary
+- **Total Tests:** **83** (36 Python `unittest` + 47 Node raw-CDP browser tests)
+  - **70 / 70 existing v7.0 baseline tests preserved 100% intact** (zero deleted, skipped, or weakened assertions; verified line-by-line by Forensic Auditor).
+  - **+13 new Kilchberg v8.0 opaque-box tests** (+4 Python, +9 Node CDP) covering every feature in `ORIGINAL_REQUEST.md` and `PROJECT.md § Feature Inventory` strictly via public interfaces (`docs/assets/kilchberg_depth.png`, `docs/data/kilchberg_animations.json`, `docs/index.html`, `docs/**/*.js`, browser canvas/DOM, `window.__dioramaDebug` Contract #5 + `livingCounts` + `depthStats` + `simStats`).
+- **Runner Hardening:** Default per-suite `--timeout` in `tests/run_e2e.py` raised to `120 s` to accommodate the expanded Tier 2/3/4 browser suites without timeouts.
 
-All 5 independent Verification Wave agents passed strictly:
-
-| Agent | Role | Verdict | Key Verified Evidence |
-|---|---|---|---|
-| `e2e_auditor_iter2` | Forensic Integrity Auditor (Intermediate Track Audit) | **CLEAN** | 0 integrity violations, 0 tautologies/skips, strict opaque-box design, zero unauthorized edits outside `TEST_INFRA.md` & `tests/**`, zero code/data in `.agents/teamwork/`. |
-| `e2e_rev1_iter2` | Primary Reviewer | **APPROVE** | Uncontended `python3 tests/run_e2e.py --tier all`: **`63.11 s`** (`< 90 s` budget), all 4 tiers `< 30 s` (T1 `14.9 s`, T2 `14.4 s`, T3 `19.25 s`, T4 `14.50 s`), **70 tests \| 28 PASSED \| 42 FAILED \| 0 ERRORS** (live M3 animations flipped 5 tests PASS & caught an `sbb_ic_north` stop-point bug!), `0` orphan Chromium processes / temp dirs. |
-| `e2e_rev2_iter2` | Secondary Reviewer | **APPROVE** | Independent Tier 3 (`19.28 s`), Tier 4 (`23.46 s`), Tier 1 `--json-report` schema validated, `--timeout 3` clean `exit=124` with `0` leaks, full M4/M5 F24 easing & raw-GainNode compatibility verified. |
-| `e2e_chal1_iter2` | Python Assets & Quality Challenger | **CONFIRMED** | Zero `scipy` imports; `0` pixel mismatches vs brute-force/`float32`; synthetic F6 cool-violet shadows pass `T2.FA1.07`; `1×1` specks ignored while `10×10` & all `v6.2` floating cars/sports props caught; dynamic Lindt tile lookup & unconditional 4-tuple road `d16` checks verified. |
-| `e2e_chal2_iter2` | Browser CDP & Process Hygiene Challenger | **CONFIRMED** | **12 / 12** forced-timeout stress probes (`0.1 s`–`4.5 s` across Tiers 1–3) exited `124` with `0` live Chromium orphans and `0` leaked temp dirs; malformed percent-encoding returns HTTP `400`; `_closePromise` & `openTab()` cleanup verified; zero vacuous `if (dbg)` guards. |
-
----
-
-## 3. Running the Suite (For M6 / Integration Verification)
-
+## 2. Canonical Execution Command
 ```bash
-# Run all 4 tiers (~60–65 s uncontended, exit 0 when all 70 tests pass on complete v7.0)
-python3 tests/run_e2e.py --tier all --verbose
-
-# Run individual tiers (< 25 s each)
-python3 tests/run_e2e.py --tier 1
-python3 tests/run_e2e.py --tier 2
-python3 tests/run_e2e.py --tier 3
-python3 tests/run_e2e.py --tier 4
-
-# Emit machine-readable JSON summary
-python3 tests/run_e2e.py --tier all --json-report /tmp/e2e_report.json
+cd /home/antigravity/mad-greg/pixel-art && .venv/bin/python tests/run_e2e.py --tier all --verbose
 ```
 
-> **Note for M4/M5 Integrators:** Ensure `docs/app.js` exposes the `PROJECT.md § Interface Contracts #5` read-only telemetry accessor `window.__dioramaDebug` (object or getter function) with `{ mode, scale, u, v, dpr, animTime, fps, audioEnabled, audioState, audioGains, activeLandmark, selectedBuilding, searchResultCount }` (where `audioGains` maps `lake_waves`, `birds`, `crickets`, `traffic`, `town_traffic`, `train`, `bells`) and sets `document.body.dataset.mode` (`day` | `sunset` | `night`).
+Targeted tier runs:
+```bash
+cd /home/antigravity/mad-greg/pixel-art && .venv/bin/python tests/run_e2e.py --tier 1 --verbose
+cd /home/antigravity/mad-greg/pixel-art && .venv/bin/python tests/run_e2e.py --tier 2 --verbose
+cd /home/antigravity/mad-greg/pixel-art && .venv/bin/python tests/run_e2e.py --tier 3 --verbose
+cd /home/antigravity/mad-greg/pixel-art && .venv/bin/python tests/run_e2e.py --tier 4 --verbose
+```
+
+## 3. Verified Snapshot at Publication (M1 & M2 Landed; M3 & M4 Pending)
+Independent verification by `e2e_reviewer_3` (`tests/run_e2e.py --tier all --verbose`):
+- **Syntax checks (`py_compile` + `node --check`):** `SYNTAX_OK` (exit `0`)
+- **Total:** `83 tests | 74 PASSED | 9 FAILED | 0 ERRORS | 0 TIMEOUTS`
+- **Baseline Regression Check:** **70 / 70 PASS** (0 regressions)
+- **New v8.0 Tests Already Passing (4 / 13):**
+  - `T1.FA1.08` — Depth map open-air roof small hits (`< 2%` trains, `< 1%` main roads) & `0.12 <= occ_frac <= 0.35` (PASS against M1)
+  - `T1.FA2.09` — `kilchberg_animations.json` `< 650 KB` & Contract #2 `network` schema (PASS against M2)
+  - `T2.FA2.07` — `network` UV `[0,1]`, non-spiking `d16`, inside `island_2x`, zero Lake Zurich water intrusion (PASS against M2)
+  - `T2.FA3.09` — SUP `waterMaskReady` & realistic diurnal count guardrail (PASS)
+- **Remaining v8.0 Tests Ready to Gate M3 & M4 (9 / 13 — cleanly failing with `AssertionError` until M3/M4 land):**
+  - `T1.FA1.09` — ES module `<script type="module" src="app.js?v=...">`, synced `?v=`, `docs/js/` modules (gates M3)
+  - `T1.FA3.13` — `window.__dioramaDebug.simStats` schema + Contract #5 + zero ES module 404s (gates M3)
+  - `T2.FA3.07` — Realistic daytime vehicle/pedestrian density bounds via `simStats` (gates M3/M4)
+  - `T2.FA3.08` — Active 1D IDM car-following / bus-dwell braking & non-gridlock invariant (gates M3)
+  - `T3.07` — Cross-tab deterministic `?t=10` canvas + `simStats` identity vs `?t=15` motion delta (gates M3)
+  - `T3.08` — Diurnal activity shift across `day` / `sunset` / `night` (gates M3/M4)
+  - `T3.09` — 2× zoom `?follow=train` & `?follow=bus` roof opacity (`holeFrac < 0.06`) + foreground occlusion (gates M1/M3 runtime `drawDepthMasked`, currently catching `bus holeFrac=6.64%`)
+  - `T3.10` — Church bell `bellPhase` ↔ `audioGains.bells` sync + `Live: Off` spatial audio updates (gates M4)
+  - `T4.07` — Journey 7: Living Kilchberg commuter & village life (Bahnhof, Follow Train/Bus, Pier/Lindt/Seebad, entity trip inspection, zero layout clipping) (gates M4)
+
+## 4. Verification Sign-Off
+- **Forensic Auditor (`e2e_auditor_2`):** `CLEAN`
+- **Primary Reviewer (`e2e_reviewer_3`):** `APPROVE`
+- **Secondary Reviewer (`e2e_reviewer_4`):** `APPROVE`
+- **Python Challenger (`e2e_challenger_3`):** `CONFIRMED` (empirically verified `get_lake_zurich_mask_2x()` + 16/16 synthetic failure-injection probes on `T2.FA2.07`)
+- **Browser Challenger (`e2e_challenger_4`):** `CONFIRMED` (empirically verified `analyzeVehicleRoofOpacity()` catches 2–4px vertical/horizontal/diagonal cutouts with 0.00% false positives on clean roofs and `>= 10px` foreground occluders, and verified `T4.07` flake elimination)

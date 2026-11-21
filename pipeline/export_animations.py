@@ -21,6 +21,7 @@ import gc
 import heapq
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from rasterio.transform import from_bounds
 from scipy import ndimage
 from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Point, shape
-from shapely.ops import linemerge, unary_union
+from shapely.ops import linemerge, nearest_points, unary_union
 from shapely.prepared import prep
 
 from .config import (
@@ -899,6 +900,691 @@ def _bldg_roof_anchor(scene: _AnimScene, bidx: int) -> tuple[float, float, float
     return _bldg_ridge_apex(scene, bidx)
 
 
+_PROHIBITED_AERIAL_RE = re.compile(r"paraglider|hot-air|balloon|glider", re.IGNORECASE)
+
+
+def _is_valid_land(scene: _AnimScene, e_pt: float, n_pt: float) -> bool:
+    """Return True iff LV95 (e_pt, n_pt) lies strictly inside diorama_mask and outside lake_mask."""
+    col = int(math.floor((e_pt - E_MIN) / GRID_RES))
+    row = int(math.floor((N_MAX - n_pt) / GRID_RES))
+    if col < 0 or col >= GRID_W or row < 0 or row >= GRID_H:
+        return False
+    return bool(scene.diorama_mask[row, col]) and not bool(scene.lake_mask[row, col])
+
+
+def _is_valid_land_arr(scene: _AnimScene, e_arr: np.ndarray, n_arr: np.ndarray) -> np.ndarray:
+    """Vectorized dry-land diorama mask check: inside diorama_mask and outside lake_mask."""
+    cols = np.floor((e_arr - E_MIN) / GRID_RES).astype(np.int32)
+    rows = np.floor((N_MAX - n_arr) / GRID_RES).astype(np.int32)
+    in_bounds = (cols >= 0) & (cols < GRID_W) & (rows >= 0) & (rows < GRID_H)
+    valid = np.zeros(len(e_arr), dtype=bool)
+    valid[in_bounds] = scene.diorama_mask[rows[in_bounds], cols[in_bounds]] & (
+        ~scene.lake_mask[rows[in_bounds], cols[in_bounds]]
+    )
+    return valid
+
+
+def _proj_uv_d16(
+    cam: IsometricCamera,
+    shift_x: float,
+    shift_y: float,
+    W_full: int,
+    H_full: int,
+    e_pt: float,
+    n_pt: float,
+    z_pt: float,
+    vehicle_h: float = 1.7,
+) -> tuple[float, float, int]:
+    """Project a single LV95 3D point to normalized (u, v) and 16-bit depth d16."""
+    ea = np.array([e_pt], dtype=np.float64)
+    na = np.array([n_pt], dtype=np.float64)
+    za = np.array([z_pt], dtype=np.float64)
+    px, py, _ = cam.project(ea, na, za)
+    _, _, pd = cam.project(ea, na, za + vehicle_h * 0.72)
+    d16 = int(np.clip(np.round((float(pd[0]) - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 65535.0), 1, 65534))
+    u = round(float((px[0] + shift_x) / W_full), 5)
+    v = round(float((py[0] + shift_y) / H_full), 5)
+    return u, v, d16
+
+
+def _clip_land_polyline(
+    ls: LineString,
+    scene: _AnimScene,
+    step_m: float = 5.5,
+    sig_m: float = 1.2,
+    inset_m: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray, float] | None:
+    """Smooth an LV95 polyline, clip strictly to (diorama_mask & ~lake_mask), and resample uniformly."""
+    L_raw = float(ls.length)
+    if L_raw < 4.0:
+        return None
+    n_d = max(4, int(math.ceil(L_raw)) + 1)
+    ss_d = np.linspace(0.0, L_raw, n_d)
+    pts_d = np.asarray([ls.interpolate(float(s)).coords[0] for s in ss_d], dtype=np.float64)
+
+    if sig_m > 0.0 and n_d >= 7:
+        e_sm = ndimage.gaussian_filter1d(pts_d[:, 0], sigma=sig_m, mode="nearest")
+        n_sm = ndimage.gaussian_filter1d(pts_d[:, 1], sigma=sig_m, mode="nearest")
+    else:
+        e_sm, n_sm = pts_d[:, 0].copy(), pts_d[:, 1].copy()
+
+    ls_sm = LineString(list(zip(e_sm.tolist(), n_sm.tolist())))
+    L_sm = float(ls_sm.length)
+    if L_sm < 4.0:
+        return None
+    n_c = max(4, int(math.ceil(L_sm / 0.5)) + 1)
+    ss_c = np.linspace(0.0, L_sm, n_c)
+    pts_c = np.asarray([ls_sm.interpolate(float(s)).coords[0] for s in ss_c], dtype=np.float64)
+
+    inside = _is_valid_land_arr(scene, pts_c[:, 0], pts_c[:, 1])
+    idx_t = np.nonzero(inside)[0]
+    if len(idx_t) < 2:
+        return None
+    runs = np.split(idx_t, np.where(np.diff(idx_t) > 1)[0] + 1)
+    best_run = max(runs, key=len)
+
+    s0 = float(ss_c[best_run[0]]) + inset_m
+    s1 = float(ss_c[best_run[-1]]) - inset_m
+    if s1 <= s0 + max(2.0, step_m * 0.5):
+        s0 = float(ss_c[best_run[0]])
+        s1 = float(ss_c[best_run[-1]])
+        if s1 <= s0 + 2.0:
+            return None
+
+    L_fin = s1 - s0
+    n_fin = max(3, int(round(L_fin / step_m)) + 1)
+    ss_fin = np.linspace(s0, s1, n_fin)
+    pts_fin = np.asarray([ls_sm.interpolate(float(s)).coords[0] for s in ss_fin], dtype=np.float64)
+    # Final per-point dry-land filter in case coarse resampling straddles a concave shore pixel
+    keep = _is_valid_land_arr(scene, pts_fin[:, 0], pts_fin[:, 1])
+    if not np.all(keep):
+        idx_k = np.nonzero(keep)[0]
+        if len(idx_k) < 3:
+            return None
+        kruns = np.split(idx_k, np.where(np.diff(idx_k) > 1)[0] + 1)
+        best_k = max(kruns, key=len)
+        if len(best_k) < 3:
+            return None
+        pts_fin = pts_fin[best_k]
+        L_fin = float(LineString(pts_fin.tolist()).length)
+    return pts_fin[:, 0], pts_fin[:, 1], float(L_fin)
+
+
+def _largest_connected_lines(
+    lines: list[LineString],
+    snap_m: float = 1.5,
+    bridge_m: float = 10.0,
+) -> list[LineString]:
+    """Return only the LineStrings belonging to the largest connected component (within bridge_m)."""
+    if len(lines) <= 1:
+        return lines
+    parent = list(range(len(lines)))
+
+    def _find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(a: int, b: int) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    pts: list[tuple[float, float]] = []
+    owners: list[int] = []
+    for idx, ls in enumerate(lines):
+        coords = list(ls.coords)
+        for c in coords:
+            pts.append((float(c[0]), float(c[1])))
+            owners.append(idx)
+        # Also sample midpoints for T-junction connectivity
+        if ls.length > snap_m * 2.0:
+            mp = ls.interpolate(0.5, normalized=True).coords[0]
+            pts.append((float(mp[0]), float(mp[1])))
+            owners.append(idx)
+
+    arr = np.asarray(pts, dtype=np.float64)
+    tree = cKDTree(arr)
+    for i, j in tree.query_pairs(r=bridge_m):
+        oi, oj = owners[i], owners[j]
+        if oi != oj:
+            _union(oi, oj)
+
+    comp_counts: dict[int, int] = {}
+    for idx in range(len(lines)):
+        r = _find(idx)
+        comp_counts[r] = comp_counts.get(r, 0) + 1
+    best_root = max(comp_counts, key=lambda r: comp_counts[r])
+    return [ls for idx, ls in enumerate(lines) if _find(idx) == best_root]
+
+
+def _project_onto_roads(
+    e_pt: float,
+    n_pt: float,
+    road_ls_map: dict[str, LineString],
+    candidate_ids: tuple[str, ...] | None = None,
+    max_dist_m: float = 35.0,
+) -> tuple[str, float, float, float, float] | None:
+    """Project an LV95 point onto exported road LineStrings; returns (road_id, frac, dist_m, se, sn)."""
+    pt = Point(e_pt, n_pt)
+    best: tuple[str, float, float, float, float] | None = None
+    ids = candidate_ids if candidate_ids is not None else tuple(road_ls_map.keys())
+    for rid in ids:
+        ls = road_ls_map.get(rid)
+        if ls is None or ls.length < 1.0:
+            continue
+        d = float(ls.distance(pt))
+        if d <= max_dist_m and (best is None or d < best[2]):
+            s = float(ls.project(pt))
+            frac = float(np.clip(s / float(ls.length), 0.0, 1.0))
+            sp = ls.interpolate(s).coords[0]
+            best = (rid, round(frac, 4), d, float(sp[0]), float(sp[1]))
+    return best
+
+
+def _build_network(
+    scene: _AnimScene,
+    cam: IsometricCamera,
+    shift_x: float,
+    shift_y: float,
+    W_full: int,
+    H_full: int,
+    mvt: dict,
+    obs_z_road: np.ndarray,
+    underpass_poly,
+    road_lv95: dict[str, tuple[np.ndarray, np.ndarray, float]],
+) -> dict:
+    """Build and strictly validate the Interface Contract #2 multimodal Kilchberg network."""
+    road_ls_map: dict[str, LineString] = {
+        rid: LineString(list(zip(er.tolist(), nr.tolist())))
+        for rid, (er, nr, _lr) in road_lv95.items()
+    }
+    trans_feats = mvt.get("transportation", [])
+    trans_name_feats = mvt.get("transportation_name", [])
+    poi_feats = mvt.get("poi", [])
+
+    def _dem_z(e_pt: float, n_pt: float) -> float:
+        return float(_sample_bilinear_dem(scene.dem, np.array([e_pt]), np.array([n_pt]))[0])
+
+    def _mvt_poi_coord(name_match: str, fallback: tuple[float, float]) -> tuple[float, float]:
+        for g, p in poi_feats:
+            if p.get("name") == name_match:
+                c = g.centroid
+                if _is_valid_land(scene, float(c.x), float(c.y)):
+                    return float(c.x), float(c.y)
+        return fallback
+
+    def _validate_uv_d16(u: float, v: float, d16: int, label: str) -> None:
+        assert 0.0 <= u <= 1.0, f"network {label}: u={u} out of [0,1]"
+        assert 0.0 <= v <= 1.0, f"network {label}: v={v} out of [0,1]"
+        assert 1 <= d16 <= 65534, f"network {label}: d16={d16} out of [1,65534]"
+
+    # 1. Crosswalks (8 verified Swiss zebra crossings anchored to exact exported road frac)
+    crosswalk_specs: list[tuple[str, str, str, str | None, float, float]] = [
+        ("cw_bendlikon",      "Bendlikon (Seestrasse)",            "seestrasse_sb",          "seestrasse_nb",          2684046.7, 1241843.7),
+        ("cw_lindt",          "Lindt & Sprüngli (Seestrasse)",     "seestrasse_sb",          "seestrasse_nb",          2684145.0, 1241545.0),
+        ("cw_schooren_seebad", "Schooren / Seebad (Seestrasse)",   "seestrasse_sb",          "seestrasse_nb",          2684272.2, 1241360.5),
+        ("cw_paradies",       "Paradiesstrasse / Mönchhof",        "seestrasse_sb",          "seestrasse_nb",          2683794.2, 1242581.3),
+        ("cw_bahnhof_dorf",   "Bahnhof / Dorfstrasse",             "dorfstrasse_viaduct_up", "dorfstrasse_viaduct_dn", 2683968.7, 1241858.4),
+        ("cw_schulhaus_dorf", "Schulhaus Dorfstrasse",             "dorfstrasse_viaduct_up", "dorfstrasse_viaduct_dn", 2683836.9, 1241822.6),
+        ("cw_gemeindehaus",   "Gemeindehaus (Alte Landstrasse)",   "alte_landstrasse_eb",    "alte_landstrasse_wb",    2683651.3, 1242162.0),
+        ("cw_schwelle",       "Schwelle / Dorf (Alte Landstrasse)", "alte_landstrasse_eb",   "alte_landstrasse_wb",    2683654.9, 1241790.5),
+    ]
+    crosswalks_out: list[dict] = []
+    for cw_id, cw_name, rid, opp_rid, ce_raw, cn_raw in crosswalk_specs:
+        ls = road_ls_map.get(rid)
+        if ls is None:
+            continue
+        pt = Point(ce_raw, cn_raw)
+        s = float(ls.project(pt))
+        frac = round(float(np.clip(s / float(ls.length), 0.0, 1.0)), 4)
+        p_main = ls.interpolate(s).coords[0]
+        ce, cn = float(p_main[0]), float(p_main[1])
+        # Center zebra anchor midway between opposing lanes so stripes straddle the full carriageway
+        ls_opp = road_ls_map.get(opp_rid) if opp_rid else None
+        if ls_opp is not None:
+            p_opp = ls_opp.interpolate(float(ls_opp.project(Point(ce, cn)))).coords[0]
+            mid_e, mid_n = 0.5 * (ce + float(p_opp[0])), 0.5 * (cn + float(p_opp[1]))
+            if _is_valid_land(scene, mid_e, mid_n):
+                ce, cn = mid_e, mid_n
+        assert _is_valid_land(scene, ce, cn), f"crosswalk {cw_id} not on dry land"
+        cz = _dem_z(ce, cn) + 0.35
+        u, v, d16 = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, ce, cn, cz, vehicle_h=1.7)
+        _validate_uv_d16(u, v, d16, cw_id)
+
+        # Screen-pixel unit normal perpendicular to road tangent at s +- 2.0 m
+        sa = max(0.0, s - 2.0)
+        sb = min(float(ls.length), s + 2.0)
+        pa = ls.interpolate(sa).coords[0]
+        pb = ls.interpolate(sb).coords[0]
+        ua, va, _ = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, float(pa[0]), float(pa[1]), _dem_z(float(pa[0]), float(pa[1])) + 0.35)
+        ub, vb, _ = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, float(pb[0]), float(pb[1]), _dem_z(float(pb[0]), float(pb[1])) + 0.35)
+        tx = (ub - ua) * W_full
+        ty = (vb - va) * H_full
+        tn = max(1e-6, math.hypot(tx, ty))
+        nx = round(-ty / tn, 4)
+        ny = round(tx / tn, 4)
+
+        crosswalks_out.append({
+            "id": cw_id,
+            "name": cw_name,
+            "road_id": rid,
+            "frac": frac,
+            "u": u,
+            "v": v,
+            "d16": d16,
+            "nx": nx,
+            "ny": ny,
+        })
+
+    # 2. Major Kilchberg Junctions (6 verified intersections with exact links into roads[8])
+    junction_specs: list[tuple[str, str, float, float]] = [
+        ("junc_bendlikon",      "Bendlikon (Seestrasse / Dorfstrasse)",          2684040.7, 1241872.4),
+        ("junc_moenchhof",      "Mönchhof (Alte Landstrasse / Dorfstrasse)",     2683629.4, 1242300.0),
+        ("junc_bahnhof",        "Bahnhofplatz (Dorfstrasse / Bahnhofstrasse)",   2683968.7, 1241858.4),
+        ("junc_schooren_lindt", "Schooren / Lindt (Seestrasse / Schoorenstr.)",  2684154.2, 1241527.5),
+        ("junc_dorfplatz",      "Schwelle / Dorfplatz (Alte Landstrasse)",       2683654.9, 1241790.5),
+        ("junc_paradies",       "Paradiesstrasse (Seestrasse / Paradiesstr.)",   2683770.5, 1242646.8),
+    ]
+    junctions_out: list[dict] = []
+    for jid, jname, je, jn in junction_specs:
+        assert _is_valid_land(scene, je, jn), f"junction {jid} not on dry land"
+        jz = _dem_z(je, jn) + 0.35
+        u, v, d16 = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, je, jn, jz, vehicle_h=2.0)
+        _validate_uv_d16(u, v, d16, jid)
+        jpt = Point(je, jn)
+        links: list[dict] = []
+        for rid, ls in road_ls_map.items():
+            if rid.startswith("a3_motorway"):
+                continue
+            if float(ls.distance(jpt)) <= 22.0:
+                frac = round(float(np.clip(ls.project(jpt) / float(ls.length), 0.0, 1.0)), 4)
+                links.append({"road_id": rid, "frac": frac})
+        assert len(links) >= 1, f"junction {jid} has no road links"
+        junctions_out.append({
+            "id": jid,
+            "name": jname,
+            "u": u,
+            "v": v,
+            "d16": d16,
+            "links": links,
+        })
+
+    # Pre-build the largest connected dry-land walkable MVT graph (used to snap off-street
+    # landmark/school/park POIs to their authentic pedestrian street/footway entrance AND
+    # to route all village footpaths on genuine MVT geometry).
+    walk_raw = _flatten_lines([
+        g for g, p in trans_feats
+        if p.get("class") in ("footway", "path", "minor", "primary", "secondary", "tertiary", "service", "track")
+        and p.get("brunnel") != "tunnel"
+    ])
+    land_walk_all: list[LineString] = []
+    for ls in walk_raw:
+        if ls.length < 0.8:
+            continue
+        c0, c1 = ls.coords[0], ls.coords[-1]
+        mp = ls.interpolate(0.5, normalized=True).coords[0]
+        if (
+            _is_valid_land(scene, float(c0[0]), float(c0[1]))
+            and _is_valid_land(scene, float(c1[0]), float(c1[1]))
+            and _is_valid_land(scene, float(mp[0]), float(mp[1]))
+        ):
+            land_walk_all.append(ls)
+    land_walk = _largest_connected_lines(land_walk_all, snap_m=1.5, bridge_m=10.0)
+    u_walk = unary_union(land_walk)
+
+    # Pre-build drivable dry-land MVT road segments for feeders that traverse unnamed minor
+    # connectors or bridge short gaps (e.g. Schoorenstrasse railway crossing, upper Dorfstrasse/
+    # Stockenstrasse, Breitloostrasse access).
+    drive_raw = _flatten_lines([
+        g for g, p in trans_feats
+        if p.get("class") in ("minor", "tertiary", "secondary", "primary", "service")
+        and p.get("brunnel") != "tunnel"
+    ])
+    drive_land: list[LineString] = []
+    for ls in drive_raw:
+        if ls.length < 0.8:
+            continue
+        c0, c1 = ls.coords[0], ls.coords[-1]
+        mp = ls.interpolate(0.5, normalized=True).coords[0]
+        if (
+            _is_valid_land(scene, float(c0[0]), float(c0[1]))
+            or _is_valid_land(scene, float(c1[0]), float(c1[1]))
+            or _is_valid_land(scene, float(mp[0]), float(mp[1]))
+        ):
+            drive_land.append(ls)
+
+    def _snap_to_walk_entrance(pe: float, pn: float, max_snap_m: float = 80.0) -> tuple[float, float]:
+        """Snap an off-street building/campus centroid to its nearest dry-land walkable MVT entrance."""
+        pt = Point(pe, pn)
+        _, np_walk = nearest_points(pt, u_walk)
+        we, wn = float(np_walk.x), float(np_walk.y)
+        if pt.distance(np_walk) <= max_snap_m and _is_valid_land(scene, we, wn):
+            return we, wn
+        return pe, pn
+
+    # 3. Typed POIs & Residential Neighbourhood Clusters
+    bldgs_meta = scene.meta.get("buildings", [])
+    b_gem = bldgs_meta[856] if len(bldgs_meta) > 856 else None
+    b_st_e = bldgs_meta[1254] if len(bldgs_meta) > 1254 else None
+    gem_en = (float(b_gem["e"]), float(b_gem["n"])) if b_gem else (2683610.2, 1242084.4)
+    st_e_en = (float(b_st_e["e"]), float(b_st_e["n"])) if b_st_e else (2683480.0, 1241656.0)
+
+    # Canonical LV95 coordinates for POIs (MVT-extracted where available; landward pierhead for Bendlikon Pier)
+    poi_coords: dict[str, tuple[float, float]] = {}
+    poi_uv: dict[str, tuple[float, float]] = {}
+    pois_out: list[dict] = []
+    non_mw_roads = tuple(rid for rid in road_ls_map if not rid.startswith("a3_motorway"))
+
+    def _add_poi(
+        pid: str,
+        pname: str,
+        pkind: str,
+        pe: float,
+        pn: float,
+        max_road_dist_m: float = 35.0,
+        vehicle_h: float = 1.7,
+        snap_walk: bool = False,
+    ) -> None:
+        if snap_walk:
+            pe, pn = _snap_to_walk_entrance(pe, pn)
+        assert _is_valid_land(scene, pe, pn), f"POI {pid} ({pe:.1f}, {pn:.1f}) not on dry land"
+        pz = _dem_z(pe, pn) + 0.35
+        u, v, d16 = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, pe, pn, pz, vehicle_h=vehicle_h)
+        _validate_uv_d16(u, v, d16, pid)
+        entry: dict = {
+            "id": pid,
+            "name": pname,
+            "kind": pkind,
+            "u": u,
+            "v": v,
+            "d16": d16,
+        }
+        proj = _project_onto_roads(pe, pn, road_ls_map, candidate_ids=non_mw_roads, max_dist_m=max_road_dist_m)
+        if proj is not None:
+            entry["road_id"] = proj[0]
+            entry["road_frac"] = proj[1]
+        pois_out.append(entry)
+        poi_coords[pid] = (pe, pn)
+        poi_uv[pid] = (u, v)
+
+    # Transit hubs (rail + landward Bendlikon ZSG pierhead)
+    _add_poi("poi_bahnhof", "Bahnhof Kilchberg (SBB)", "rail", 2683882.9, 1242070.7, max_road_dist_m=140.0)
+    _add_poi("poi_bendlikon_pier", "Bendlikon Pier (ZSG Badweg)", "pier", 2684036.7, 1242066.4, max_road_dist_m=80.0)
+
+    # Official ZVV/DIDOK bus stops from BUS_STOP_CATALOG
+    bus_stop_ids = [
+        "poi_bus_paradies",
+        "poi_bus_bendlikon",
+        "poi_bus_lindt",
+        "poi_bus_schooren",
+        "poi_bus_schulhaus_dorf",
+        "poi_bus_schwelle",
+        "poi_bus_gemeindehaus",
+        "poi_bus_sanatorium",
+        "poi_bus_paradiessteig",
+        "poi_bus_hornhalden",
+    ]
+    for bs_id, (bs_name, bse, bsn) in zip(bus_stop_ids, BUS_STOP_CATALOG):
+        _add_poi(bs_id, f"Bus {bs_name}", "bus_stop", bse, bsn, max_road_dist_m=25.0)
+
+    # Landmarks, attractions, civic & cultural POIs (off-street campuses snapped to walkable entrance)
+    _add_poi("poi_lindt_plaza", "Lindt Home of Chocolate", "landmark", 2684129.0, 1241412.0, max_road_dist_m=95.0, snap_walk=True)
+    seebad_e, seebad_n = _mvt_poi_coord("Seebad Kilchberg", (2684322.8, 1241427.1))
+    _add_poi("poi_seebad", "Seebad Kilchberg", "bath", seebad_e, seebad_n, max_road_dist_m=95.0, snap_walk=True)
+    san_e, san_n = _mvt_poi_coord("Sanatorium Kilchberg", (2683512.0, 1242428.5))
+    _add_poi("poi_sanatorium", "Sanatorium Kilchberg", "hospital", san_e, san_n, max_road_dist_m=120.0, snap_walk=True)
+    _add_poi("poi_kirche", "Reformierte Kirche Kilchberg", "church", 2683400.0, 1241313.8, max_road_dist_m=60.0)
+    _add_poi("poi_st_elisabeth", "Kirche St. Elisabeth", "church", st_e_en[0], st_e_en[1], max_road_dist_m=60.0)
+    _add_poi("poi_gemeindehaus", "Gemeindehaus Kilchberg", "civic", gem_en[0], gem_en[1], max_road_dist_m=70.0, snap_walk=True)
+
+    # Schools
+    sd_e, sd_n = _mvt_poi_coord("Schulhaus Dorfstrasse", (2683795.4, 1241861.6))
+    _add_poi("poi_schulhaus_dorf", "Schulhaus Dorfstrasse", "school", sd_e, sd_n, max_road_dist_m=70.0, snap_walk=True)
+    sb_e, sb_n = _mvt_poi_coord("Schulhaus Brunnenmoos", (2683573.8, 1241554.4))
+    _add_poi("poi_schulhaus_brunnenmoos", "Schulhaus Brunnenmoos", "school", sb_e, sb_n, max_road_dist_m=80.0, snap_walk=True)
+    sal_e, sal_n = _mvt_poi_coord("Schulhaus Alte Landstrasse und Gemeindehaus", (2683617.4, 1242060.5))
+    _add_poi("poi_schulhaus_alte_landstr", "Schulhaus Alte Landstrasse", "school", sal_e, sal_n, max_road_dist_m=70.0)
+    camp_e, camp_n = _mvt_poi_coord("Campus Kilchberg", (2683507.3, 1240809.0))
+    if _is_valid_land(scene, camp_e, camp_n):
+        _add_poi("poi_campus_kilchberg", "Campus Kilchberg", "school", camp_e, camp_n, max_road_dist_m=80.0)
+
+    # Parks & Fountains
+    morf_e, morf_n = _mvt_poi_coord("Morfanlage", (2683888.0, 1242367.1))
+    _add_poi("poi_morfanlage", "Morfanlage", "park", morf_e, morf_n, max_road_dist_m=80.0, snap_walk=True)
+    nav_e, nav_n = _mvt_poi_coord("Navillepark", (2684165.0, 1241627.9))
+    _add_poi("poi_navillepark", "Navillepark", "park", nav_e, nav_n, max_road_dist_m=80.0)
+    sulz_e, sulz_n = _mvt_poi_coord("Sulzergut", (2684456.6, 1241147.6))
+    if _is_valid_land(scene, sulz_e, sulz_n):
+        _add_poi("poi_sulzergut", "Sulzergut Park", "park", sulz_e, sulz_n, max_road_dist_m=80.0)
+
+    fountain_ids = ["poi_fountain_kirche", "poi_fountain_cf_meyer", "poi_fountain_bahnhof"]
+    for fid, (fname, fe, fn) in zip(fountain_ids, FOUNTAIN_SPECS):
+        _add_poi(fid, f"Brunnen {fname}", "fountain", fe, fn, max_road_dist_m=50.0)
+
+    # Residential neighbourhood clusters computed dynamically from buildings_kilchberg_meta.json
+    nb_accum: dict[str, list[tuple[float, float]]] = {}
+    for b in bldgs_meta:
+        nb = b.get("neighbourhood") or b.get("quartier") or ""
+        if not nb:
+            continue
+        be, bn = float(b["e"]), float(b["n"])
+        if _is_valid_land(scene, be, bn):
+            nb_accum.setdefault(nb, []).append((be, bn))
+    top_nbs = sorted(nb_accum.items(), key=lambda kv: -len(kv[1]))[:9]
+    for nb_name, pts_nb in top_nbs:
+        arr_nb = np.asarray(pts_nb, dtype=np.float64)
+        ce, cn = float(arr_nb[:, 0].mean()), float(arr_nb[:, 1].mean())
+        if not _is_valid_land(scene, ce, cn):
+            # Fall back to building closest to centroid
+            d2 = (arr_nb[:, 0] - ce) ** 2 + (arr_nb[:, 1] - cn) ** 2
+            best_i = int(np.argmin(d2))
+            ce, cn = float(arr_nb[best_i, 0]), float(arr_nb[best_i, 1])
+        slug = re.sub(r"[^a-z0-9]+", "_", nb_name.lower().replace("ö", "oe").replace("ä", "ae").replace("ü", "ue")).strip("_")
+        _add_poi(f"poi_res_{slug}", f"Quartier {nb_name}", "residential", ce, cn, max_road_dist_m=150.0)
+
+    # 4. Residential / Village Feeder Streets (genuine MVT road geometry, every feeder snapped
+    #    at pts[0] or pts[-1] within <= 25 px of its declared connects_road @ connects_frac)
+    # route_mode: "named" (trans_name_feats only), "named+bridge" (named + nearby drive_land),
+    #             or "drive_land" (genuine MVT minor/residential road network from main road).
+    feeder_specs: list[tuple[str, str, str, tuple[float, float], tuple[float, float], float, str | None, str]] = [
+        ("feeder_bahnhofstrasse",    "Bahnhofstrasse",    "residential", (2683968.7, 1241858.4), (2683882.9, 1242070.7), 6.5, "poi_bahnhof",        "named"),
+        ("feeder_badweg",            "Badweg",            "lane",        (2683977.8, 1242044.9), (2684036.7, 1242066.4), 5.0, "poi_bendlikon_pier", "named"),
+        ("feeder_paradiesstrasse",   "Paradiesstrasse",   "residential", (2683770.5, 1242646.8), (2683602.7, 1242358.2), 7.5, None,                 "named"),
+        ("feeder_schoorenstrasse",   "Schoorenstrasse",   "residential", (2684154.2, 1241527.5), (2683959.5, 1240988.1), 7.5, "poi_lindt_plaza",    "named+bridge"),
+        ("feeder_weinbergstrasse",   "Weinbergstrasse",   "residential", (2683879.6, 1241758.9), (2683512.3, 1242931.9), 8.0, None,                 "named"),
+        ("feeder_schlimbergstrasse", "Schlimbergstrasse", "residential", (2683654.3, 1241800.6), (2683229.2, 1242268.9), 7.5, None,                 "named"),
+        ("feeder_stockenstrasse",    "Stockenstrasse",    "residential", (2683654.9, 1241790.5), (2683055.5, 1242859.1), 9.0, "poi_kirche",         "drive_land"),
+        ("feeder_breitloostrasse",   "Breitloostrasse",   "residential", (2683651.3, 1242162.0), (2682893.7, 1242447.3), 8.5, None,                 "drive_land"),
+        ("feeder_kirchenweg",        "Kirchenweg",        "lane",        (2683752.4, 1241356.8), (2684009.6, 1241398.8), 7.0, "poi_kirche",         "named"),
+    ]
+    feeders_out: list[dict] = []
+    for fid, fname, fkind, start_en, end_en, step_m, poi_id, route_mode in feeder_specs:
+        if route_mode == "drive_land":
+            route_segs = drive_land
+        else:
+            raw_segs = _flatten_lines([g for g, p in trans_name_feats if p.get("name") == fname])
+            route_segs = []
+            for ls in raw_segs:
+                if ls.length < 1.0:
+                    continue
+                mp = ls.interpolate(0.5, normalized=True).coords[0]
+                c0, c1 = ls.coords[0], ls.coords[-1]
+                if (
+                    _is_valid_land(scene, float(mp[0]), float(mp[1]))
+                    or _is_valid_land(scene, float(c0[0]), float(c0[1]))
+                    or _is_valid_land(scene, float(c1[0]), float(c1[1]))
+                ):
+                    route_segs.append(ls)
+            if route_mode == "named+bridge" and route_segs:
+                u_named = unary_union(route_segs)
+                bridge_segs = [ls for ls in drive_land if ls.distance(u_named) < 15.0]
+                route_segs = route_segs + bridge_segs
+        if not route_segs:
+            continue
+        stitched = _stitch_exact_path(route_segs, start_en, end_en, subdiv_m=4.0, snap_m=1.5, bridge_m=12.0)
+        if stitched is None:
+            u_geom = unary_union(route_segs)
+            merged_list = [u_geom] if u_geom.geom_type == "LineString" else _flatten_lines([linemerge(u_geom)])
+            if not merged_list:
+                continue
+            stitched = max(merged_list, key=lambda g: float(g.length))
+        clipped = _clip_land_polyline(stitched, scene, step_m=step_m, sig_m=1.4, inset_m=0.5)
+        if clipped is None:
+            continue
+        ef, nf, lf = clipped
+        assert np.all(_is_valid_land_arr(scene, ef, nf)), f"feeder {fid} has out-of-land point"
+        zf, zf_d = _sample_road_z(scene, ef, nf, underpass_poly, allowed_bridge_cls=())
+        pts = _pack_path(
+            cam, shift_x, shift_y, W_full, H_full, obs_z_road,
+            ef, nf, zf + 0.35, vehicle_h=2.0, z_depth=zf_d + 0.35,
+        )
+        for i, p in enumerate(pts):
+            _validate_uv_d16(float(p[0]), float(p[1]), int(p[3]), f"{fid}[{i}]")
+            if i > 0:
+                assert abs(int(p[3]) - int(pts[i - 1][3])) < 1500, f"feeder {fid} d16 spike at {i}"
+
+        # Connect feeder to nearest non-motorway main road (prefer closer endpoint)
+        proj_start = _project_onto_roads(float(ef[0]), float(nf[0]), road_ls_map, candidate_ids=non_mw_roads, max_dist_m=30.0)
+        proj_end = _project_onto_roads(float(ef[-1]), float(nf[-1]), road_ls_map, candidate_ids=non_mw_roads, max_dist_m=30.0)
+        if proj_start is not None and (proj_end is None or proj_start[2] <= proj_end[2]):
+            conn_road, conn_frac, conn_e, conn_n = proj_start[0], proj_start[1], proj_start[3], proj_start[4]
+        elif proj_end is not None:
+            conn_road, conn_frac, conn_e, conn_n = proj_end[0], proj_end[1], proj_end[3], proj_end[4]
+        else:
+            raise AssertionError(f"feeder {fid} endpoints did not snap within 30 m of any main road")
+
+        # Verify screen-pixel snap distance <= 25 px at connects_road @ connects_frac
+        cu, cv, _ = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, conn_e, conn_n, _dem_z(conn_e, conn_n) + 0.35, vehicle_h=2.0)
+        d_px_0 = math.hypot((float(pts[0][0]) - cu) * W_full, (float(pts[0][1]) - cv) * H_full)
+        d_px_1 = math.hypot((float(pts[-1][0]) - cu) * W_full, (float(pts[-1][1]) - cv) * H_full)
+        assert min(d_px_0, d_px_1) <= 25.0, (
+            f"feeder {fid} endpoint snap to {conn_road}@{conn_frac} too far: {min(d_px_0, d_px_1):.1f} px"
+        )
+
+        f_entry: dict = {
+            "id": fid,
+            "name": fname,
+            "kind": fkind,
+            "length_m": round(lf, 1),
+            "pts": pts,
+            "connects_road": conn_road,
+            "connects_frac": conn_frac,
+        }
+        if poi_id is not None and poi_id in poi_coords:
+            f_entry["poi_id"] = poi_id
+        feeders_out.append(f_entry)
+
+    # 5. Connected DEM-Sampled Footpaths & Promenades (1 single connected component over land_walk)
+    footpath_specs: list[tuple[str, str, str, str, str, tuple[float, float] | None, tuple[float, float] | None]] = [
+        ("fp_bahnhof_dorf",          "Bahnhof → Bendlikon",              "commuter",  "poi_bahnhof",               "poi_bus_bendlikon",          None, None),
+        ("fp_bahnhof_pier",          "Bahnhof → Bendlikon Pier",         "commuter",  "poi_bahnhof",               "poi_bendlikon_pier",         None, None),
+        ("fp_pier_bendlikon",        "Bendlikon Pier → Seestrasse",      "promenade", "poi_bendlikon_pier",        "poi_bus_bendlikon",          None, None),
+        ("fp_bendlikon_lindt",       "Seestrasse Promenade → Lindt",     "promenade", "poi_bus_bendlikon",         "poi_lindt_plaza",            None, None),
+        ("fp_bus_lindt_plaza",       "Bus Lindt → Lindt Plaza",          "promenade", "poi_bus_lindt",             "poi_lindt_plaza",            None, None),
+        ("fp_lindt_seebad",          "Lindt → Seebad Kilchberg",         "promenade", "poi_bus_lindt",             "poi_seebad",                 None, None),
+        ("fp_seebad_schooren",       "Seebad → Schooren",                "promenade", "poi_seebad",                "poi_bus_schooren",           None, None),
+        ("fp_bahnhof_schulhaus_dorf", "Bahnhof Footbridge → Schulhaus",  "commuter",  "poi_bahnhof",               "poi_schulhaus_dorf",         None, None),
+        ("fp_schulhaus_dorf_schwelle", "Schulhaus Dorf → Schwelle",      "village",   "poi_schulhaus_dorf",        "poi_bus_schwelle",           None, None),
+        ("fp_schwelle_gemeindehaus", "Schwelle → Gemeindehaus",          "village",   "poi_bus_schwelle",          "poi_gemeindehaus",           None, None),
+        ("fp_schwelle_brunnenmoos",  "Schwelle → Schulhaus Brunnenmoos", "village",   "poi_bus_schwelle",          "poi_schulhaus_brunnenmoos",  None, None),
+        ("fp_brunnenmoos_kirche",    "Brunnenmoos → Reformierte Kirche", "village",   "poi_schulhaus_brunnenmoos", "poi_kirche",                 None, None),
+        ("fp_gemeindehaus_sanatorium", "Gemeindehaus → Sanatorium Park", "park",      "poi_gemeindehaus",          "poi_sanatorium",             None, None),
+        ("fp_pier_morfanlage",       "Bendlikon Pier → Morfanlage",      "promenade", "poi_bendlikon_pier",        "poi_morfanlage",             None, None),
+    ]
+    footpaths_out: list[dict] = []
+    for fpid, fpname, fpkind, from_poi, to_poi, start_ov, end_ov in footpath_specs:
+        if from_poi not in poi_coords or to_poi not in poi_coords:
+            continue
+        s_en = start_ov if start_ov is not None else poi_coords[from_poi]
+        e_en = end_ov if end_ov is not None else poi_coords[to_poi]
+        stitched = _stitch_exact_path(land_walk, s_en, e_en, subdiv_m=4.0, snap_m=1.5, bridge_m=10.0)
+        if stitched is None:
+            continue
+        clipped = _clip_land_polyline(stitched, scene, step_m=5.5, sig_m=1.2, inset_m=0.5)
+        if clipped is None:
+            continue
+        ep, np_, lp = clipped
+        assert np.all(_is_valid_land_arr(scene, ep, np_)), f"footpath {fpid} has out-of-land point"
+        zp, zp_d = _sample_road_z(scene, ep, np_, underpass_poly, allowed_bridge_cls=())
+        pts = _pack_path(
+            cam, shift_x, shift_y, W_full, H_full, obs_z_road,
+            ep, np_, zp + 0.25, vehicle_h=1.7, z_depth=zp_d + 0.25,
+        )
+        for i, p in enumerate(pts):
+            _validate_uv_d16(float(p[0]), float(p[1]), int(p[3]), f"{fpid}[{i}]")
+            if i > 0:
+                assert abs(int(p[3]) - int(pts[i - 1][3])) < 1500, f"footpath {fpid} d16 spike at {i}"
+        fu0, fv0 = poi_uv[from_poi]
+        tu0, tv0 = poi_uv[to_poi]
+        d_from_px = math.hypot((float(pts[0][0]) - fu0) * W_full, (float(pts[0][1]) - fv0) * H_full)
+        d_to_px = math.hypot((float(pts[-1][0]) - tu0) * W_full, (float(pts[-1][1]) - tv0) * H_full)
+        assert d_from_px <= 40.0 and d_to_px <= 40.0, (
+            f"footpath {fpid} endpoint gap too large: d_from={d_from_px:.1f} px, d_to={d_to_px:.1f} px"
+        )
+        footpaths_out.append({
+            "id": fpid,
+            "name": fpname,
+            "kind": fpkind,
+            "length_m": round(lp, 1),
+            "pts": pts,
+            "from_poi": from_poi,
+            "to_poi": to_poi,
+        })
+
+    # 6. Additional Active Sports Fields (5 verified fields from buildings_kilchberg_meta.json sports_fields[4:])
+    sports_fields = scene.meta.get("sports_fields", [])
+    extra_sports_specs: list[tuple[str, int]] = [
+        ("sports_lakeside_tennis",        13),
+        ("sports_brunnenmoos_football",   12),
+        ("sports_brunnenmoos_multisport", 11),
+        ("sports_gemeindehaus_multisport", 14),
+        ("sports_hochweid_upper_football", 4),
+    ]
+    extra_sports_out: list[dict] = []
+    for sp_id, sf_idx in extra_sports_specs:
+        if sf_idx >= len(sports_fields):
+            continue
+        sf = sports_fields[sf_idx]
+        se, sn = float(sf["e"]), float(sf["n"])
+        if not _is_valid_land(scene, se, sn):
+            continue
+        sz = float(sf.get("z", _dem_z(se, sn)))
+        u, v, d16 = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, se, sn, sz + 0.25, vehicle_h=1.7)
+        _validate_uv_d16(u, v, d16, sp_id)
+        extra_sports_out.append({
+            "id": sp_id,
+            "kind": str(sf.get("kind", "multisport")),
+            "u": u,
+            "v": v,
+            "d16": d16,
+            "w_m": round(float(sf["width"]), 1),
+            "h_m": round(float(sf["length"]), 1),
+            "angle": round(float(sf["angle"]), 4),
+        })
+
+    network_out = {
+        "crosswalks": crosswalks_out,
+        "junctions": junctions_out,
+        "feeders": feeders_out,
+        "footpaths": footpaths_out,
+        "pois": pois_out,
+        "extra_sports": extra_sports_out,
+    }
+
+    # Final guardrail assertions on network block
+    assert 6 <= len(crosswalks_out) <= 8, f"expected 6..8 crosswalks, got {len(crosswalks_out)}"
+    assert len(junctions_out) >= 5, f"expected >=5 junctions, got {len(junctions_out)}"
+    assert len(feeders_out) >= 8, f"expected >=8 feeders, got {len(feeders_out)}"
+    assert len(footpaths_out) >= 10, f"expected >=10 footpaths, got {len(footpaths_out)}"
+    assert len(pois_out) >= 25, f"expected >=25 pois, got {len(pois_out)}"
+    assert 3 <= len(extra_sports_out) <= 5, f"expected 3..5 extra_sports, got {len(extra_sports_out)}"
+    net_text = json.dumps(network_out, separators=(",", ":"))
+    assert _PROHIBITED_AERIAL_RE.search(net_text) is None, "prohibited aerial term found in network JSON"
+    return network_out
+
+
 def export_animations(mpp_full: float = 0.25) -> Path:
     scene = _load_anim_scene(RAW_CACHE_DIR)
     cam = IsometricCamera(mpp=mpp_full)
@@ -990,6 +1676,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
     underpass_poly = unary_union(road_tunnel_geoms + rail_occ_geoms) if (road_tunnel_geoms or rail_occ_geoms) else None
 
     roads_out = []
+    road_lv95: dict[str, tuple[np.ndarray, np.ndarray, float]] = {}
 
     def _emit_road(
         route_id: str,
@@ -1017,6 +1704,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         if clipped is None:
             return
         er, nr, lr = clipped
+        road_lv95[route_id] = (er, nr, lr)
         zr, zr_d = _sample_road_z(scene, er, nr, underpass_poly, allowed_bridge_cls=allowed_bridge_cls)
         entry: dict = {
             "id": route_id,
@@ -1174,6 +1862,10 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             speed_mps=9.2, has_bus=True, bus_count=1, car_count=6, phase=0.58,
             allowed_bridge_cls=(), vehicle_h=2.2,
         )
+    # 2b. Multimodal Geography & Network Export (reuses obs_z_road & exact road_lv95 before freeing)
+    network_out = _build_network(
+        scene, cam, shift_x, shift_y, W_full, H_full, mvt, obs_z_road, underpass_poly, road_lv95,
+    )
     del obs_z_road
     gc.collect()
 
@@ -1412,17 +2104,25 @@ def export_animations(mpp_full: float = 0.25) -> Path:
             "shoreline": shoreline_out,
             "vignettes": vignettes_out,
         },
+        "network": network_out,
     }
 
     out_p = DOCS_DIR / "data" / "kilchberg_animations.json"
     out_p.parent.mkdir(parents=True, exist_ok=True)
-    out_p.write_text(json.dumps(payload, separators=(",", ":")))
+    serialized = json.dumps(payload, separators=(",", ":"))
+    assert _PROHIBITED_AERIAL_RE.search(serialized) is None, "prohibited aerial term found in kilchberg_animations.json"
+    out_p.write_text(serialized)
+    size_bytes = out_p.stat().st_size
+    assert size_bytes < 650 * 1024, f"kilchberg_animations.json too large: {size_bytes} bytes (>= 650 KB)"
     print(
         f"[anim] Exported {len(trains_out)} trains, {len(roads_out)} roads, "
         f"{len(ships_out)} ships/boats, {len(flags_out)} flags, "
         f"{len(village_chimneys_out)} chimneys, {len(fountains_out)} fountains, "
-        f"{len(gulls_out)} gulls, {len(shoreline_out)} shoreline pts -> "
-        f"{out_p} ({out_p.stat().st_size // 1024} KB)"
+        f"{len(gulls_out)} gulls, {len(shoreline_out)} shoreline pts, "
+        f"network(cw={len(network_out['crosswalks'])}, junc={len(network_out['junctions'])}, "
+        f"feeders={len(network_out['feeders'])}, fp={len(network_out['footpaths'])}, "
+        f"pois={len(network_out['pois'])}, sports={len(network_out['extra_sports'])}) -> "
+        f"{out_p} ({size_bytes // 1024} KB)"
     )
     return out_p
 

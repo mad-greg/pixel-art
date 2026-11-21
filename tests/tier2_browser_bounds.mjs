@@ -158,6 +158,86 @@ async function runTests(harness, test) {
       assert(desktop.exceptions.length === prevExc, `No-match search threw JS error: ${desktop.exceptions.slice(prevExc).join('; ')}`);
       await desktop.typeText(sel, '');
     });
+
+    await test('T2.FA3.07', 'Realistic daytime entity density bounds via window.__dioramaDebug.simStats', async () => {
+      const dbg = await desktop.getDebug();
+      const sim = dbg?.simStats;
+      assert(sim && typeof sim === 'object', 'window.__dioramaDebug.simStats missing (v8.0 Contract #3)');
+      assert(
+        sim.vehicles >= 40 && sim.vehicles <= 160,
+        `Daytime simStats.vehicles=${sim.vehicles} outside realistic [40, 160] range`,
+      );
+      assert(
+        sim.pedestrians >= 40 && sim.pedestrians <= 220,
+        `Daytime simStats.pedestrians=${sim.pedestrians} outside realistic [40, 220] range`,
+      );
+      assert(sim.activeTrips >= 10, `Expected simStats.activeTrips >= 10, got ${sim.activeTrips}`);
+      assert(sim.brakingCount >= 0 && sim.brakingCount <= sim.vehicles, `brakingCount=${sim.brakingCount} out of [0, ${sim.vehicles}]`);
+      assert(sim.yieldingCount >= 0 && sim.yieldingCount <= sim.vehicles, `yieldingCount=${sim.yieldingCount} out of [0, ${sim.vehicles}]`);
+    });
+
+    await test('T2.FA3.08', 'Active IDM car-following / bus-dwell queueing & non-gridlock invariant across timestamps', async () => {
+      const timestamps = [10, 22, 34, 46];
+      let maxBraking = 0;
+      let maxYielding = 0;
+      const samples = [];
+
+      for (const t of timestamps) {
+        await desktop.navigate(`/?mode=day&t=${t}`, { waitReady: true });
+        await sleep(140);
+        const dbg = await desktop.getDebug();
+        const sim = dbg?.simStats;
+        assert(sim && typeof sim === 'object', `window.__dioramaDebug.simStats missing at ?t=${t} (v8.0 Contract #3)`);
+        assert(sim.vehicles > 0, `Expected vehicles > 0 at ?t=${t}, got ${sim.vehicles}`);
+        assert(sim.brakingCount >= 0 && sim.brakingCount <= sim.vehicles, `Invalid brakingCount=${sim.brakingCount} at ?t=${t}`);
+        assert(sim.yieldingCount >= 0 && sim.yieldingCount <= sim.vehicles, `Invalid yieldingCount=${sim.yieldingCount} at ?t=${t}`);
+
+        const moving = sim.vehicles - sim.brakingCount;
+        const minMoving = Math.floor(sim.vehicles * 0.3);
+        assert(
+          moving >= minMoving,
+          `Traffic gridlock at ?t=${t}: only ${moving}/${sim.vehicles} vehicles moving (brakingCount=${sim.brakingCount})`,
+        );
+
+        if (typeof sim.clippingCount === 'number') {
+          assert(sim.clippingCount === 0, `Vehicle clipping detected at ?t=${t}: clippingCount=${sim.clippingCount}`);
+        }
+        if (typeof sim.overlapCount === 'number') {
+          assert(sim.overlapCount === 0, `Vehicle overlap detected at ?t=${t}: overlapCount=${sim.overlapCount}`);
+        }
+
+        maxBraking = Math.max(maxBraking, sim.brakingCount);
+        maxYielding = Math.max(maxYielding, sim.yieldingCount);
+        samples.push(`t=${t}(v=${sim.vehicles},b=${sim.brakingCount},y=${sim.yieldingCount})`);
+      }
+
+      assert(
+        maxBraking >= 1 || maxYielding >= 1,
+        `No active IDM braking or crosswalk yielding observed across ${samples.join(', ')}`,
+      );
+    });
+
+    await test('T2.FA3.09', 'SUP paddler water-mask presence & diurnal guardrail (day active, night 0)', async () => {
+      await desktop.navigate('/?mode=day&t=10', { waitReady: true });
+      await sleep(180);
+      const dbgDay = await desktop.getDebug();
+      assert(dbgDay && dbgDay.waterMaskReady === true, `Expected waterMaskReady === true, got ${dbgDay?.waterMaskReady}`);
+      assert(
+        dbgDay.livingCounts && typeof dbgDay.livingCounts.sups === 'number' && dbgDay.livingCounts.sups >= 2,
+        `Expected daytime livingCounts.sups >= 2, got ${dbgDay?.livingCounts?.sups}`,
+      );
+
+      await desktop.clickSelector('#btn-mode-night');
+      await sleep(240);
+      const dbgNight = await desktop.getDebug();
+      assert(
+        dbgNight && dbgNight.livingCounts && dbgNight.livingCounts.sups === 0,
+        `Expected nighttime livingCounts.sups === 0, got ${dbgNight?.livingCounts?.sups}`,
+      );
+
+      await desktop.clickSelector('#btn-mode-day');
+      await sleep(160);
+    });
   } finally {
     await harness.closeTab(desktop);
   }

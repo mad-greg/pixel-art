@@ -28,6 +28,7 @@ from tests.lib.assets_helper import (
     filter_dilated_components,
     find_interior_components,
     get_day_island_and_exterior_masks,
+    get_lake_zurich_mask_2x,
     get_landmark_uv,
     load_animations_json,
     load_depth_rgb,
@@ -551,8 +552,78 @@ class TestTier2FA2GeospatialBounds(unittest.TestCase):
                 self.assertTrue(1.0 <= spd <= 5.0, f"{ship['id']} sailboat speed {spd} m/s unrealistic")
             elif kind == "zsg_steamer":
                 self.assertTrue(4.0 <= spd <= 10.0, f"{ship['id']} steamer speed {spd} m/s unrealistic")
+            elif any(k in kind.lower() or k in str(ship.get("id", "")).lower() for k in ("sup", "paddle", "rowboat", "skiff")):
+                self.assertTrue(0.5 <= spd <= 2.5, f"{ship['id']} slow watercraft speed {spd} m/s unrealistic (Guardrail #2)")
             else:
                 self.assertTrue(1.0 <= spd <= 12.0, f"{ship['id']} speed {spd} m/s unrealistic")
+
+    @test_meta("T2.FA2.07", "Network graph UV [0,1], non-spiking d16, island & zero water intrusion")
+    def test_07_network_dem_and_zero_water_intrusion(self) -> None:
+        anim = load_animations_json()
+        net = anim.get("network")
+        self.assertIsInstance(
+            net,
+            dict,
+            "kilchberg_animations.json missing 'network' object (v8.0 Contract #2)",
+        )
+
+        island_2x = get_day_island_and_exterior_masks()["island_2x"]
+        lake_eroded_2x = get_lake_zurich_mask_2x()["lake_eroded_2x"]
+        h2, w2 = island_2x.shape
+
+        violations: list[str] = []
+
+        def _check_pt(label: str, u: float, v: float, d16: float) -> None:
+            if len(violations) >= 10:
+                return
+            if not (0.0 <= u <= 1.0 and 0.0 <= v <= 1.0):
+                violations.append(f"{label}: UV ({u:.4f}, {v:.4f}) out of [0,1]")
+                return
+            if not (math.isfinite(d16) and 1.0 <= d16 <= 65534.0):
+                violations.append(f"{label}: invalid d16={d16}")
+                return
+            x2 = int(round(u * (w2 - 1)))
+            y2 = int(round(v * (h2 - 1)))
+            if not bool(island_2x[y2, x2]):
+                violations.append(f"{label}: UV ({u:.4f}, {v:.4f}) falls outside diorama island mask")
+                return
+            if bool(lake_eroded_2x[y2, x2]):
+                violations.append(f"{label}: UV ({u:.4f}, {v:.4f}) intrudes into Lake Zurich water mask")
+
+        for col in ("crosswalks", "junctions", "pois", "extra_sports"):
+            for item in net.get(col, []):
+                if len(violations) >= 10:
+                    break
+                _check_pt(
+                    f"{col}/{item.get('id', '?')}",
+                    float(item["u"]),
+                    float(item["v"]),
+                    float(item["d16"]),
+                )
+
+        for col in ("feeders", "footpaths"):
+            for item in net.get(col, []):
+                if len(violations) >= 10:
+                    break
+                pts = item.get("pts", [])
+                self.assertGreaterEqual(len(pts), 2, f"{col}/{item.get('id', '?')} has <2 vertices")
+                prev_d16 = None
+                for i, p in enumerate(pts):
+                    if len(violations) >= 10:
+                        break
+                    u, v, d16 = float(p[0]), float(p[1]), float(p[3])
+                    _check_pt(f"{col}/{item.get('id', '?')}[{i}]", u, v, d16)
+                    if prev_d16 is not None and abs(d16 - prev_d16) >= 8000.0:
+                        violations.append(
+                            f"{col}/{item.get('id', '?')}[{i}]: abrupt d16 spike {prev_d16}->{d16}"
+                        )
+                    prev_d16 = d16
+
+        self.assertEqual(
+            violations,
+            [],
+            f"Network graph DEM/water/UV violations: {'; '.join(violations)}",
+        )
 
 
 if __name__ == "__main__":

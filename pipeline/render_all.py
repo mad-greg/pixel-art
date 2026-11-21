@@ -73,6 +73,7 @@ def render_everything(
     skip_full: bool = False,
     crops: tuple[str, ...] | None = None,
     crop_preset: str = "day",
+    depth_only: bool = False,
 ) -> None:
     extract_scene(force=False)
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
@@ -83,6 +84,22 @@ def render_everything(
     t0 = time.time()
     scene = SceneData()
     print(f"[render] Loaded Kilchberg 3D scene in {time.time() - t0:.1f}s")
+
+    if depth_only:
+        t_p = time.time()
+        render_diorama_tiled_hires(
+            scene,
+            mpp=mpp_full,
+            preset_key="day",
+            tiles_dir=DOCS_DIR / "assets" / "tiles" / "day",
+            overview_webp_path=DOCS_DIR / "assets" / "diorama_day.webp",
+            full_png_path=RENDERS_DIR / "kilchberg_diorama_day.png",
+            tile_size=1024,
+            collect_hit_boxes=False,
+            depth_only=True,
+        )
+        print(f"[render] Depth-only pass complete in {time.time() - t_p:.1f}s")
+        return
 
     meta_out_p = DOCS_DIR / "data" / "kilchberg_interactive.json"
     if not skip_full:
@@ -160,6 +177,7 @@ if __name__ == "__main__":
     ap.add_argument("--skip-full", action="store_true")
     ap.add_argument("--crops", nargs="+", default=None)
     ap.add_argument("--crop-preset", choices=["day", "sunset", "night"], default="day")
+    ap.add_argument("--depth-only", action="store_true")
     args = ap.parse_args()
     render_everything(
         mpp_full=args.mpp_full,
@@ -170,4 +188,5 @@ if __name__ == "__main__":
         skip_full=args.skip_full,
         crops=tuple(args.crops) if args.crops else None,
         crop_preset=args.crop_preset,
+        depth_only=args.depth_only,
     )

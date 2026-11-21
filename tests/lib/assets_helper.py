@@ -527,6 +527,77 @@ def get_day_island_and_exterior_masks() -> Dict[str, Any]:
     }
 
 
+@functools.lru_cache(maxsize=2)
+def get_lake_zurich_mask_2x() -> Dict[str, np.ndarray]:
+    """Opaque-box Lake Zurich water mask (2x pooled overview) from diorama_day.webp.
+
+    Finds the largest blue 4-connected component inside the diorama island and
+    returns both the raw 2x mask and an eroded (~2 m interior buffer, size=5)
+    mask so shoreline boardwalks/piers never false-fail while offshore water
+    intrusions are caught cleanly.
+    """
+    day = load_overview_rgb("day")
+    island_full = get_day_island_and_exterior_masks()["island_full"]
+    r = day[..., 0].astype(np.int16)
+    g = day[..., 1].astype(np.int16)
+    b = day[..., 2].astype(np.int16)
+    blue = (b > r + 15) & (g > r + 10) & island_full
+
+    h, w = blue.shape
+    blue_2x = blue[: (h // 2) * 2, : (w // 2) * 2].reshape(h // 2, 2, w // 2, 2).all(axis=(1, 3))
+    comps, runs, parent = rle_connected_components_4(blue_2x)
+
+    lake_2x = np.zeros_like(blue_2x, dtype=np.bool_)
+    if comps:
+        lake_root = comps[0]["root"]
+        for y, x0, x1, rid in runs:
+            if parent[rid] == lake_root:
+                lake_2x[y, x0:x1] = True
+
+    lake_eroded_2x = erode_mask_pil(lake_2x, size=5)
+    return {
+        "lake_2x": lake_2x,
+        "lake_eroded_2x": lake_eroded_2x,
+    }
+
+
+def count_depth_roof_small_hits(
+    pts: List[List[float]],
+    b_occ: np.ndarray,
+    d16_map: np.ndarray,
+    dy_lo: int,
+    dy_hi: int,
+    max_delta: int = 45,
+) -> Tuple[int, int]:
+    """Count open-air (occ==0) roof-band centerline samples with small occluder hits.
+
+    A small positive delta (0 < veh_d16 - scene_d16 <= max_delta) directly above
+    an open-air rail/road centerline indicates overhead wire/pole occluder pixels
+    punching holes across tall vehicle roofs.
+    """
+    h, w = b_occ.shape
+    small_hits = 0
+    total = 0
+    for p in pts:
+        if len(p) < 4:
+            continue
+        u, v, occ, vd16 = float(p[0]), float(p[1]), int(p[2]), int(round(float(p[3])))
+        if occ:
+            continue
+        x = int(round(u * (w - 1)))
+        y = int(round(v * (h - 1)))
+        y0 = max(0, y - dy_hi)
+        y1 = max(0, y - dy_lo + 1)
+        if 0 <= x < w and y0 < y1:
+            total += 1
+            col_occ = b_occ[y0:y1, x]
+            if np.any(col_occ):
+                dd = vd16 - d16_map[y0:y1, x][col_occ].astype(np.int32)
+                if np.any((dd > 0) & (dd <= max_delta)):
+                    small_hits += 1
+    return small_hits, total
+
+
 def distance_to_exterior_sky_m(u: float, v: float) -> float:
     """Euclidean distance in meters from normalized (u, v) to exterior sky (~1.0 m/px accuracy)."""
     masks = get_day_island_and_exterior_masks()

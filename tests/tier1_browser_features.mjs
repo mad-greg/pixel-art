@@ -461,6 +461,34 @@ async function runTests(harness, test) {
       assert(typeof dbg.audioEnabled === 'boolean', `Invalid debug.audioEnabled: ${dbg.audioEnabled}`);
       assert(typeof dbg.searchResultCount === 'number', `Invalid debug.searchResultCount: ${dbg.searchResultCount}`);
     });
+
+    await test('T1.FA3.13', 'window.__dioramaDebug.simStats exposes v8.0 simulation telemetry with valid numeric fields', async () => {
+      const dbg = await tab.getDebug();
+      assert(dbg && typeof dbg === 'object', 'window.__dioramaDebug is missing or not an object (Contract #5)');
+      const missingContract5 = REQUIRED_DEBUG_KEYS.filter((k) => !(k in dbg));
+      assert(missingContract5.length === 0, `window.__dioramaDebug missing Contract #5 keys: ${missingContract5.join(', ')}`);
+      assert(dbg.livingCounts && typeof dbg.livingCounts === 'object', 'window.__dioramaDebug.livingCounts missing');
+      assert(dbg.depthStats && typeof dbg.depthStats === 'object', 'window.__dioramaDebug.depthStats missing');
+
+      const sim = dbg.simStats;
+      assert(sim && typeof sim === 'object', 'window.__dioramaDebug.simStats missing (v8.0 Contract #3)');
+
+      const reqSimKeys = ['vehicles', 'brakingCount', 'yieldingCount', 'pedestrians', 'boardingCount', 'activeTrips', 'bellPhase'];
+      const missingSim = reqSimKeys.filter((k) => typeof sim[k] !== 'number' || !Number.isFinite(sim[k]));
+      assert(missingSim.length === 0, `simStats missing finite numeric keys: ${missingSim.join(', ')}`);
+
+      assert(sim.vehicles > 0, `Expected simStats.vehicles > 0, got ${sim.vehicles}`);
+      assert(sim.pedestrians > 0, `Expected simStats.pedestrians > 0, got ${sim.pedestrians}`);
+      assert(sim.activeTrips > 0, `Expected simStats.activeTrips > 0, got ${sim.activeTrips}`);
+      assert(sim.brakingCount >= 0 && sim.brakingCount <= sim.vehicles, `Invalid simStats.brakingCount=${sim.brakingCount} (vehicles=${sim.vehicles})`);
+      assert(sim.yieldingCount >= 0 && sim.yieldingCount <= sim.vehicles, `Invalid simStats.yieldingCount=${sim.yieldingCount} (vehicles=${sim.vehicles})`);
+      assert(sim.boardingCount >= 0, `Invalid simStats.boardingCount=${sim.boardingCount}`);
+      assert(sim.bellPhase >= 0 && sim.bellPhase < 1, `Invalid simStats.bellPhase=${sim.bellPhase} (expected [0, 1))`);
+
+      assert(tab.localHttpErrors.length === 0, `Local HTTP errors (ES module 404s): ${tab.localHttpErrors.map((e) => `${e.status} ${e.url}`).join('; ')}`);
+      assert(tab.localLoadFailures.length === 0, `Local load failures: ${tab.localLoadFailures.map((e) => `${e.errorText} ${e.url}`).join('; ')}`);
+      assert(tab.exceptions.length === 0, `Runtime JS exceptions: ${tab.exceptions.join('; ')}`);
+    });
   } finally {
     await harness.closeTab(tab);
   }

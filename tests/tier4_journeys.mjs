@@ -1,5 +1,5 @@
 /**
- * Tier 4 (Node CDP): 6 Real-World End-User Application Journeys (T4.01 - T4.06).
+ * Tier 4 (Node CDP): 7 Real-World End-User Application Journeys (T4.01 - T4.07).
  */
 
 import {
@@ -404,6 +404,364 @@ async function runTests(harness, test) {
       await tab.clickSelector('#landmark-list .lm-item:nth-child(1)');
       await tab.waitForCameraSettled();
       assert(tab.exceptions.length === 0, `Mobile landmark tour threw exception: ${tab.exceptions.join('; ')}`);
+    } finally {
+      await harness.closeTab(tab);
+    }
+  });
+
+  // ── T4.07: Journey 7 — Living Kilchberg Commuter & Village Life ──
+  await test('T4.07', 'Journey 7: Living Kilchberg commuter & village life (Bahnhof, Bus dwell, Pier/Lindt/Seebad & trip readout)', async () => {
+    const tab = await harness.openTab('/?mode=day', { width: 1280, height: 800, dpr: 2, waitReady: true });
+    try {
+      // Step 1: Bahnhof Kilchberg & Follow Train
+      tab.resetNetworkCounters();
+      await tab.clickSelector('#landmark-list .lm-item:nth-child(4)');
+      await tab.waitForCameraSettled();
+      await tab.clickSelector('#btn-zoom-2x');
+      await tab.waitForCameraSettled();
+      await sleep(160);
+
+      const dbg1 = await tab.getDebug();
+      assert(dbg1?.simStats && typeof dbg1.simStats === 'object', 'window.__dioramaDebug.simStats missing at Bahnhof (v8.0 Contract #3)');
+      assert(dbg1.simStats.activeTrips > 0, `Expected activeTrips > 0 at Bahnhof, got ${dbg1.simStats.activeTrips}`);
+      assert(dbg1.simStats.pedestrians > 0, `Expected pedestrians > 0 at Bahnhof, got ${dbg1.simStats.pedestrians}`);
+      assert(dbg1.simStats.vehicles > 0, `Expected vehicles > 0 at Bahnhof, got ${dbg1.simStats.vehicles}`);
+
+      let followTrainOk = false;
+      for (let i = 0; i < 6; i++) {
+        const d = await tab.getDebug();
+        if (d?.followTarget === 'train') {
+          followTrainOk = true;
+          break;
+        }
+        await tab.clickSelector('#btn-follow');
+        await sleep(160);
+      }
+      assert(followTrainOk, 'Could not cycle #btn-follow to Follow: Train');
+      await sleep(300);
+      const dbgTrain = await tab.getDebug();
+      assert(dbgTrain.scale >= 1.4, `Expected zoom >= 1.4x during Follow: Train, got ${dbgTrain.scale}`);
+      assert(tab.tileResponses.length >= 1, `Expected >=1 tile load across Bahnhof 2x + Follow: Train, got ${tab.tileResponses.length}`);
+      const trainSample = await tab.captureCanvasSample('#diorama-canvas', 48, 27);
+      assert(trainSample && trainSample.meanLuma > 5, 'Canvas blank during Follow: Train');
+
+      // Step 2: Follow Bus (stop dwell & queueing/braking)
+      let followBusOk = false;
+      for (let i = 0; i < 6; i++) {
+        const d = await tab.getDebug();
+        if (d?.followTarget === 'bus') {
+          followBusOk = true;
+          break;
+        }
+        await tab.clickSelector('#btn-follow');
+        await sleep(160);
+      }
+      assert(followBusOk, 'Could not cycle #btn-follow to Follow: Bus');
+      const dbgBusInit = await tab.getDebug();
+      assert(dbgBusInit.scale >= 1.4, `Expected zoom >= 1.4x during Follow: Bus, got ${dbgBusInit.scale}`);
+
+      for (let s = 0; s < 3; s++) {
+        await sleep(360);
+        const d = await tab.getDebug();
+        assert(d?.simStats && d.simStats.vehicles > 0, `Invalid simStats.vehicles during Follow: Bus sample ${s}`);
+        assert(
+          d.simStats.brakingCount >= 0 && d.simStats.brakingCount <= d.simStats.vehicles,
+          `Invalid simStats.brakingCount=${d.simStats.brakingCount} during Follow: Bus sample ${s}`,
+        );
+      }
+
+      // Cycle Follow back to Off
+      for (let i = 0; i < 6; i++) {
+        const d = await tab.getDebug();
+        if (!d?.followTarget) break;
+        await tab.clickSelector('#btn-follow');
+        await sleep(140);
+      }
+
+      // Step 3: Bendlikon Pier, Lindt HoC & Schooren Seebad living activity
+      await tab.clickSelector('#landmark-list .lm-item:nth-child(3)');
+      await tab.waitForCameraSettled();
+      const pierSample = await tab.captureCanvasSample('#diorama-canvas', 48, 27);
+      const dbgPier = await tab.getDebug();
+      assert(pierSample && pierSample.meanLuma > 5, 'Canvas blank at Bendlikon Pier');
+      assert(dbgPier?.simStats?.activeTrips > 0, 'Expected activeTrips > 0 at Bendlikon Pier');
+
+      await tab.clickSelector('#landmark-list .lm-item:nth-child(1)');
+      await tab.waitForCameraSettled();
+      await tab.clickSelector('#btn-zoom-2x');
+      await tab.waitForCameraSettled();
+      const lindtSample = await tab.captureCanvasSample('#diorama-canvas', 48, 27);
+      const dbgLindt = await tab.getDebug();
+      assert(lindtSample && lindtSample.meanLuma > 5, 'Canvas blank at Lindt HoC');
+      assert(dbgLindt?.simStats?.pedestrians > 0, 'Expected pedestrians > 0 at Lindt HoC');
+
+      await tab.clickSelector('#landmark-list .lm-item:nth-child(5)');
+      await tab.waitForCameraSettled();
+      await tab.clickSelector('#btn-zoom-2x');
+      await tab.waitForCameraSettled();
+      await sleep(160);
+      const dbgSeebad = await tab.getDebug();
+      assert(dbgSeebad?.waterMaskReady === true, `Expected waterMaskReady === true at Seebad, got ${dbgSeebad?.waterMaskReady}`);
+      assert(
+        dbgSeebad?.livingCounts?.sups >= 2,
+        `Expected livingCounts.sups >= 2 at Schooren Seebad, got ${dbgSeebad?.livingCounts?.sups}`,
+      );
+
+      // Step 4: Entity trip inspection & zero layout regression
+      const preInsp = await tab.evaluate(`(() => ({
+        title: (document.getElementById('insp-title')?.textContent || '').trim(),
+        cardText: (document.getElementById('inspector-card')?.textContent || '').trim(),
+      }))()`);
+      for (let i = 0; i < 6; i++) {
+        const d = await tab.getDebug();
+        if (d?.followTarget === 'train') break;
+        await tab.clickSelector('#btn-follow');
+        await sleep(140);
+      }
+      await sleep(200);
+      const vpCenter = await tab.evaluate(`(() => {
+        const r = document.getElementById('viewport').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`);
+      await tab.clickPoint(vpCenter.x, vpCenter.y);
+      await sleep(160);
+
+      const layoutCheck = await tab.evaluate(`(() => {
+        const title = (document.getElementById('insp-title')?.textContent || '').trim();
+        const cardText = (document.getElementById('inspector-card')?.textContent || '').trim();
+        const tripEls = Array.from(document.querySelectorAll('[id*="trip" i], [class*="trip" i], [data-trip]'))
+          .filter((el) => {
+            const st = window.getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            return st.display !== 'none' && st.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+          })
+          .map((el) => (el.textContent || '').trim())
+          .filter(Boolean);
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const sels = ['#topbar', '.workspace', '#viewport', '#hud-coords', '.nav-overlay', '#sidebar'];
+        const clipped = [];
+        for (const s of sels) {
+          const el = document.querySelector(s);
+          if (!el) continue;
+          const r = el.getBoundingClientRect();
+          if (r.bottom > vh + 1) clipped.push(s + '.bottom=' + Math.round(r.bottom));
+          if (r.right > vw + 1) clipped.push(s + '.right=' + Math.round(r.right));
+        }
+        return { title, cardText, tripBadge: tripEls.join(' | '), clipped };
+      })()`);
+      assert(layoutCheck.title.length > 0, 'Inspector title #insp-title empty after entity trip inspection');
+      const tripUpdated =
+        layoutCheck.title !== preInsp.title ||
+        layoutCheck.cardText !== preInsp.cardText ||
+        layoutCheck.tripBadge.length > 0;
+      assert(
+        tripUpdated,
+        `Entity trip inspection did not update inspector or show a trip readout (still stuck on "${preInsp.title}")`,
+      );
+      assert(layoutCheck.clipped.length === 0, `Layout clipping detected in Journey 7: ${layoutCheck.clipped.join(', ')}`);
+      assert(tab.exceptions.length === 0, `Exceptions in Journey 7: ${tab.exceptions.join('; ')}`);
+      assert(tab.consoleErrors.length === 0, `console.error in Journey 7: ${tab.consoleErrors.join('; ')}`);
+      assert(tab.localHttpErrors.length === 0, `Local HTTP errors in Journey 7: ${tab.localHttpErrors.map((e) => `${e.status} ${e.url}`).join('; ')}`);
+    } finally {
+      await harness.closeTab(tab);
+    }
+  });
+
+  // ── T4.08: RAF Loop Non-Leak Across Repeated Live: Off -> On Toggles ──
+  await test('T4.08', 'Hardening: repeated Live Off/On toggles never multiply requestAnimationFrame loops', async () => {
+    const tab = await harness.openTab('/', { width: 1280, height: 800, dpr: 2, waitReady: true });
+    try {
+      await sleep(200);
+      await tab.evaluate(`(() => {
+        const orig = window.requestAnimationFrame.bind(window);
+        window.__rafCount = 0;
+        window.requestAnimationFrame = (cb) => {
+          window.__rafCount++;
+          return orig(cb);
+        };
+      })()`);
+      await tab.evaluate('window.__rafCount = 0');
+      await sleep(400);
+      const baseCount = await tab.evaluate('window.__rafCount');
+      assert(baseCount > 0, `Expected active baseline RAF loop, got ${baseCount}`);
+
+      // Toggle Live Off -> On 6 times rapidly (12 clicks)
+      for (let i = 0; i < 12; i++) {
+        await tab.clickSelector('#btn-toggle-anim');
+        await sleep(15);
+      }
+      await sleep(100);
+      await tab.evaluate('window.__rafCount = 0');
+      await sleep(400);
+      const afterCount = await tab.evaluate('window.__rafCount');
+      const maxAllowed = Math.max(Math.ceil(baseCount * 1.8), 40);
+      assert(
+        afterCount <= maxAllowed,
+        `RAF loop multiplied after Live Off/On toggles: baseline=${baseCount}/400ms, after=${afterCount}/400ms (max ${maxAllowed})`,
+      );
+      assert(tab.exceptions.length === 0, `Exceptions in T4.08: ${tab.exceptions.join('; ')}`);
+      assert(tab.consoleErrors.length === 0, `console.error in T4.08: ${tab.consoleErrors.join('; ')}`);
+    } finally {
+      await harness.closeTab(tab);
+    }
+  });
+
+  // ── T4.09: Negative & Extreme ?t= Timestamp Clamping & Frame Stability ──
+  await test('T4.09', 'Hardening: negative (?t=-5) and extreme (?t=1e16) timestamps stay finite and fast', async () => {
+    for (const q of ['/?t=-5', '/?t=1e16']) {
+      const tab = await harness.openTab(q, { width: 1280, height: 800, dpr: 2, waitReady: true });
+      try {
+        const probe = await tab.evaluate(`(async () => {
+          const d = window.__dioramaDebug;
+          // Settle 2 warmup RAF frames so initial depth-map decode / tile composite finishes cleanly
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+          const t0 = performance.now();
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+          const twoFrameMs = performance.now() - t0;
+          return {
+            animTime: d ? d.animTime : null,
+            simStats: d ? d.simStats : null,
+            twoFrameMs,
+          };
+        })()`);
+        assert(Number.isFinite(probe.animTime) && probe.animTime >= 0 && probe.animTime <= 1e9,
+          `${q}: animTime out of clamped range [0, 1e9]: ${probe.animTime}`);
+        assert(probe.simStats && Number.isFinite(probe.simStats.vehicles) && probe.simStats.vehicles > 0,
+          `${q}: invalid simStats.vehicles: ${JSON.stringify(probe.simStats)}`);
+        assert(probe.twoFrameMs < 800,
+          `${q}: frame stall detected (2 RAF frames took ${probe.twoFrameMs.toFixed(1)} ms)`);
+        assert(tab.exceptions.length === 0, `${q} exceptions: ${tab.exceptions.join('; ')}`);
+        assert(tab.consoleErrors.length === 0, `${q} console.error: ${tab.consoleErrors.join('; ')}`);
+      } finally {
+        await harness.closeTab(tab);
+      }
+    }
+  });
+
+  // ── T4.10: Warmup Crosswalk Non-Freeze Across ?t=22, 35, 48 ──
+  await test('T4.10', 'Hardening: ZVV buses advance cleanly across cold ?t=22, 35, 48 loads without crosswalk warmup freeze', async () => {
+    const positions = [];
+    for (const tVal of [22, 35, 48]) {
+      const tab = await harness.openTab(`/?mode=day&zoom=2&follow=bus&t=${tVal}`, {
+        width: 1280,
+        height: 800,
+        dpr: 2,
+        waitReady: true,
+      });
+      try {
+        await sleep(160);
+        const uv = await tab.evaluate('(() => ({ u: window.__dioramaDebug.u, v: window.__dioramaDebug.v }))()');
+        assert(Number.isFinite(uv.u) && Number.isFinite(uv.v), `Invalid bus follow UV at t=${tVal}: ${JSON.stringify(uv)}`);
+        positions.push({ tVal, ...uv });
+        assert(tab.exceptions.length === 0, `t=${tVal} exceptions: ${tab.exceptions.join('; ')}`);
+      } finally {
+        await harness.closeTab(tab);
+      }
+    }
+    const d1 = Math.hypot(positions[1].u - positions[0].u, positions[1].v - positions[0].v);
+    const d2 = Math.hypot(positions[2].u - positions[1].u, positions[2].v - positions[1].v);
+    assert(
+      d1 > 0.002 && d2 > 0.002,
+      `Followed ZVV bus appears frozen across ?t=22/35/48: d(22->35)=${d1.toFixed(5)}, d(35->48)=${d2.toFixed(5)}, pos=${JSON.stringify(positions)}`,
+    );
+  });
+
+  // ── T4.11: Follow: Train 2x Center Click & Human-Readable Road Inspector Titles ──
+  await test('T4.11', 'Hardening: Follow: Train 2x center click selects SBB train & bus/car titles hide raw snake_case road IDs', async () => {
+    // 1. Follow: Train center click at 2x must hit the SBB train (not a background house)
+    const trainTab = await harness.openTab('/?mode=day&zoom=2&follow=train&t=22', {
+      width: 1280,
+      height: 800,
+      dpr: 2,
+      waitReady: true,
+    });
+    try {
+      await sleep(220);
+      const vp = await trainTab.evaluate(`(() => {
+        const r = document.getElementById('viewport').getBoundingClientRect();
+        return { x: r.left + r.width * 0.5, y: r.top + r.height * 0.5 };
+      })()`);
+      await trainTab.clickPoint(vp.x, vp.y);
+      await sleep(180);
+      const res = await trainTab.evaluate(`(() => ({
+        title: (document.getElementById('insp-title') || {}).textContent || '',
+        selectedBuilding: window.__dioramaDebug ? window.__dioramaDebug.selectedBuilding : null,
+      }))()`);
+      assert(
+        /SBB\s+(S8|S24|IC)/i.test(res.title) && res.selectedBuilding === null,
+        `Follow: Train center click at 2x missed train: title="${res.title}", selectedBuilding=${res.selectedBuilding}`,
+      );
+      assert(trainTab.exceptions.length === 0, `T4.11 train exceptions: ${trainTab.exceptions.join('; ')}`);
+    } finally {
+      await harness.closeTab(trainTab);
+    }
+
+    // 2. Follow: Bus center click at 2x must show human-readable road name (no raw snake_case IDs)
+    const busTab = await harness.openTab('/?mode=day&zoom=2&follow=bus&t=22', {
+      width: 1280,
+      height: 800,
+      dpr: 2,
+      waitReady: true,
+    });
+    try {
+      await sleep(220);
+      const vp = await busTab.evaluate(`(() => {
+        const r = document.getElementById('viewport').getBoundingClientRect();
+        return { x: r.left + r.width * 0.5, y: r.top + r.height * 0.5 };
+      })()`);
+      await busTab.clickPoint(vp.x, vp.y);
+      await sleep(180);
+      const title = await busTab.evaluate(`(document.getElementById('insp-title') || {}).textContent || ''`);
+      assert(/ZVV\s+Bus/i.test(title), `Follow: Bus center click did not select ZVV bus: title="${title}"`);
+      assert(
+        !/(dorfstrasse_viaduct|seestrasse_|alte_landstrasse|a3_motorway)/i.test(title),
+        `Raw snake_case road ID leaked into inspector title: "${title}"`,
+      );
+      assert(busTab.exceptions.length === 0, `T4.11 bus exceptions: ${busTab.exceptions.join('; ')}`);
+    } finally {
+      await harness.closeTab(busTab);
+    }
+  });
+
+  // ── T4.12: Mobile 390x844 .topbar Zero Horizontal Overflow ──
+  await test('T4.12', 'Hardening: mobile 390x844 .topbar has zero horizontal overflow (scrollWidth <= clientWidth)', async () => {
+    const tab = await harness.openTab('/?t=10', { width: 390, height: 844, dpr: 2, waitReady: true });
+    try {
+      await sleep(180);
+      const m0 = await tab.evaluate(`(() => {
+        const tb = document.getElementById('topbar');
+        const tr = tb.getBoundingClientRect();
+        return {
+          tbScrollW: tb.scrollWidth,
+          tbClientW: tb.clientWidth,
+          tbLeft: Math.round(tr.left),
+          tbRight: Math.round(tr.right),
+          docScrollW: document.documentElement.scrollWidth,
+          innerW: window.innerWidth,
+        };
+      })()`);
+      assert(
+        m0.tbScrollW <= m0.tbClientW,
+        `Mobile .topbar horizontal overflow: scrollWidth=${m0.tbScrollW} > clientWidth=${m0.tbClientW}`,
+      );
+      assert(
+        m0.docScrollW <= m0.innerW,
+        `Mobile document horizontal overflow: scrollWidth=${m0.docScrollW} > innerWidth=${m0.innerW}`,
+      );
+      assert(m0.tbLeft === 0 && m0.tbRight <= m0.innerW + 1, `Mobile .topbar misaligned: ${JSON.stringify(m0)}`);
+
+      // Open sidebar drawer and verify no horizontal shift
+      await tab.clickSelector('#btn-toggle-sidebar');
+      await sleep(220);
+      const m1 = await tab.evaluate(`(() => {
+        const tb = document.getElementById('topbar');
+        const tr = tb.getBoundingClientRect();
+        return { tbScrollW: tb.scrollWidth, tbClientW: tb.clientWidth, tbLeft: Math.round(tr.left) };
+      })()`);
+      assert(m1.tbScrollW <= m1.tbClientW && m1.tbLeft === 0,
+        `Mobile .topbar shifted/overflowed after opening drawer: ${JSON.stringify(m1)}`);
+      assert(tab.exceptions.length === 0, `T4.12 exceptions: ${tab.exceptions.join('; ')}`);
     } finally {
       await harness.closeTab(tab);
     }

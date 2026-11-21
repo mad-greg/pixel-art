@@ -658,6 +658,30 @@ export class CDPTab {
     })()`);
   }
 
+  /**
+   * Native-pixel ROI capture around (cxFrac, cyFrac) of canvas (no downsampling).
+   * Used for opaque-box vehicle roof opacity & perforation checks at 2x zoom.
+   */
+  async captureCanvasRegion(selector = '#diorama-canvas', { cxFrac = 0.5, cyFrac = 0.5, boxW = 120, boxH = 80 } = {}) {
+    return this.evaluate(`(() => {
+      const src = document.querySelector(${JSON.stringify(selector)});
+      if (!src || src.width < 16 || src.height < 16) return null;
+      const w = Math.min(${boxW}, src.width);
+      const h = Math.min(${boxH}, src.height);
+      const x0 = Math.max(0, Math.min(src.width - w, Math.round(src.width * ${cxFrac} - w / 2)));
+      const y0 = Math.max(0, Math.min(src.height - h, Math.round(src.height * ${cyFrac} - h / 2)));
+      const ctx = src.getContext('2d');
+      const data = ctx.getImageData(x0, y0, w, h).data;
+      const pixels = new Array(w * h * 3);
+      for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
+        pixels[j] = data[i];
+        pixels[j + 1] = data[i + 1];
+        pixels[j + 2] = data[i + 2];
+      }
+      return { width: w, height: h, pixels };
+    })()`);
+  }
+
   async close() {
     if (this.closed) return;
     this.closed = true;
@@ -694,6 +718,94 @@ export function diffCanvasSamples(s1, s2) {
     meanAbsDiff: sumAbs / nPix,
     changedFrac: changed / nPix,
     maxDiff,
+  };
+}
+
+/**
+ * Opaque-box vehicle roof opacity & interior perforation analyzer.
+ * Compares native-pixel ROIs captured with Live: On vs Live: Off at the exact
+ * same camera pose. Narrow 2-4px wire/catenary cutouts punching background
+ * grass through a train or bus roof show up as narrow gaps bridged on opposite
+ * sides (<=4px left+right OR <=4px up+down) by rendered vehicle pixels, while
+ * clean solid roofs and >=9px solid foreground building occluders yield 0%.
+ */
+export function analyzeVehicleRoofOpacity(roiOn, roiOff, diffThresh = 14) {
+  if (
+    !roiOn ||
+    !roiOff ||
+    !roiOn.pixels ||
+    !roiOff.pixels ||
+    roiOn.width !== roiOff.width ||
+    roiOn.height !== roiOff.height ||
+    roiOn.pixels.length !== roiOff.pixels.length
+  ) {
+    return { vehPixels: 0, interiorHoles: 0, holeFrac: 1.0 };
+  }
+  const w = roiOn.width;
+  const h = roiOn.height;
+  const pOn = roiOn.pixels;
+  const pOff = roiOff.pixels;
+  const isVeh = new Uint8Array(w * h);
+  let vehPixels = 0;
+
+  for (let idx = 0, j = 0; idx < w * h; idx++, j += 3) {
+    const dr = Math.abs(pOn[j] - pOff[j]);
+    const dg = Math.abs(pOn[j + 1] - pOff[j + 1]);
+    const db = Math.abs(pOn[j + 2] - pOff[j + 2]);
+    if (Math.max(dr, dg, db) > diffThresh) {
+      isVeh[idx] = 1;
+      vehPixels++;
+    }
+  }
+
+  let interiorHoles = 0;
+  for (let y = 1; y < h - 1; y++) {
+    const rowOff = y * w;
+    for (let x = 1; x < w - 1; x++) {
+      if (isVeh[rowOff + x]) continue;
+      let hasLeft = false;
+      for (let dx = 1; dx <= 4 && x - dx >= 0; dx++) {
+        if (isVeh[rowOff + x - dx]) {
+          hasLeft = true;
+          break;
+        }
+      }
+      let hasRight = false;
+      if (hasLeft) {
+        for (let dx = 1; dx <= 4 && x + dx < w; dx++) {
+          if (isVeh[rowOff + x + dx]) {
+            hasRight = true;
+            break;
+          }
+        }
+      }
+      if (hasLeft && hasRight) {
+        interiorHoles++;
+        continue;
+      }
+      let hasUp = false;
+      for (let dy = 1; dy <= 4 && y - dy >= 0; dy++) {
+        if (isVeh[(y - dy) * w + x]) {
+          hasUp = true;
+          break;
+        }
+      }
+      if (!hasUp) continue;
+      let hasDown = false;
+      for (let dy = 1; dy <= 4 && y + dy < h; dy++) {
+        if (isVeh[(y + dy) * w + x]) {
+          hasDown = true;
+          break;
+        }
+      }
+      if (hasDown) interiorHoles++;
+    }
+  }
+
+  return {
+    vehPixels,
+    interiorHoles,
+    holeFrac: interiorHoles / Math.max(1, vehPixels + interiorHoles),
   };
 }
 

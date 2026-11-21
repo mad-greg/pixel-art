@@ -4,7 +4,7 @@
 Usage:
   python3 tests/run_e2e.py --tier 1
   python3 tests/run_e2e.py --tier 1,2 --verbose
-  python3 tests/run_e2e.py --tier all --json-report /tmp/e2e_report.json --timeout 75
+  python3 tests/run_e2e.py --tier all --json-report /tmp/e2e_report.json --timeout 120
 
 Exit codes:
   0   All requested tiers executed cleanly, total tests > 0, 0 failures, 0 errors.
@@ -246,8 +246,8 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument(
         "--timeout",
         type=float,
-        default=75.0,
-        help="Per-suite timeout in seconds before killing subprocess group (default: 75)",
+        default=120.0,
+        help="Per-suite timeout in seconds before killing subprocess group (default: 120)",
     )
     args = parser.parse_args(argv)
 

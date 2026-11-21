@@ -25,6 +25,7 @@ from tests.lib.assets_helper import (
     BAHNHOF_PLATFORM_UV,
     CANVAS_H,
     CANVAS_W,
+    DATA_DIR,
     DETAIL_PLATES,
     DOCS_DIR,
     LINDT_HOC_ID,
@@ -34,6 +35,7 @@ from tests.lib.assets_helper import (
     REQUIRED_LANDMARK_IDS,
     REQUIRED_ROAD_IDS,
     TILES_DIR,
+    count_depth_roof_small_hits,
     distance_to_exterior_sky_m,
     ffprobe_audio,
     get_landmark_uv,
@@ -209,6 +211,90 @@ class TestTier1FA1Assets(unittest.TestCase):
             "550.5",
             html,
             "docs/index.html elevation stat not updated to 550.5 m spire (F25)",
+        )
+
+    @test_meta("T1.FA1.08", "Depth map open-air roof small hits <2% trains, <1% main roads")
+    def test_08_depth_open_air_roof_hits(self) -> None:
+        arr = load_depth_rgb()
+        b_occ = arr[..., 2] == 255
+        d16_map = (arr[..., 0].astype(np.uint16) << 8) | arr[..., 1].astype(np.uint16)
+
+        occ_frac = float(np.mean(b_occ))
+        self.assertGreaterEqual(occ_frac, 0.12, f"Occluder fraction {occ_frac:.4f} < 0.12")
+        self.assertLessEqual(occ_frac, 0.35, f"Occluder fraction {occ_frac:.4f} > 0.35")
+        self.assertGreater(int(np.sum(b_occ)), 100_000, "Depth occluder pixel count <= 100,000")
+
+        anim = load_animations_json()
+        trains_by_id = {t["id"]: t for t in anim.get("trains", [])}
+        roads_by_id = {r["id"]: r for r in anim.get("roads", [])}
+
+        violations = []
+        for tid in ("sbb_s8_south", "sbb_ic_north"):
+            self.assertIn(tid, trains_by_id, f"Missing train corridor '{tid}' in kilchberg_animations.json")
+            hits, total = count_depth_roof_small_hits(
+                trains_by_id[tid].get("pts", []), b_occ, d16_map, dy_lo=4, dy_hi=8, max_delta=45
+            )
+            self.assertGreater(total, 0, f"Train '{tid}' has 0 open-air samples")
+            frac = hits / total
+            if frac >= 0.02:
+                violations.append(f"train/{tid}: {hits}/{total} ({frac * 100:.2f}% >= 2.0%)")
+
+        main_roads = (
+            "seestrasse_sb",
+            "seestrasse_nb",
+            "dorfstrasse_viaduct_up",
+            "dorfstrasse_viaduct_dn",
+            "alte_landstrasse_eb",
+            "alte_landstrasse_wb",
+        )
+        for rid in main_roads:
+            self.assertIn(rid, roads_by_id, f"Missing main road '{rid}' in kilchberg_animations.json")
+            hits, total = count_depth_roof_small_hits(
+                roads_by_id[rid].get("pts", []), b_occ, d16_map, dy_lo=3, dy_hi=7, max_delta=45
+            )
+            self.assertGreater(total, 0, f"Road '{rid}' has 0 open-air samples")
+            frac = hits / total
+            if frac >= 0.01:
+                violations.append(f"road/{rid}: {hits}/{total} ({frac * 100:.2f}% >= 1.0%)")
+
+        self.assertEqual(
+            violations,
+            [],
+            f"Open-air roof small occluder hits exceed v8.0 Contract #1 limits: {'; '.join(violations)}",
+        )
+
+    @test_meta("T1.FA1.09", "index.html ES module app.js, synced ?v=, zero CDN scripts")
+    def test_09_es_module_contract(self) -> None:
+        html = (DOCS_DIR / "index.html").read_text(encoding="utf-8")
+
+        ext_scripts = re.findall(r'<script[^>]+src=["\'](https?:)?//[^"\']+["\']', html, flags=re.IGNORECASE)
+        self.assertEqual(ext_scripts, [], f"External CDN scripts found in index.html: {ext_scripts}")
+
+        mod_m = re.search(
+            r'<script\b(?=[^>]*\btype=["\']module["\'])(?=[^>]*\bsrc=["\']app\.js\?v=([0-9A-Za-z._-]+)["\'])[^>]*>',
+            html,
+            flags=re.IGNORECASE,
+        )
+        self.assertIsNotNone(
+            mod_m,
+            'docs/index.html missing <script type="module" src="app.js?v=..."> (v8.0 Contract #3)',
+        )
+
+        css_m = re.search(r'styles\.css\?v=([0-9A-Za-z._-]+)', html)
+        self.assertIsNotNone(css_m, "styles.css missing ?v= version query parameter")
+        self.assertEqual(
+            css_m.group(1),
+            mod_m.group(1),
+            f"ES module version mismatch: styles.css?v={css_m.group(1)} vs app.js?v={mod_m.group(1)}",
+        )
+
+        js_dir = DOCS_DIR / "js"
+        self.assertTrue(js_dir.is_dir(), "Missing docs/js/ ES module directory (v8.0 Contract #3)")
+        js_modules = list(js_dir.rglob("*.js"))
+        self.assertGreaterEqual(
+            len(js_modules),
+            3,
+            f"Expected >=3 ES modules under docs/js/, found {len(js_modules)}",
         )
 
 
@@ -429,6 +515,95 @@ class TestTier1FA2GeospatialData(unittest.TestCase):
                 if m:
                     hits.append(f"{fp.relative_to(DOCS_DIR)}: '{m.group(0)}'")
         self.assertEqual(hits, [], f"Prohibited aerial terms found in docs/: {hits}")
+
+    @test_meta("T1.FA2.09", "kilchberg_animations.json network schema & compact size <650KB")
+    def test_09_multimodal_network_schema(self) -> None:
+        anim_path = DATA_DIR / "kilchberg_animations.json"
+        self.assertTrue(anim_path.is_file(), f"Missing {anim_path}")
+        size_bytes = anim_path.stat().st_size
+        self.assertLess(
+            size_bytes,
+            650 * 1024,
+            f"kilchberg_animations.json size {size_bytes} bytes >= 650 KB limit (Contract #2)",
+        )
+
+        anim = load_animations_json()
+        net = anim.get("network")
+        self.assertIsInstance(
+            net,
+            dict,
+            "kilchberg_animations.json missing 'network' object (v8.0 Contract #2)",
+        )
+
+        # 1. crosswalks
+        crosswalks = net.get("crosswalks")
+        self.assertIsInstance(crosswalks, list, "network.crosswalks must be a list")
+        self.assertGreaterEqual(len(crosswalks), 6, f"Expected >=6 crosswalks, got {len(crosswalks)}")
+        for cw in crosswalks:
+            for k in ("id", "name", "road_id", "frac", "u", "v", "d16", "nx", "ny"):
+                self.assertIn(k, cw, f"crosswalk {cw.get('id')} missing key '{k}'")
+            self.assertIn(cw["road_id"], REQUIRED_ROAD_IDS, f"crosswalk {cw['id']} unknown road_id '{cw['road_id']}'")
+            frac = float(cw["frac"])
+            self.assertTrue(0.0 < frac < 1.0, f"crosswalk {cw['id']} frac={frac} not in (0, 1)")
+
+        # 2. junctions
+        junctions = net.get("junctions")
+        self.assertIsInstance(junctions, list, "network.junctions must be a list")
+        self.assertGreaterEqual(len(junctions), 4, f"Expected >=4 junctions, got {len(junctions)}")
+        for jc in junctions:
+            for k in ("id", "name", "u", "v", "d16", "links"):
+                self.assertIn(k, jc, f"junction {jc.get('id')} missing key '{k}'")
+            links = jc["links"]
+            self.assertIsInstance(links, list, f"junction {jc['id']} links must be a list")
+            self.assertGreaterEqual(len(links), 1, f"junction {jc['id']} has empty links")
+            for lnk in links:
+                self.assertIn("road_id", lnk, f"junction {jc['id']} link missing road_id")
+                self.assertIn("frac", lnk, f"junction {jc['id']} link missing frac")
+
+        # 3. feeders
+        feeders = net.get("feeders")
+        self.assertIsInstance(feeders, list, "network.feeders must be a list")
+        self.assertGreaterEqual(len(feeders), 4, f"Expected >=4 feeders, got {len(feeders)}")
+        for fd in feeders:
+            for k in ("id", "name", "kind", "length_m", "pts", "connects_road", "connects_frac"):
+                self.assertIn(k, fd, f"feeder {fd.get('id')} missing key '{k}'")
+            self.assertGreater(float(fd["length_m"]), 0.0, f"feeder {fd['id']} length_m <= 0")
+            self.assertIn(fd["connects_road"], REQUIRED_ROAD_IDS, f"feeder {fd['id']} unknown connects_road '{fd['connects_road']}'")
+            pts = fd["pts"]
+            self.assertIsInstance(pts, list, f"feeder {fd['id']} pts must be a list")
+            self.assertGreaterEqual(len(pts), 5, f"feeder {fd['id']} has <5 pts")
+            self.assertGreaterEqual(len(pts[0]), 4, f"feeder {fd['id']} pt missing [u,v,occ,d16]")
+
+        # 4. footpaths
+        footpaths = net.get("footpaths")
+        self.assertIsInstance(footpaths, list, "network.footpaths must be a list")
+        self.assertGreaterEqual(len(footpaths), 4, f"Expected >=4 footpaths, got {len(footpaths)}")
+        for fp in footpaths:
+            for k in ("id", "name", "kind", "length_m", "pts", "from_poi", "to_poi"):
+                self.assertIn(k, fp, f"footpath {fp.get('id')} missing key '{k}'")
+            self.assertGreater(float(fp["length_m"]), 0.0, f"footpath {fp['id']} length_m <= 0")
+            pts = fp["pts"]
+            self.assertIsInstance(pts, list, f"footpath {fp['id']} pts must be a list")
+            self.assertGreaterEqual(len(pts), 5, f"footpath {fp['id']} has <5 pts")
+            self.assertGreaterEqual(len(pts[0]), 4, f"footpath {fp['id']} pt missing [u,v,occ,d16]")
+
+        # 5. pois
+        pois = net.get("pois")
+        self.assertIsInstance(pois, list, "network.pois must be a list")
+        self.assertGreaterEqual(len(pois), 8, f"Expected >=8 POIs, got {len(pois)}")
+        for poi in pois:
+            for k in ("id", "name", "kind", "u", "v", "d16"):
+                self.assertIn(k, poi, f"poi {poi.get('id')} missing key '{k}'")
+
+        # 6. extra_sports
+        extra_sports = net.get("extra_sports")
+        self.assertIsInstance(extra_sports, list, "network.extra_sports must be a list")
+        self.assertGreaterEqual(len(extra_sports), 1, f"Expected >=1 extra_sports, got {len(extra_sports)}")
+        for sp in extra_sports:
+            for k in ("id", "kind", "u", "v", "d16", "w_m", "h_m", "angle"):
+                self.assertIn(k, sp, f"extra_sports {sp.get('id')} missing key '{k}'")
+            self.assertGreater(float(sp["w_m"]), 0.0, f"extra_sports {sp['id']} w_m <= 0")
+            self.assertGreater(float(sp["h_m"]), 0.0, f"extra_sports {sp['id']} h_m <= 0")
 
 
 class TestTier1FA4AudioStatic(unittest.TestCase):
