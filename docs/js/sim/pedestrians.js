@@ -343,22 +343,35 @@ export function createPedestrianSim(animData) {
       poiToStopKeys.get(bestPoi.id).push(stopKey);
 
       if (!poiCurbGeo.has(bestPoi.id)) {
-        const isoY = 0.55;
-        const gx = pos.tx;
-        const gy = pos.ty / isoY;
-        const gm = Math.hypot(gx, gy) || 1;
-        let rx = -gy / gm;
-        let ry = (gx / gm) * isoY;
-        if (isMain && (rx * 0.5 + ry) > 0) {
-          rx = -rx;
-          ry = -ry;
+        const isLakeLane = isMain && rd.id === 'seestrasse_nb';
+        let rx;
+        let ry;
+        if (isMain) {
+          // True screen-space perpendicular matches the projected Seestrasse lane separation
+          const tm = Math.hypot(pos.tx, pos.ty) || 1;
+          rx = -pos.ty / tm;
+          ry = pos.tx / tm;
+          // Point strictly outward from Seestrasse centerline: inland (up-left) for SB, lakeward (down-right) for NB
+          if ((!isLakeLane && ry > 0) || (isLakeLane && ry < 0)) {
+            rx = -rx;
+            ry = -ry;
+          }
+        } else {
+          const isoY = 0.55;
+          const gx = pos.tx;
+          const gy = pos.ty / isoY;
+          const gm = Math.hypot(gx, gy) || 1;
+          rx = -gy / gm;
+          ry = (gx / gm) * isoY;
         }
         const swRoadIdx = sidewalkRoads.indexOf(rd);
         const rdLenM = Math.max(20, rd.length_m || 400);
+        const baseD16 = pos.d16 || bestPoi.d16 || 30000;
+        const curbD16 = isMain ? clamp(baseD16 + (isLakeLane ? -38 : 38), 1, 65534) : baseD16;
         poiCurbGeo.set(bestPoi.id, {
           u: pos.wx / masterW,
           v: pos.wy / masterH,
-          d16: pos.d16 || bestPoi.d16 || 30000,
+          d16: curbD16,
           tx: pos.tx,
           ty: pos.ty,
           rx,
@@ -456,24 +469,37 @@ export function createPedestrianSim(animData) {
     const frac = clamp(distM / L, 0.004, 0.996);
     const pos = samplePathAt(rd.pts, frac, masterW, masterH, 3);
     if (!pos) return null;
-    const isoY = 0.55;
-    const gx = pos.tx;
-    const gy = pos.ty / isoY;
-    const gm = Math.hypot(gx, gy) || 1;
-    let rx = -gy / gm;
-    let ry = (gx / gm) * isoY;
     const isMain = rd.kind === 'seestrasse';
-    if (isMain && (rx * 0.5 + ry) > 0) {
-      rx = -rx;
-      ry = -ry;
+    const isLakeLane = isMain && rd.id === 'seestrasse_nb';
+    let rx;
+    let ry;
+    if (isMain) {
+      // True screen-space perpendicular matches the projected Seestrasse lane separation
+      const tm = Math.hypot(pos.tx, pos.ty) || 1;
+      rx = -pos.ty / tm;
+      ry = pos.tx / tm;
+      // Offset strictly outward from Seestrasse centerline: inland for SB, lakeward for NB
+      if ((!isLakeLane && ry > 0) || (isLakeLane && ry < 0)) {
+        rx = -rx;
+        ry = -ry;
+      }
+    } else {
+      const isoY = 0.55;
+      const gx = pos.tx;
+      const gy = pos.ty / isoY;
+      const gm = Math.hypot(gx, gy) || 1;
+      rx = -gy / gm;
+      ry = (gx / gm) * isoY;
     }
-    const latPx = isMain ? 5.8 : 4.5;
+    const latPx = isMain ? 7.0 : 4.5;
     const wx = pos.wx + rx * latPx;
     const wy = pos.wy + ry * latPx;
+    const baseD16 = pos.d16 || 30000;
+    const swD16 = isMain ? clamp(baseD16 + (isLakeLane ? -38 : 38), 1, 65534) : baseD16;
     return {
       u: clamp(wx / masterW, 0.002, 0.998),
       v: clamp(wy / masterH, 0.002, 0.998),
-      d16: pos.d16 || 30000,
+      d16: swD16,
       tx: pos.tx * dir,
       ty: pos.ty * dir,
     };
@@ -751,14 +777,28 @@ export function createPedestrianSim(animData) {
 
   function updateCrosswalkPosition(ag, cw) {
     const p = ag.state === 'crossing_cw' ? ag.cwProgress : 0;
-    const spanPx = (p - 0.5) * 15.0 * ag.cwDir;
-    const wx = cw.u * masterW + cw.nx * spanPx;
-    const wy = cw.v * masterH + cw.ny * spanPx * 0.55;
+    const isSeestrasse = typeof cw.road_id === 'string' && cw.road_id.startsWith('seestrasse');
+    let wx;
+    let wy;
+    if (isSeestrasse) {
+      const nMag = Math.hypot(cw.nx, cw.ny) || 1;
+      const ux = cw.nx / nMag;
+      const uy = cw.ny / nMag;
+      const spanPx = (p - 0.5) * 23.0 * ag.cwDir;
+      wx = cw.u * masterW + ux * spanPx;
+      wy = cw.v * masterH + uy * spanPx;
+      ag.tx = ux * ag.cwDir;
+      ag.ty = uy * ag.cwDir;
+    } else {
+      const spanPx = (p - 0.5) * 15.0 * ag.cwDir;
+      wx = cw.u * masterW + cw.nx * spanPx;
+      wy = cw.v * masterH + cw.ny * spanPx * 0.55;
+      ag.tx = cw.nx * ag.cwDir;
+      ag.ty = cw.ny * 0.55 * ag.cwDir;
+    }
     ag.u = clamp(wx / masterW, 0.002, 0.998);
     ag.v = clamp(wy / masterH, 0.002, 0.998);
     ag.d16 = cw.d16 || 30000;
-    ag.tx = cw.nx * ag.cwDir;
-    ag.ty = cw.ny * 0.55 * ag.cwDir;
   }
 
   function resetState(mode, tStart) {

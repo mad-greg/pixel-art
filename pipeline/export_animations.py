@@ -1493,6 +1493,21 @@ def _build_network(
         ("fp_gemeindehaus_sanatorium", "Gemeindehaus → Sanatorium Park", "park",      "poi_gemeindehaus",          "poi_sanatorium",             None, None),
         ("fp_pier_morfanlage",       "Bendlikon Pier → Morfanlage",      "promenade", "poi_bendlikon_pier",        "poi_morfanlage",             None, None),
     ]
+    # Sidewalk preference (+1.0 = inland sidewalk, -1.0 = lakeward sidewalk) when a footpath
+    # follows Seestrasse's MVT primary centerline.
+    seestrasse_fp_side: dict[str, float] = {
+        "fp_bahnhof_dorf": +1.0,
+        "fp_bendlikon_lindt": +1.0,
+        "fp_bus_lindt_plaza": +1.0,
+        "fp_bahnhof_pier": +1.0,
+        "fp_pier_morfanlage": -1.0,
+        "fp_pier_bendlikon": -1.0,
+        "fp_lindt_seebad": -1.0,
+        "fp_seebad_schooren": -1.0,
+    }
+    see_sb_ls = road_ls_map.get("seestrasse_sb")
+    see_nb_ls = road_ls_map.get("seestrasse_nb")
+
     footpaths_out: list[dict] = []
     for fpid, fpname, fpkind, from_poi, to_poi, start_ov, end_ov in footpath_specs:
         if from_poi not in poi_coords or to_poi not in poi_coords:
@@ -1506,6 +1521,28 @@ def _build_network(
         if clipped is None:
             continue
         ep, np_, lp = clipped
+        if see_sb_ls is not None and see_nb_ls is not None:
+            side = seestrasse_fp_side.get(fpid, +1.0)
+            ep = ep.copy()
+            np_ = np_.copy()
+            for idx in range(len(ep)):
+                pt = Point(float(ep[idx]), float(np_[idx]))
+                p_sb = see_sb_ls.interpolate(see_sb_ls.project(pt))
+                p_nb = see_nb_ls.interpolate(see_nb_ls.project(pt))
+                cl_e = 0.5 * (p_sb.x + p_nb.x)
+                cl_n = 0.5 * (p_sb.y + p_nb.y)
+                ve = p_sb.x - p_nb.x
+                vn = p_sb.y - p_nb.y
+                vlen2 = ve * ve + vn * vn
+                if math.hypot(ep[idx] - cl_e, np_[idx] - cl_n) < 7.5 and vlen2 > 1.0:
+                    lat = ((ep[idx] - cl_e) * ve + (np_[idx] - cl_n) * vn) / vlen2
+                    if abs(lat) < 1.15:
+                        delta_lat = (side * 1.25) - lat
+                        cand_e = ep[idx] + delta_lat * ve
+                        cand_n = np_[idx] + delta_lat * vn
+                        if _is_valid_land(scene, float(cand_e), float(cand_n)):
+                            ep[idx] = cand_e
+                            np_[idx] = cand_n
         assert np.all(_is_valid_land_arr(scene, ep, np_)), f"footpath {fpid} has out-of-land point"
         zp, zp_d = _sample_road_z(scene, ep, np_, underpass_poly, allowed_bridge_cls=())
         pts = _pack_path(
