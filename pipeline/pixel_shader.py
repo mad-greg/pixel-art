@@ -25,6 +25,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from scipy import ndimage
 
+from . import signage as _signage
 from .config import (
     E_MAX,
     E_MIN,
@@ -5917,27 +5918,7 @@ def render_diorama(
                         lu,
                     )
                     lt_d = top_dist[hi_l]
-                    # 3D golden "LINDT HOME OF CHOCOLATE" capital lettering frieze (3 word groups + cast drop shadow)
-                    in_word_grp = (
-                        ((arc_u >= 4.0) & (arc_u <= 10.5))
-                        | ((arc_u >= 11.6) & (arc_u <= 19.2))
-                        | ((arc_u >= 20.3) & (arc_u <= 29.8))
-                    )
-                    gold_frieze = (
-                        in_white_curve
-                        & (lt_d >= 0.85)
-                        & (lt_d <= 1.88)
-                        & in_word_grp
-                        & (((arc_u * 1.65) % 1.0) >= 0.25)
-                    )
-                    frieze_sh = in_white_curve & (lt_d > 1.88) & (lt_d <= 2.15) & in_word_grp
-                    if frieze_sh.any():
-                        w_base[hi_l[frieze_sh]] *= 0.86
-                    if gold_frieze.any():
-                        gf_idx = hi_l[gold_frieze]
-                        w_base[gf_idx] = [236.0, 194.0, 72.0]
-                        if preset.is_night or preset_key == "sunset":
-                            f_mat[wi[gf_idx]] = M_WINDOW_LIT
+                    # v9.1: HoC lettering is baked via pipeline/signage.py (SIGNS registry) after all facade detail.
 
                     plaza_glass = (
                         ((in_white_curve & (lh >= 0.35) & (lh <= 5.4)) | (brick_m & (le >= 2684118.0) & (lh >= 0.45) & (lh <= 3.8)))
@@ -7083,6 +7064,19 @@ def render_diorama(
                             w_base[ca_l] = np.where(ca_str[:, None], [236.0, 230.0, 216.0], ca_base)
                             f_mat[wi[ca_l]] = M_WALL
 
+                # v9.1: real-typeface lettering baked into the facade plane (see pipeline/signage.py)
+                if not hasattr(scene, "_signs_resolved"):
+                    scene._signs_resolved = _signage.resolve_signs(scene, camera.azimuth_from_deg)
+                _signage.bake_signs(
+                    scene._signs_resolved, w_bi, w_dbin, w_e, w_n, w_z,
+                    w_base, f_mat, wi, M_WINDOW_LIT, preset_key, preset.is_night,
+                )
+                if not hasattr(scene, "_clocks_resolved"):
+                    scene._clocks_resolved = _signage.resolve_clocks(scene, camera.azimuth_from_deg)
+                _signage.bake_clocks(
+                    scene._clocks_resolved, w_bi, w_dbin, w_e, w_n, w_z,
+                    w_base, f_mat, wi, M_WINDOW_LIT, preset_key, preset.is_night,
+                )
                 f_col[wi] = w_base
 
             zbuf[fy, fx] = fd

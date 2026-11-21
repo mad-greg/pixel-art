@@ -426,6 +426,9 @@ function drawSwissClockDial(ctx, cx, cy, rDial, s, tSec, mode, style = 'civic', 
 }
 
 function drawSignPlaque(ctx, x, y, text, s, alpha, opts = {}) {
+  // v9.1: lettering is baked into the building textures by pipeline/pixel_shader.py (real typefaces,
+  // true facade-plane projection). Floating screen-space text overlays are intentionally disabled.
+  return;
   if (alpha <= 0.01) return;
   const fontPx = Math.max(8, Math.round((opts.baseFontPx || 2.3) * s));
   const padX = Math.max(3, Math.round((opts.padX || 1.6) * s));
@@ -459,6 +462,9 @@ function drawSignPlaque(ctx, x, y, text, s, alpha, opts = {}) {
 }
 
 function drawRotatedSignText(ctx, x, y, text, s, alpha, rotRad, opts = {}) {
+  // v9.1: lettering is baked into the building textures by pipeline/pixel_shader.py (real typefaces,
+  // true facade-plane projection). Floating screen-space text overlays are intentionally disabled.
+  return;
   if (alpha <= 0.01) return;
   const fontPx = Math.max(8, Math.round((opts.baseFontPx || 3.0) * s));
   ctx.save();
