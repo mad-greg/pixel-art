@@ -524,27 +524,56 @@ function drawWaterLapRings(ctx, depthMgr, toX, toY, u, v, s, tSec, isNight, isSu
 
 function drawSwissOrMuniFlag(ctx, cam, fx, fy, wScale, wind, phaseIdx, isNight, kind = 'swiss') {
   const waveStep = Math.floor(wind.wavePhase) % 4;
-  const billow = Math.min(1.25, Math.max(0.75, wind.strength * 1.3));
+  const billow = Math.min(1.0, Math.max(0.65, wind.strength * 1.1));
   const fPhase = (waveStep + phaseIdx) % 4;
-  const dy1 = (fPhase === 1 ? -1 : (fPhase === 3 ? 1 : 0)) * billow * wScale;
-  const dy2 = (fPhase === 2 ? -1 : (fPhase === 0 ? 1 : 0)) * billow * wScale;
+  const dy1 = (fPhase === 1 ? -0.6 : (fPhase === 3 ? 0.6 : 0)) * billow * wScale;
+  const dy2 = (fPhase === 2 ? -0.7 : (fPhase === 0 ? 0.7 : 0)) * billow * wScale;
   const poleCol = isNight ? '#8a99b2' : '#d8dce2';
   const finialCol = isNight ? '#c8a852' : '#f2ca52';
   const whiteCross = isNight ? '#cfd6e2' : '#f8f6f0';
 
   if (kind === 'kilchberg') {
-    // Authentic Kilchberg (ZH) municipal Wappen: azure #1a5fb4 + 4-petal white flower #f4f6f8 + gold center #f2c430
-    drawPixelRectWorld(ctx, cam, fx, fy - 14 * wScale, 1.5, 15, poleCol, wScale);
-    drawPixelRectWorld(ctx, cam, fx - 0.3 * wScale, fy - 15 * wScale, 2.0, 1.4, finialCol, wScale);
+    // Authentic Kilchberg (ZH) municipal Wappen: azure #1a5fb4 + 4-petal white flower (Blume) + gold center (Butzen)
+    const { scale, offsetX, offsetY } = cam;
+    const s = scale * wScale;
+    drawPixelRectWorld(ctx, cam, fx, fy - 14.5 * wScale, 1.4, 15.5, poleCol, wScale);
+    drawPixelRectWorld(ctx, cam, fx - 0.3 * wScale, fy - 15.5 * wScale, 2.0, 1.3, finialCol, wScale);
     const kAzure = isNight ? '#12427e' : '#1a5fb4';
-    const kPetal = isNight ? '#cfd6e2' : '#f4f6f8';
+    const kPetal = isNight ? '#cfd6e2' : '#f8fafc';
+    const kPetalShade = isNight ? '#94a3b8' : '#cbd5e1';
     const kGold = isNight ? '#c49d28' : '#f2c430';
-    drawPixelRectWorld(ctx, cam, fx + 1.5 * wScale, fy - 14 * wScale, 3, 6.0, kAzure, wScale);
-    drawPixelRectWorld(ctx, cam, fx + 4.2 * wScale, fy - 14 * wScale + dy1, 3.2, 6.0, kAzure, wScale);
-    drawPixelRectWorld(ctx, cam, fx + 7.2 * wScale, fy - 14 * wScale + dy2, 2.8, 6.0, kAzure, wScale);
-    drawPixelRectWorld(ctx, cam, fx + 4.9 * wScale, fy - 13.0 * wScale + dy1, 1.5, 4.0, kPetal, wScale);
-    drawPixelRectWorld(ctx, cam, fx + 3.7 * wScale, fy - 11.7 * wScale + dy1, 3.9, 1.5, kPetal, wScale);
-    drawPixelRectWorld(ctx, cam, fx + 4.9 * wScale, fy - 11.7 * wScale + dy1, 1.5, 1.5, kGold, wScale);
+    const kGoldEdge = isNight ? '#854d0e' : '#b45309';
+
+    // Crisp square-ish municipal flag body (waving in 3 strips, clean edges)
+    const segY0 = fy - 14.5 * wScale;
+    drawPixelRectWorld(ctx, cam, fx + 1.4 * wScale, segY0, 2.8, 7.2, kAzure, wScale);
+    drawPixelRectWorld(ctx, cam, fx + 4.1 * wScale, segY0 + dy1, 3.0, 7.2, kAzure, wScale);
+    drawPixelRectWorld(ctx, cam, fx + 7.0 * wScale, segY0 + dy2, 2.6, 7.2, kAzure, wScale);
+
+    // 4-petal rounded white flower (top, right, bottom, left lobes) + gold center
+    const cx = offsetX + (fx + 5.5 * wScale) * scale;
+    const cy = offsetY + (segY0 + 3.6 * wScale + dy1) * scale;
+    const petalDist = 1.65 * s;
+    const petalR = 1.25 * s;
+    ctx.save();
+    ctx.fillStyle = kPetal;
+    ctx.strokeStyle = kPetalShade;
+    ctx.lineWidth = Math.max(0.6, 0.35 * s);
+    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.arc(cx + dirs[i][0] * petalDist, cy + dirs[i][1] * petalDist, petalR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Subtle inner shading + crisp round gold Butzen
+    ctx.fillStyle = kGold;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(1.0, 0.95 * s), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = kGoldEdge;
+    ctx.lineWidth = Math.max(0.5, 0.25 * s);
+    ctx.stroke();
+    ctx.restore();
     return;
   }
 
