@@ -527,8 +527,10 @@ export function createPedestrianSim(animData) {
   function samplePlatformPos(isSE, platFrac, doorShift = 0) {
     const dU = platNe[0] - platSw[0];
     const dV = platNe[1] - platSw[1];
-    const baseU = isSE ? (platSw[0] + 0.0013 - doorShift * 0.00045) : (platSw[0] - 0.0003 + doorShift * 0.00045);
-    const baseV = isSE ? (platSw[1] + 0.0020 - doorShift * 0.00060) : (platSw[1] + 0.0002 + doorShift * 0.00060);
+    // NW platform (k=-0.3) sits NW of Gleis 2; SE platform (k=+2.0) sits SE of Gleis 1.
+    // Never place commuters in the trackbed between Gleis 2 and Gleis 1!
+    const baseU = isSE ? (platSw[0] + 0.0021 - doorShift * 0.00025) : (platSw[0] - 0.0003 + doorShift * 0.00025);
+    const baseV = isSE ? (platSw[1] + 0.0031 - doorShift * 0.00035) : (platSw[1] - 0.0003 + doorShift * 0.00035);
     return {
       u: baseU + platFrac * dU,
       v: baseV + platFrac * dV,

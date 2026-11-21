@@ -724,6 +724,81 @@ function drawWaterfowlWake(ctx, sx, sy, vx, vy, px, isNight, scaleMul = 1.0) {
  * Lake Zurich micro-life (moored boats, swans, ducks, slow SUPs + paddle ripples, slow rowboat/skiff),
  * terrace glows, platform lamps, and nighttime streetlamp glows.
  */
+/**
+ * Pre-train architectural signage & platform fixtures on the NW side of SBB tracks
+ * so passing trains naturally pass in front of the Bahnhof info board & clock.
+ */
+export function drawPreTrainVignettes(ctx, cam, animData, worldW, worldH, wScale, tSec, mode) {
+  const { scale, offsetX, offsetY, width: canvasW, height: canvasH, dpr = 1 } = cam;
+  const isNight = mode === 'night';
+  const isSunset = mode === 'sunset';
+  const s = scale * wScale;
+  if (s < 0.35) return;
+  const effCssScale = s / Math.max(1, dpr);
+  const detailAlpha = Math.max(0, Math.min(1, (effCssScale - 1.1) / 0.3));
+  const toX = (u) => u * worldW * scale + offsetX;
+  const toY = (v) => v * worldH * scale + offsetY;
+  const inView = (x, y, padWorld = 60) => {
+    const pad = Math.max(60, padWorld * s);
+    return x >= -pad && x <= canvasW + pad && y >= -pad && y <= canvasH + pad;
+  };
+  const vig = (animData && animData.ambient && animData.ambient.vignettes) || {};
+  const bh = vig.bahnhof_kilchberg || {};
+  const platSw = bh.plat_sw || [0.55049, 0.50304];
+  const platNe = bh.plat_ne || [0.56449, 0.49558];
+
+  ctx.save();
+  const midU = 0.5 * (platSw[0] + platNe[0]);
+  const midV = 0.5 * (platSw[1] + platNe[1]) - 0.0006;
+  const bx = toX(midU);
+  const by = toY(midV);
+  if (inView(bx, by, 30)) {
+    const bw = Math.max(6, 8.2 * s);
+    const bhPx = Math.max(3, 3.8 * s);
+    if (isNight || isSunset) {
+      const bGrad = ctx.createRadialGradient(bx, by, 1 * s, bx, by, 9.5 * s);
+      bGrad.addColorStop(0, isNight ? 'rgba(59, 130, 246, 0.42)' : 'rgba(59, 130, 246, 0.22)');
+      bGrad.addColorStop(1, 'rgba(59, 130, 246, 0)');
+      ctx.fillStyle = bGrad;
+      ctx.beginPath();
+      ctx.arc(bx, by, 9.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = isNight ? '#1d4ed8' : '#2563eb';
+    ctx.fillRect(Math.round(bx - bw * 0.5), Math.round(by - bhPx * 0.5), Math.round(bw), Math.round(bhPx));
+    if (detailAlpha > 0.01) {
+      const lineCode = (Math.floor(tSec / 18) % 2) === 0 ? 'S8  Zürich HB' : 'S24 Pfäffikon';
+      drawSignPlaque(ctx, bx, by, lineCode, s, detailAlpha, {
+        bg: '#0f2d7a',
+        border: '#93c5fd',
+        fg: '#f8fafc',
+        baseFontPx: 1.75,
+        padX: 1.2,
+        padY: 0.65,
+      });
+    } else {
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(Math.round(bx - bw * 0.38), Math.round(by - bhPx * 0.22), Math.max(2, Math.round(bw * 0.55)), Math.max(1, Math.round(0.8 * s)));
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(Math.round(bx - bw * 0.38), Math.round(by + bhPx * 0.06), Math.max(2, Math.round(bw * 0.40)), Math.max(1, Math.round(0.8 * s)));
+    }
+    const ckX = bx + bw * 0.68 + 1.8 * s;
+    const ckY = by;
+    drawSwissClockDial(ctx, ckX, ckY, 2.6 * s, s, tSec, mode, 'sbb', detailAlpha);
+  }
+  if (detailAlpha > 0.01) {
+    drawSwissClockDial(ctx, toX(0.5772), toY(0.4902), 3.6 * s, s, tSec, mode, 'sbb', detailAlpha);
+    drawSignPlaque(ctx, toX(0.5788), toY(0.4920), 'Kilchberg', s, detailAlpha, {
+      bg: '#003399',
+      border: '#f8fafc',
+      fg: '#ffffff',
+      baseFontPx: 2.3,
+      glowCol: isNight ? 'rgba(96, 165, 250, 0.5)' : null,
+    });
+  }
+  ctx.restore();
+}
+
 export function drawKilchbergDetails(
   ctx,
   cam,
@@ -2014,60 +2089,6 @@ export function drawKilchbergDetails(
       }
     }
 
-    // Glowing blue SBB Perronanzeiger departure board & 1944 Hans Hilfiker SBB Bahnhofsuhr (strictly deterministic!)
-    if (s >= 0.35) {
-      const midU = 0.5 * (platSw[0] + platNe[0]);
-      const midV = 0.5 * (platSw[1] + platNe[1]) - 0.0006;
-      const bx = toX(midU);
-      const by = toY(midV);
-      if (inView(bx, by, 30)) {
-        const bw = Math.max(6, 8.2 * s);
-        const bh = Math.max(3, 3.8 * s);
-        if (isNight || isSunset) {
-          const bGrad = ctx.createRadialGradient(bx, by, 1 * s, bx, by, 9.5 * s);
-          bGrad.addColorStop(0, isNight ? 'rgba(59, 130, 246, 0.42)' : 'rgba(59, 130, 246, 0.22)');
-          bGrad.addColorStop(1, 'rgba(59, 130, 246, 0)');
-          ctx.fillStyle = bGrad;
-          ctx.beginPath();
-          ctx.arc(bx, by, 9.5 * s, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.fillStyle = isNight ? '#1d4ed8' : '#2563eb';
-        ctx.fillRect(Math.round(bx - bw * 0.5), Math.round(by - bh * 0.5), Math.round(bw), Math.round(bh));
-        if (detailAlpha > 0.01) {
-          const lineCode = (Math.floor(tSec / 18) % 2) === 0 ? 'S8  Zürich HB' : 'S24 Pfäffikon';
-          drawSignPlaque(ctx, bx, by, lineCode, s, detailAlpha, {
-            bg: '#0f2d7a',
-            border: '#93c5fd',
-            fg: '#f8fafc',
-            baseFontPx: 1.75,
-            padX: 1.2,
-            padY: 0.65,
-          });
-        } else {
-          ctx.fillStyle = '#f8fafc';
-          ctx.fillRect(Math.round(bx - bw * 0.38), Math.round(by - bh * 0.22), Math.max(2, Math.round(bw * 0.55)), Math.max(1, Math.round(0.8 * s)));
-          ctx.fillStyle = '#fde047';
-          ctx.fillRect(Math.round(bx - bw * 0.38), Math.round(by + bh * 0.06), Math.max(2, Math.round(bw * 0.40)), Math.max(1, Math.round(0.8 * s)));
-        }
-
-        // Mid-platform SBB Bahnhofsuhr with red lollipop second hand
-        const ckX = bx + bw * 0.68 + 1.8 * s;
-        const ckY = by;
-        drawSwissClockDial(ctx, ckX, ckY, 2.6 * s, s, tSec, mode, 'sbb', detailAlpha);
-      }
-      // M3.5 Iconic station-building SBB Bahnhofsuhr & crisp blue "Kilchberg" SBB platform nameboard at 2x-4x zoom
-      if (detailAlpha > 0.01) {
-        drawSwissClockDial(ctx, toX(0.5772), toY(0.4902), 3.6 * s, s, tSec, mode, 'sbb', detailAlpha);
-        drawSignPlaque(ctx, toX(0.5788), toY(0.4920), 'Kilchberg', s, detailAlpha, {
-          bg: '#003399',
-          border: '#f8fafc',
-          fg: '#ffffff',
-          baseFontPx: 2.3,
-          glowCol: isNight ? 'rgba(96, 165, 250, 0.5)' : null,
-        });
-      }
-    }
     if (!hasDynamicPeds) {
       const nComm = isNight ? 4 : 8;
       const dPlatU = platNe[0] - platSw[0];
@@ -2075,8 +2096,8 @@ export function drawKilchbergDetails(
       for (let c = 0; c < nComm; c++) {
         const isSE = c % 2 === 1;
         const baseF = 0.12 + (c / nComm) * 0.78 + Math.sin(tSec * 0.25 + c * 1.9) * 0.04;
-        const cu = (isSE ? platSw[0] + 0.0013 : platSw[0] - 0.0003) + baseF * dPlatU;
-        const cv = (isSE ? platSw[1] + 0.0020 : platSw[1] + 0.0002) + baseF * dPlatV;
+        const cu = (isSE ? platSw[0] + 0.0021 : platSw[0] - 0.0003) + baseF * dPlatU;
+        const cv = (isSE ? platSw[1] + 0.0031 : platSw[1] - 0.0003) + baseF * dPlatV;
         const wx = cu * worldW;
         const wy = cv * worldH;
         const d16 = depthMgr.evalWalkerD16(wx, wy, 424.6, worldW, worldH, false);

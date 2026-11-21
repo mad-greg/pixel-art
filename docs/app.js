@@ -14,6 +14,7 @@ import {
   drawAtmosphereAndLife,
   drawKilchbergDetails,
   drawMiniPerson,
+  drawPreTrainVignettes,
   drawShorelineWaves,
 } from './js/render/vignettes.js';
 import {
@@ -1543,6 +1544,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
         }
       }, extraVertPx);
     }
+
+    // 3b. NW-platform Bahnhof board & clock drawn before SBB trains so passing trains cleanly pass in front
+    drawPreTrainVignettes(ctx, cam, animData, worldW, worldH, wScale, tSec, currentMode);
 
     // 4. SBB Seebahn Multi-Carriage Trains
     for (const tr of (animData.trains || [])) {
