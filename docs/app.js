@@ -56,7 +56,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     { file: '10_stockengut_ridge_farm.webp', label: 'Stockengut Ridge Farm', lmId: 'stockengut_farm' },
   ];
 
-  const ASSET_VER = '10.0';
+  const ASSET_VER = '11.0';
   const MAX_CACHED_TILES = 128;
 
   // Overview images, 2-level 0.25/0.125 m/px tile pyramids (LRU-bounded) & 16-bit 3D Depth Manager
