@@ -271,10 +271,10 @@ async function runTests(harness, test) {
       // Precondition first: fail cleanly on v8.0 with AssertionError
       const counts = await desktop.evaluate(`({
         lmCount: document.querySelectorAll('#landmark-list .lm-item').length,
-        cropCount: document.querySelectorAll('#crop-gallery .crop-thumb').length,
+        cropCount: document.querySelectorAll('#crop-gallery .crop-thumb, .crop-thumb').length,
       })`);
-      assert(counts.lmCount >= 16, `Expected >= 16 landmarks for v9.0 pin decluttering check, got ${counts.lmCount}`);
-      assert(counts.cropCount >= 10, `Expected >= 10 detail plates for v9.0 layout check, got ${counts.cropCount}`);
+      assert(counts.lmCount >= 16, `Expected >= 16 landmarks for pin decluttering check, got ${counts.lmCount}`);
+      assert(counts.cropCount === 0, `Expected 0 detail plates (#crop-gallery removed), got ${counts.cropCount}`);
 
       const collectVisiblePinsExpr = `(() => {
         const vp = document.getElementById('viewport')?.getBoundingClientRect();
@@ -358,7 +358,7 @@ async function runTests(harness, test) {
       }
       assert(activeOverlaps.length === 0, `Severe .lm-pin overlap at Fit with active pin: ${activeOverlaps.join('; ')}`);
 
-      // 4. Desktop 1280x800 zero clipping with 16 landmarks + 10 plates
+      // 4. Desktop 1280x800 zero clipping with 16 landmarks
       const deskClip = await desktop.evaluate(`(() => {
         const vw = window.innerWidth;
         const vh = window.innerHeight;
@@ -375,9 +375,9 @@ async function runTests(harness, test) {
         }
         return clipped;
       })()`);
-      assert(deskClip.length === 0, `Desktop 1280x800 layout clipped with 16 landmarks/10 plates: ${deskClip.join(', ')}`);
+      assert(deskClip.length === 0, `Desktop 1280x800 layout clipped with 16 landmarks: ${deskClip.join(', ')}`);
 
-      // 5. Mobile 390x844 zero clipping with 16 landmarks + 10 plates (last test on Tab 1)
+      // 5. Mobile 390x844 zero clipping with 16 landmarks (last test on Tab 1)
       await desktop.resize(390, 844, 2, true);
       await sleep(180);
       const mobClip = await desktop.evaluate(`(() => {
@@ -398,7 +398,7 @@ async function runTests(harness, test) {
         }
         return clipped;
       })()`);
-      assert(mobClip.length === 0, `Mobile 390x844 layout clipped with 16 landmarks/10 plates: ${mobClip.join(', ')}`);
+      assert(mobClip.length === 0, `Mobile 390x844 layout clipped with 16 landmarks: ${mobClip.join(', ')}`);
     });
   } finally {
     await harness.closeTab(desktop);

@@ -197,11 +197,11 @@ export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, _tSec) 
 }
 
 export function createPedestrianSim(animData) {
-  const masterW = (animData && animData.canvas_width) || 12331;
-  const masterH = (animData && animData.canvas_height) || 5444;
+  const masterW = (animData && animData.canvas_width) || 28024;
+  const masterH = (animData && animData.canvas_height) || 12373;
   const depthMin = (animData && typeof animData.depth_min === 'number') ? animData.depth_min : -2400.0;
   const depthMax = (animData && typeof animData.depth_max === 'number') ? animData.depth_max : 2400.0;
-  const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+  const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.11;
   const resFactor = 0.25 / mppMaster;
   const depthSlopeGround = mppMaster * Math.sqrt(3) * (65535.0 / Math.max(1.0, depthMax - depthMin));
   const network = (animData && animData.network) || {};
@@ -1246,6 +1246,10 @@ export function createPedestrianSim(animData) {
     // Advance every pedestrian agent
     for (let i = 0; i < agents.length; i++) {
       const ag = agents[i];
+      ag.prevU = ag.u;
+      ag.prevV = ag.v;
+      ag.prevStride = ag.stridePhase;
+      ag.prevState = ag.state;
       if (ag.pauseCooldown > 0) ag.pauseCooldown = Math.max(0, ag.pauseCooldown - dt);
 
       if (ag.state === 'in_transit') {
@@ -1823,13 +1827,27 @@ export function createPedestrianSim(animData) {
     const visV0 = (-offsetY / Math.max(1, worldH * scale)) - padV;
     const visV1 = ((canvasH - offsetY) / Math.max(1, worldH * scale)) + padV;
 
+    const alpha = PED_FIXED_DT > 0 ? clamp(subStepRem / PED_FIXED_DT, 0, 1) : 0;
     const out = [];
     for (let i = 0; i < agents.length; i++) {
       const ag = agents[i];
       if (ag.state === 'in_transit') continue;
-      if (ag.u < visU0 || ag.u > visU1 || ag.v < visV0 || ag.v > visV1) continue;
-      const wx = ag.u * worldW;
-      const wy = ag.v * worldH;
+      let u = ag.u;
+      let v = ag.v;
+      let stridePhase = ag.stridePhase;
+      if (alpha > 0 && ag.prevU !== undefined && ag.prevState !== 'in_transit') {
+        const du = ag.u - ag.prevU;
+        const dv = ag.v - ag.prevV;
+        if (Math.abs(du) < 0.003 && Math.abs(dv) < 0.003) {
+          u += du * alpha;
+          v += dv * alpha;
+          const dStride = ag.stridePhase - (ag.prevStride != null ? ag.prevStride : ag.stridePhase);
+          if (Math.abs(dStride) < 2.0) stridePhase += dStride * alpha;
+        }
+      }
+      if (u < visU0 || u > visU1 || v < visV0 || v > visV1) continue;
+      const wx = u * worldW;
+      const wy = v * worldH;
       let d16 = ag.d16;
       if (ag.zGnd != null && depthMgr) {
         d16 = depthMgr.evalWalkerD16(wx, wy, ag.zGnd, worldW, worldH, !!ag.onElevatedDeck);
@@ -1855,7 +1873,7 @@ export function createPedestrianSim(animData) {
         hasStroller: ag.hasStroller,
         partnerCoat: ag.partnerCoat,
         partnerHair: ag.partnerHair,
-        stridePhase: ag.stridePhase,
+        stridePhase,
         tripLabel: ag.tripLabel,
         originName: ag.originName,
         destName: ag.destName,
@@ -1865,16 +1883,27 @@ export function createPedestrianSim(animData) {
   }
 
   function getInspectablePedestrians(worldW, worldH) {
+    const alpha = PED_FIXED_DT > 0 ? clamp(subStepRem / PED_FIXED_DT, 0, 1) : 0;
     const out = [];
     for (let i = 0; i < agents.length; i++) {
       const ag = agents[i];
       if (ag.state === 'in_transit') continue;
+      let u = ag.u;
+      let v = ag.v;
+      if (alpha > 0 && ag.prevU !== undefined && ag.prevState !== 'in_transit') {
+        const du = ag.u - ag.prevU;
+        const dv = ag.v - ag.prevV;
+        if (Math.abs(du) < 0.003 && Math.abs(dv) < 0.003) {
+          u += du * alpha;
+          v += dv * alpha;
+        }
+      }
       out.push({
         id: ag.id,
-        wx: ag.u * worldW,
-        wy: ag.v * worldH,
-        u: ag.u,
-        v: ag.v,
+        wx: u * worldW,
+        wy: v * worldH,
+        u,
+        v,
         role: ag.role,
         state: ag.state,
         tripLabel: ag.tripLabel,

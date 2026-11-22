@@ -1,4 +1,6 @@
 import { createAudioEngine } from './js/audio.js';
+import { createCameraController } from './js/camera.js';
+import { createTileManager } from './js/tiles.js';
 import { createDepthManager } from './js/render/depth.js';
 import {
   shadeHex,
@@ -27,7 +29,7 @@ import { createPedestrianSim, drawPedestrianEntity } from './js/sim/pedestrians.
 import { createTrafficSim } from './js/sim/traffic.js';
 
   const canvas = document.getElementById('diorama-canvas');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { alpha: false });
   const viewport = document.getElementById('viewport');
   const pinsLayer = document.getElementById('pins-layer');
   const loupeCanvas = document.getElementById('loupe-canvas');
@@ -43,27 +45,17 @@ import { createTrafficSim } from './js/sim/traffic.js';
     ? Math.max(0, Math.min(1e9, rawFixedT))
     : null;
 
-  const CROPS = [
-    { file: '01_lindt_home_of_chocolate.webp', label: 'Lindt Home of Chocolate', lmId: 'lindt_hoc' },
-    { file: '02_reformierte_kirche_dorf.webp', label: 'Reformierte Kirche & Graves', lmId: 'reformierte_kirche' },
-    { file: '03_bendlikon_harbor_pier.webp', label: 'Bendlikon Pier & Sailboats', lmId: 'bendlikon_pier' },
-    { file: '04_bahnhof_kilchberg_weinberg.webp', label: 'Bahnhof & Dorfstrasse Viaduct', lmId: 'bahnhof_stockengut' },
-    { file: '05_schooren_seebad.webp', label: 'Schooren & Seebad', lmId: 'schooren_seebad' },
-    { file: '06_sanatorium_ridge.webp', label: 'Sanatorium Kilchberg', lmId: 'sanatorium_ridge' },
-    { file: '07_st_elisabeth_church.webp', label: 'Kath. Kirche St. Elisabeth', lmId: 'st_elisabeth' },
-    { file: '08_cf_meyer_haus.webp', label: 'C.F. Meyer-Haus', lmId: 'cf_meyer_haus' },
-    { file: '09_gemeindehaus_alte_landstrasse.webp', label: 'Gemeindehaus & Schulhaus', lmId: 'gemeindehaus_alte_landstr' },
-    { file: '10_stockengut_ridge_farm.webp', label: 'Stockengut Ridge Farm', lmId: 'stockengut_farm' },
-  ];
-
-  const ASSET_VER = '11.0';
+  const ASSET_VER = '12.0';
   const MAX_CACHED_TILES = 128;
+  const MODE_BACKDROPS = {
+    day: '#1b2b42',
+    sunset: '#2a2034',
+    night: '#0a101f',
+  };
 
-  // Overview images, 2-level 0.25/0.125 m/px tile pyramids (LRU-bounded) & 16-bit 3D Depth Manager
+  // Overview images, 2-level 0.22/0.11 m/px async ImageBitmap tile manager & 16-bit 3D Depth Manager
   const overviewImages = {};
   const tileManifests = {};   // mode -> { width, height, tileSize, cols, rows, mpp, z1? } | null
-  const tileCache = new Map(); // "${mode}:${level}:${col}_${row}" -> HTMLImageElement | 'loading' | 'error'
-  const visibleTileKeys = new Set();
   const depthMgr = createDepthManager();
 
   function formatMppCm(mpp) {
@@ -77,17 +69,11 @@ import { createTrafficSim } from './js/sim/traffic.js';
   let meta = null;
   let animData = null;
 
-  // World space = full-resolution diorama pixel space (either tileManifest width/height or overview width/height)
-  let scale = 0.05;
-  let offsetX = 0;
-  let offsetY = 0;
-
   let showAnimations = true;
   let showPins = true;
   let showLoupe = false;
   let wheelMode = 'zoom'; // 'zoom' | 'pan'
   let lastMouse = { x: 0, y: 0 };
-  let drawScheduled = false;
 
   // HiDPI: the canvas backing store is `dpr` x its CSS size (capped at 2 for 60 fps pixel-art rendering).
   // All camera maths (scale, offsets, hit radii) run in backing-store ("device") pixels; the user-facing
@@ -100,20 +86,51 @@ import { createTrafficSim } from './js/sim/traffic.js';
   let lastHitTestEntities = [];
   let pointerDownFollow = null;
   let searchResultCount = 0;
-  let camAnim = null;
+
+  // Frame telemetry & unified 60fps rAF state
   const renderStamps = [];
+  const frameDurations = [];
+  const MAX_FRAME_SAMPLES = 60;
+  let lastFrameMs = 0;
+  let p95FrameMs = 0;
+  let droppedFrames = 0;
+  let rafId = 0;
+  let lastRafTs = 0;
+  let needsDraw = false;
+  let lastTileLevel = 'overview';
+  let lastTilesLoaded = 0;
+
+  // Offscreen snapshot crossfade for Day / Sunset / Night transitions (bypassed on ?t=)
+  let modeFadeCanvas = null;
+  let modeFade = null; // { startMs, durationMs, ready }
+  let modeSwitchGen = 0;
+  let modeSwitchAnchor = null;
+
+  // Dirty-check caches to prevent per-frame DOM layout thrash
+  let lastLodText = '';
+  let lastZoomReadoutText = '';
+  let lastScaleBarPx = -1;
+  let lastScaleBarLabel = '';
+  let lastMinimapKey = '';
+  let lastReplaceStateMs = 0;
+
+  function safeReplaceState(url) {
+    const now = performance.now();
+    if (now - lastReplaceStateMs < 350) return;
+    lastReplaceStateMs = now;
+    try { window.history.replaceState(null, '', url); } catch (_) { /* sandboxed */ }
+  }
 
   function getDeviceRatio() {
     return Math.max(1, Math.min(DPR_CAP, window.devicePixelRatio || 1));
   }
-  function cssScale() {
-    return scale / dpr;
-  }
 
   function getWorldSize() {
     const mf = tileManifests[currentMode];
-    if (mf && mf.width && mf.height) {
-      return { width: mf.width, height: mf.height, tiled: true, mf };
+    const mfW = mf && (mf.width || mf.full_width);
+    const mfH = mf && (mf.height || mf.full_height);
+    if (mfW && mfH) {
+      return { width: mfW, height: mfH, tiled: true, mf };
     }
     const ov = overviewImages[currentMode];
     if (ov) {
@@ -122,13 +139,30 @@ import { createTrafficSim } from './js/sim/traffic.js';
     return { width: 4462, height: 2146, tiled: false, mf: null };
   }
 
+  const camCtrl = createCameraController({
+    getViewportSize: () => ({ width: canvas.width || 1, height: canvas.height || 1 }),
+    getWorldSize: () => getWorldSize(),
+    getDpr: () => dpr,
+    isDeterministic: () => fixedAnimTime !== null,
+  });
+  const camState = camCtrl.state;
+
+  const tileMgr = createTileManager({
+    assetVer: ASSET_VER,
+    maxInflight: 8,
+    maxCached: MAX_CACHED_TILES,
+    crossfadeMs: 120,
+    onTileReady: () => scheduleDraw(),
+  });
+
+  function cssScale() {
+    return camState.scale / dpr;
+  }
+
   function scheduleDraw() {
-    if (!drawScheduled) {
-      drawScheduled = true;
-      requestAnimationFrame(() => {
-        drawScheduled = false;
-        draw();
-      });
+    needsDraw = true;
+    if (!rafId && !document.hidden) {
+      rafId = requestAnimationFrame(frameTick);
     }
   }
 
@@ -150,8 +184,13 @@ import { createTrafficSim } from './js/sim/traffic.js';
     return fetch(`assets/tiles/${mode}/manifest.json?v=${ASSET_VER}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
+        if (data) {
+          if (!data.width && data.full_width) data.width = data.full_width;
+          if (!data.height && data.full_height) data.height = data.full_height;
+        }
         tileManifests[mode] = data;
-        if (data && data.mpp) {
+        tileMgr.setManifest(mode, data);
+        if (data && data.mpp && data.width && data.height) {
           const fidEl = document.getElementById('spec-fidelity');
           if (fidEl) fidEl.textContent = `${formatMppCm(data.mpp)} · ${data.width.toLocaleString()}×${data.height.toLocaleString()}`;
         }
@@ -159,50 +198,15 @@ import { createTrafficSim } from './js/sim/traffic.js';
       })
       .catch(() => {
         tileManifests[mode] = null;
+        tileMgr.setManifest(mode, null);
         return null;
       });
   }
 
-  function evictTileCache() {
-    if (tileCache.size <= MAX_CACHED_TILES) return;
-    for (const key of tileCache.keys()) {
-      if (tileCache.size <= MAX_CACHED_TILES) break;
-      if (!visibleTileKeys.has(key)) {
-        tileCache.delete(key);
-      }
-    }
-  }
-
-  function requestTile(mode, level, col, row, subPath = '') {
-    const key = `${mode}:${level}:${col}_${row}`;
-    visibleTileKeys.add(key);
-    if (tileCache.has(key)) {
-      const cached = tileCache.get(key);
-      tileCache.delete(key);
-      tileCache.set(key, cached);
-      return cached;
-    }
-    tileCache.set(key, 'loading');
-    const relPath = subPath ? `${mode}/${subPath}/${col}_${row}.webp` : `${mode}/${col}_${row}.webp`;
-    const img = new Image();
-    img.onload = () => {
-      if (tileCache.has(key)) tileCache.delete(key);
-      tileCache.set(key, img);
-      evictTileCache();
-      scheduleDraw();
-    };
-    img.onerror = () => {
-      tileCache.set(key, 'error');
-    };
-    img.src = `assets/tiles/${relPath}?v=${ASSET_VER}`;
-    evictTileCache();
-    return 'loading';
-  }
-
   function clampOffsets() {
     const { width, height } = getWorldSize();
-    const scaledW = width * scale;
-    const scaledH = height * scale;
+    const scaledW = width * camState.scale;
+    const scaledH = height * camState.scale;
     const marginX = Math.max(120, canvas.width * 0.25);
     const marginY = Math.max(120, canvas.height * 0.25);
     const minX = canvas.width - scaledW - marginX;
@@ -210,14 +214,14 @@ import { createTrafficSim } from './js/sim/traffic.js';
     const minY = canvas.height - scaledH - marginY;
     const maxY = marginY;
     if (scaledW + marginX * 2 <= canvas.width) {
-      offsetX = (canvas.width - scaledW) * 0.5;
+      camState.offsetX = (canvas.width - scaledW) * 0.5;
     } else {
-      offsetX = Math.min(maxX, Math.max(minX, offsetX));
+      camState.offsetX = Math.min(maxX, Math.max(minX, camState.offsetX));
     }
     if (scaledH + marginY * 2 <= canvas.height) {
-      offsetY = (canvas.height - scaledH) * 0.5;
+      camState.offsetY = (canvas.height - scaledH) * 0.5;
     } else {
-      offsetY = Math.min(maxY, Math.max(minY, offsetY));
+      camState.offsetY = Math.min(maxY, Math.max(minY, camState.offsetY));
     }
   }
 
@@ -233,16 +237,17 @@ import { createTrafficSim } from './js/sim/traffic.js';
       const { width, height } = getWorldSize();
       const prevW = canvas.width;
       const prevH = canvas.height;
-      const haveCam = scale > 0 && width > 0 && prevW > 300;
-      const cwx = haveCam ? (prevW * 0.5 - offsetX) / scale : 0;
-      const cwy = haveCam ? (prevH * 0.5 - offsetY) / scale : 0;
-      scale = scale * nd / dpr;
+      const haveCam = camState.scale > 0 && width > 0 && prevW > 300;
+      const cwx = haveCam ? (prevW * 0.5 - camState.offsetX) / camState.scale : 0;
+      const cwy = haveCam ? (prevH * 0.5 - camState.offsetY) / camState.scale : 0;
+      camState.scale = camState.scale * nd / dpr;
+      camState.targetScale = camState.targetScale * nd / dpr;
       dpr = nd;
       canvas.width = newW;
       canvas.height = newH;
       if (haveCam) {
-        offsetX = newW * 0.5 - cwx * scale;
-        offsetY = newH * 0.5 - cwy * scale;
+        camState.offsetX = newW * 0.5 - cwx * camState.scale;
+        camState.offsetY = newH * 0.5 - cwy * camState.scale;
         clampOffsets();
       }
       updateZoomReadout();
@@ -255,88 +260,47 @@ import { createTrafficSim } from './js/sim/traffic.js';
 
   function getCenterUV() {
     const { width, height } = getWorldSize();
-    const u = (width > 0 && scale > 0) ? (canvas.width * 0.5 - offsetX) / (width * scale) : 0.5;
-    const v = (height > 0 && scale > 0) ? (canvas.height * 0.5 - offsetY) / (height * scale) : 0.5;
+    const u = (width > 0 && camState.scale > 0) ? (canvas.width * 0.5 - camState.offsetX) / (width * camState.scale) : 0.5;
+    const v = (height > 0 && camState.scale > 0) ? (canvas.height * 0.5 - camState.offsetY) / (height * camState.scale) : 0.5;
     return { u, v };
   }
 
   function clampScale(sc) {
     const { width } = getWorldSize();
     const minScale = Math.min(0.06 * dpr, (canvas.width * 0.5) / Math.max(1, width));
-    const maxScale = 8.0 * dpr; // Up to 8x magnification of native 25 cm pixels (CSS px)
+    const maxScale = 8.0 * dpr;
     return Math.min(maxScale, Math.max(minScale, sc));
   }
 
-  // F24: cubic ease-out camera flight (log-space zoom + linear centre) shared by landmarks, presets & search.
-  function stepCameraAnim(nowMs) {
-    const a = camAnim;
-    if (!a) return;
-    const { width, height } = getWorldSize();
-    const k = Math.min(1, Math.max(0, (nowMs - a.t0) / a.ms));
-    const e = 1 - Math.pow(1 - k, 3);
-    const sc = Math.exp(Math.log(a.s0) + (Math.log(a.s1) - Math.log(a.s0)) * e);
-    if (a.keepCentre) {
-      const wx = (canvas.width * 0.5 - offsetX) / scale;
-      const wy = (canvas.height * 0.5 - offsetY) / scale;
-      scale = sc;
-      offsetX = canvas.width * 0.5 - wx * scale;
-      offsetY = canvas.height * 0.5 - wy * scale;
-    } else {
-      const cu = a.u0 + (a.u1 - a.u0) * e;
-      const cv = a.v0 + (a.v1 - a.v0) * e;
-      scale = sc;
-      offsetX = canvas.width * 0.5 - cu * width * scale;
-      offsetY = canvas.height * 0.5 - cv * height * scale;
-    }
-    clampOffsets();
+  function animateCamera(targetScale, cu, cv, ms, keepCentre = false) {
+    camCtrl.flyTo(cu, cv, targetScale, { ms, keepCentre, instant: !(ms > 0) });
     updateZoomReadout();
     scheduleDraw();
-    if (k < 1) {
-      requestAnimationFrame(stepCameraAnim);
-    } else {
-      camAnim = null;
-    }
-  }
-
-  function animateCamera(targetScale, cu, cv, ms, keepCentre = false) {
-    const { width, height } = getWorldSize();
-    if (!width || !height) return;
-    const s1 = clampScale(targetScale);
-    const c0 = getCenterUV();
-    const instant = !(ms > 0) || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    if (instant) {
-      camAnim = null;
-      scale = s1;
-      offsetX = canvas.width * 0.5 - cu * width * scale;
-      offsetY = canvas.height * 0.5 - cv * height * scale;
-      clampOffsets();
-      updateZoomReadout();
-      scheduleDraw();
-      return;
-    }
-    const wasRunning = !!camAnim;
-    camAnim = { t0: performance.now(), ms, s0: scale, s1, u0: c0.u, v0: c0.v, u1: cu, v1: cv, keepCentre };
-    if (!wasRunning) requestAnimationFrame(stepCameraAnim);
   }
 
   function pendingScale() {
-    return camAnim ? camAnim.s1 : scale;
+    return camCtrl.getTargetScale();
   }
 
   function zoomPreset(cssZoom) {
     if (followTarget) {
-      scale = clampScale(cssZoom * dpr);
+      camState.scale = clampScale(cssZoom * dpr);
+      camState.targetScale = camState.scale;
       updateZoomReadout();
       scheduleDraw();
       return;
     }
-    const c = camAnim && !camAnim.keepCentre ? { u: camAnim.u1, v: camAnim.v1 } : getCenterUV();
-    animateCamera(cssZoom * dpr, c.u, c.v, 340);
+    const c = getCenterUV();
+    camCtrl.flyTo(c.u, c.v, cssZoom * dpr, { ms: 340, keepCentre: true, noArc: true });
+    updateZoomReadout();
+    scheduleDraw();
   }
 
   function zoomStep(factor) {
-    const c = camAnim && !camAnim.keepCentre ? { u: camAnim.u1, v: camAnim.v1 } : getCenterUV();
-    animateCamera(pendingScale() * factor, c.u, c.v, followTarget ? 0 : 240, !!followTarget);
+    const c = getCenterUV();
+    camCtrl.flyTo(c.u, c.v, pendingScale() * factor, { ms: followTarget ? 0 : 240, keepCentre: true, noArc: true });
+    updateZoomReadout();
+    scheduleDraw();
   }
 
   function fitToScreen(animate = true) {
@@ -348,13 +312,12 @@ import { createTrafficSim } from './js/sim/traffic.js';
     const sy = (canvas.height - pad * 2) / height;
     const target = Math.min(sx, sy);
     if (animate && canvas.width > 300) {
-      animateCamera(target, 0.5, 0.5, 340);
+      camCtrl.flyTo(0.5, 0.5, target, { ms: 340, noArc: true });
+      updateZoomReadout();
+      scheduleDraw();
       return;
     }
-    camAnim = null;
-    scale = target;
-    offsetX = Math.round((canvas.width - width * scale) * 0.5);
-    offsetY = Math.round((canvas.height - height * scale) * 0.5);
+    camCtrl.setView(0.5, 0.5, target, { unclamped: true, skipClamp: true });
     updateZoomReadout();
     scheduleDraw();
   }
@@ -362,16 +325,17 @@ import { createTrafficSim } from './js/sim/traffic.js';
   function zoomAt(factor, cx, cy, exactScale = null) {
     const { width, height } = getWorldSize();
     if (!width || !height) return;
-    camAnim = null;
-    const prevScale = scale;
-    scale = exactScale !== null
+    camCtrl.cancelMotion();
+    const prevScale = camState.scale;
+    camState.scale = exactScale !== null
       ? clampScale(exactScale * dpr)
-      : clampScale(scale * factor);
+      : clampScale(camState.scale * factor);
+    camState.targetScale = camState.scale;
 
-    const wx = (cx - offsetX) / prevScale;
-    const wy = (cy - offsetY) / prevScale;
-    offsetX = cx - wx * scale;
-    offsetY = cy - wy * scale;
+    const wx = (cx - camState.offsetX) / prevScale;
+    const wy = (cy - camState.offsetY) / prevScale;
+    camState.offsetX = cx - wx * camState.scale;
+    camState.offsetY = cy - wy * camState.scale;
     clampOffsets();
     updateZoomReadout();
     scheduleDraw();
@@ -379,10 +343,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
 
   function panBy(dx, dy) {
     if (followTarget) setFollowMode(null);
-    camAnim = null;
-    offsetX += dx;
-    offsetY += dy;
-    clampOffsets();
+    camCtrl.panBy(dx, dy);
     scheduleDraw();
   }
 
@@ -390,11 +351,16 @@ import { createTrafficSim } from './js/sim/traffic.js';
     const el = document.getElementById('zoom-readout');
     if (el) {
       const cs = cssScale();
+      let txt;
       if (cs >= 0.98) {
         const rounded = Math.abs(cs - Math.round(cs)) < 0.03 ? Math.round(cs) : cs.toFixed(2);
-        el.textContent = `${rounded}× px`;
+        txt = `${rounded}× px`;
       } else {
-        el.textContent = `${Math.round(cs * 100)}%`;
+        txt = `${Math.round(cs * 100)}%`;
+      }
+      if (txt !== lastZoomReadoutText) {
+        lastZoomReadoutText = txt;
+        el.textContent = txt;
       }
     }
     updateScaleBar();
@@ -407,8 +373,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
     if (!bar || !label) return;
     const mf = tileManifests[currentMode];
     const world = getWorldSize();
-    const fallbackW = (meta && meta.canvas_width) || (animData && animData.canvas_width) || 24661;
-    const fallbackMpp = (meta && meta.camera && meta.camera.mpp) || (animData && animData.mpp) || 0.125;
+    const fallbackW = (meta && meta.canvas_width) || (animData && animData.canvas_width) || 28024;
+    const fallbackMpp = (meta && meta.camera && meta.camera.mpp) || (animData && animData.mpp) || 0.11;
     const mpp = (mf && mf.mpp ? mf.mpp : fallbackMpp) * (mf && mf.width ? 1 : fallbackW / Math.max(1, world.width));
     const metresPerCssPx = mpp / Math.max(1e-6, cssScale());
     const minM = metresPerCssPx * 64;
@@ -417,148 +383,108 @@ import { createTrafficSim } from './js/sim/traffic.js';
     for (const m of [1, 2, 5, 10]) {
       if (m * pow >= minM) { nice = m * pow; break; }
     }
-    const px = nice / metresPerCssPx;
-    bar.style.width = `${Math.round(px)}px`;
-    label.textContent = nice >= 1000 ? `${nice / 1000} km` : `${nice} m`;
+    const px = Math.round(nice / metresPerCssPx);
+    const lbl = nice >= 1000 ? `${nice / 1000} km` : `${nice} m`;
+    if (px !== lastScaleBarPx) {
+      lastScaleBarPx = px;
+      bar.style.width = `${px}px`;
+    }
+    if (lbl !== lastScaleBarLabel) {
+      lastScaleBarLabel = lbl;
+      label.textContent = lbl;
+    }
   }
 
-  function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  function draw(nowMs = performance.now(), simTimeSec = null) {
+    needsDraw = false;
+    ctx.fillStyle = MODE_BACKDROPS[currentMode] || '#141c2b';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // While awaiting the next mode's overview/manifest, hold the previous mode's
+    // snapshot at full opacity so rapid mode switches never flash a solid backdrop.
+    if (modeFade && !modeFade.ready && modeFadeCanvas && fixedAnimTime === null) {
+      ctx.drawImage(modeFadeCanvas, 0, 0, canvas.width, canvas.height);
+      return false;
+    }
+
     const ov = overviewImages[currentMode];
     const { width, height, tiled, mf } = getWorldSize();
-    if (!ov && !tiled) return;
+    if (!ov && !tiled) {
+      if (modeFade && modeFadeCanvas && fixedAnimTime === null) {
+        ctx.drawImage(modeFadeCanvas, 0, 0, canvas.width, canvas.height);
+      }
+      return false;
+    }
 
-    const destX = Math.round(offsetX);
-    const destY = Math.round(offsetY);
-    const destW = Math.round(width * scale);
-    const destH = Math.round(height * scale);
+    const moving = camCtrl.isMoving();
+    const scale = camState.scale;
+    const offsetX = camState.offsetX;
+    const offsetY = camState.offsetY;
+    const snapInt = !moving && scale >= 0.95 && Math.abs(scale - Math.round(scale)) < 0.02;
 
-    // 1. Always draw exact 2:1 LANCZOS overview image underneath (zero blank flashes & identical colors!)
-    ctx.imageSmoothingQuality = 'high';
+    const destX = snapInt ? Math.round(offsetX) : offsetX;
+    const destY = snapInt ? Math.round(offsetY) : offsetY;
+    const destW = snapInt ? Math.round(width * scale) : (width * scale);
+    const destH = snapInt ? Math.round(height * scale) : (height * scale);
+
+    // 1. Always draw exact LANCZOS overview image underneath (zero blank flashes)
+    ctx.imageSmoothingQuality = moving ? 'low' : 'high';
     if (ov) {
       const ovRatio = width / ov.width;
-      ctx.imageSmoothingEnabled = (scale * ovRatio) < 0.95;
+      ctx.imageSmoothingEnabled = moving || (scale * ovRatio) < 0.95;
       ctx.drawImage(ov, destX, destY, destW, destH);
     }
 
-    // 2. Stream 2-level lossless WebP tile pyramid: overview (0.50 m/px) -> z1 (0.25 m/px) -> L2 (0.125 m/px)
-    let tilesLoaded = 0;
-    let tilesVisible = 0;
-    visibleTileKeys.clear();
-    const ovWidth = ov ? ov.width : 0;
-    const z1 = (mf && mf.z1 && mf.z1.width && mf.z1.height && mf.z1.cols && mf.z1.rows) ? mf.z1 : null;
-    const needTiles = tiled && mf && (!ov || (width * scale) > ovWidth * 0.98);
-    const useZ1 = !!(needTiles && z1 && (width * scale) <= z1.width * 1.05);
+    // 2. Stream 2-level lossless WebP tile pyramid via async ImageBitmap tile manager
+    const speedPxPerSec = Math.hypot(camState.vx, camState.vy);
+    const tileRes = tileMgr.drawTiles(ctx, {
+      width: canvas.width,
+      height: canvas.height,
+      offsetX,
+      offsetY,
+      scale,
+      targetScale: camCtrl.getTargetScale(),
+      worldW: width,
+      worldH: height,
+      overview: ov,
+      moving,
+      speedPxPerSec,
+      vx: camState.vx,
+      vy: camState.vy,
+      fixedAnimTime,
+      nowMs,
+    }, { mode: currentMode });
 
-    if (needTiles && useZ1) {
-      const z1ts = z1.tileSize || 1024;
-      const z1Path = z1.path || 'z1';
-      const scaleX = width / z1.width;
-      const scaleY = height / z1.height;
-      const c0 = Math.max(0, Math.floor((-offsetX / (scale * scaleX)) / z1ts));
-      const c1 = Math.min(z1.cols - 1, Math.floor(((canvas.width - offsetX) / (scale * scaleX)) / z1ts));
-      const r0 = Math.max(0, Math.floor((-offsetY / (scale * scaleY)) / z1ts));
-      const r1 = Math.min(z1.rows - 1, Math.floor(((canvas.height - offsetY) / (scale * scaleY)) / z1ts));
-
-      ctx.imageSmoothingEnabled = (scale * scaleX) < 0.95;
-      for (let r = r0; r <= r1; r++) {
-        for (let c = c0; c <= c1; c++) {
-          tilesVisible++;
-          const tImg = requestTile(currentMode, 'z1', c, r, z1Path);
-          if (tImg && tImg !== 'loading' && tImg !== 'error') {
-            tilesLoaded++;
-            const tx0 = Math.round(offsetX + c * z1ts * scaleX * scale);
-            const ty0 = Math.round(offsetY + r * z1ts * scaleY * scale);
-            const tx1 = Math.round(offsetX + (c * z1ts + tImg.width) * scaleX * scale);
-            const ty1 = Math.round(offsetY + (r * z1ts + tImg.height) * scaleY * scale);
-            ctx.drawImage(tImg, tx0, ty0, tx1 - tx0, ty1 - ty0);
-          }
-        }
-      }
-      evictTileCache();
-    } else if (needTiles) {
-      const ts = mf.tileSize;
-      const c0 = Math.max(0, Math.floor((-offsetX / scale) / ts));
-      const c1 = Math.min(mf.cols - 1, Math.floor(((canvas.width - offsetX) / scale) / ts));
-      const r0 = Math.max(0, Math.floor((-offsetY / scale) / ts));
-      const r1 = Math.min(mf.rows - 1, Math.floor(((canvas.height - offsetY) / scale) / ts));
-
-      const l2List = [];
-      let anyMissing = false;
-      for (let r = r0; r <= r1; r++) {
-        for (let c = c0; c <= c1; c++) {
-          tilesVisible++;
-          const tImg = requestTile(currentMode, 'l2', c, r, '');
-          if (tImg && tImg !== 'loading' && tImg !== 'error') {
-            tilesLoaded++;
-            l2List.push({ c, r, tImg });
-          } else {
-            anyMissing = true;
-          }
-        }
-      }
-
-      // Progressive fallback: if any L2 tile is still decoding, paint any already-cached z1 tiles underneath
-      if (anyMissing && z1) {
-        const z1ts = z1.tileSize || 1024;
-        const scaleX = width / z1.width;
-        const scaleY = height / z1.height;
-        const zc0 = Math.max(0, Math.floor((-offsetX / (scale * scaleX)) / z1ts));
-        const zc1 = Math.min(z1.cols - 1, Math.floor(((canvas.width - offsetX) / (scale * scaleX)) / z1ts));
-        const zr0 = Math.max(0, Math.floor((-offsetY / (scale * scaleY)) / z1ts));
-        const zr1 = Math.min(z1.rows - 1, Math.floor(((canvas.height - offsetY) / (scale * scaleY)) / z1ts));
-        ctx.imageSmoothingEnabled = (scale * scaleX) < 0.95;
-        for (let r = zr0; r <= zr1; r++) {
-          for (let c = zc0; c <= zc1; c++) {
-            const zKey = `${currentMode}:z1:${c}_${r}`;
-            const zImg = tileCache.get(zKey);
-            if (zImg && zImg !== 'loading' && zImg !== 'error') {
-              const tx0 = Math.round(offsetX + c * z1ts * scaleX * scale);
-              const ty0 = Math.round(offsetY + r * z1ts * scaleY * scale);
-              const tx1 = Math.round(offsetX + (c * z1ts + zImg.width) * scaleX * scale);
-              const ty1 = Math.round(offsetY + (r * z1ts + zImg.height) * scaleY * scale);
-              ctx.drawImage(zImg, tx0, ty0, tx1 - tx0, ty1 - ty0);
-            }
-          }
-        }
-      }
-
-      ctx.imageSmoothingEnabled = scale < 0.95;
-      for (let i = 0; i < l2List.length; i++) {
-        const { c, r, tImg } = l2List[i];
-        const sxWorld = c * ts;
-        const syWorld = r * ts;
-        const tx0 = Math.round(offsetX + sxWorld * scale);
-        const ty0 = Math.round(offsetY + syWorld * scale);
-        const tx1 = Math.round(offsetX + (sxWorld + tImg.width) * scale);
-        const ty1 = Math.round(offsetY + (syWorld + tImg.height) * scale);
-        ctx.drawImage(tImg, tx0, ty0, tx1 - tx0, ty1 - ty0);
-      }
-      evictTileCache();
-    }
+    lastTileLevel = tileRes.tileLevel;
+    lastTilesLoaded = tileRes.tilesLoaded;
 
     if (lodStatusEl) {
-      if (needTiles) {
-        const activeMpp = useZ1 ? (z1.mpp || 0.25) : mf.mpp;
-        const mppStr = activeMpp ? formatMppCm(activeMpp) : 'HD';
-        lodStatusEl.textContent = tilesLoaded < tilesVisible
-          ? `Streaming ${mppStr} HD Tiles (${tilesLoaded}/${tilesVisible})…`
+      let nextLodText;
+      if (tileRes.needTiles) {
+        const mppStr = tileRes.activeMpp ? formatMppCm(tileRes.activeMpp) : 'HD';
+        nextLodText = tileRes.tilesLoaded < tileRes.tilesVisible
+          ? `Streaming ${mppStr} HD Tiles (${tileRes.tilesLoaded}/${tileRes.tilesVisible})…`
           : `Ultra-HD ${mppStr} Pixel Art Active (${scale >= 1 ? scale.toFixed(1) + '×' : Math.round(scale * 100) + '%'})`;
       } else {
-        lodStatusEl.textContent = 'Drag / Arrows to Pan · Scroll / Pinch to Zoom Close';
+        nextLodText = 'Drag / Arrows to Pan · Scroll / Pinch to Zoom Close';
+      }
+      if (nextLodText !== lastLodText) {
+        lastLodText = nextLodText;
+        lodStatusEl.textContent = nextLodText;
       }
     }
 
     if (animData) {
-      const animSec = getAnimTimeSec();
-      const liveSnap = (lastSimSnapshot && lastSimSnapshot.mode === currentMode) ? lastSimSnapshot : null;
-      if (pedSim) {
-        pedSim.updateToTime(animSec, currentMode, liveSnap);
-      }
-      if (trafficSim) {
-        const cwOcc = pedSim ? pedSim.getOccupiedCrosswalks() : null;
-        if (pedSim) trafficSim.setExternalPedestrianStats(pedSim.getStats());
-        lastSimSnapshot = trafficSim.updateToTime(animSec, currentMode, cwOcc);
+      const animSec = simTimeSec !== null ? simTimeSec : getAnimTimeSec();
+      // If draw() was called synchronously outside frameTick (e.g. boot/resize), ensure sim is up to date
+      if (simTimeSec === null) {
+        const liveSnap = (lastSimSnapshot && lastSimSnapshot.mode === currentMode) ? lastSimSnapshot : null;
+        if (pedSim) pedSim.updateToTime(animSec, currentMode, liveSnap);
+        if (trafficSim) {
+          const cwOcc = pedSim ? pedSim.getOccupiedCrosswalks() : null;
+          if (pedSim) trafficSim.setExternalPedestrianStats(pedSim.getStats());
+          lastSimSnapshot = trafficSim.updateToTime(animSec, currentMode, cwOcc);
+        }
       }
       if (showAnimations) {
         drawAnimations(width, height, animSec);
@@ -566,6 +492,22 @@ import { createTrafficSim } from './js/sim/traffic.js';
     }
 
     drawSelectionMarker(width, height);
+
+    // Smooth 220 ms preset crossfade overlay (bypassed when fixedAnimTime !== null)
+    let modeFading = false;
+    if (modeFade && modeFade.ready && modeFadeCanvas && fixedAnimTime === null) {
+      const t = (nowMs - modeFade.startMs) / modeFade.durationMs;
+      if (t < 1.0) {
+        const prevAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = Math.max(0, 1.0 - t);
+        ctx.drawImage(modeFadeCanvas, 0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = prevAlpha;
+        modeFading = true;
+      } else {
+        modeFade = null;
+      }
+    }
+
     updatePins(width, height);
     drawMinimap(ov, width, height);
     if (showLoupe) drawLoupe(ov, width, height, tiled, mf);
@@ -573,10 +515,15 @@ import { createTrafficSim } from './js/sim/traffic.js';
     const nowStamp = performance.now();
     renderStamps.push(nowStamp);
     while (renderStamps.length && nowStamp - renderStamps[0] > 1000) renderStamps.shift();
+
+    return tileRes.crossfading || modeFading;
   }
 
   // Gold diamond reticle on inspected building, or teal tracking reticle on inspected moving entity.
   function drawSelectionMarker(worldW, worldH) {
+    const scale = camState.scale;
+    const offsetX = camState.offsetX;
+    const offsetY = camState.offsetY;
     if (selectedBuilding) {
       const sx = Math.round(offsetX + selectedBuilding.u * worldW * scale);
       const sy = Math.round(offsetY + selectedBuilding.v * worldH * scale);
@@ -661,6 +608,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
 
     const cssW = canvas.width / dpr;
     const cssH = canvas.height / dpr;
+    const scale = camState.scale;
+    const offsetX = camState.offsetX;
+    const offsetY = camState.offsetY;
     const declutter = cssScale() < 0.7;
     const coords = new Array(n);
     let activeIdx = -1;
@@ -725,16 +675,15 @@ import { createTrafficSim } from './js/sim/traffic.js';
       const { sx, sy, onScreen } = coords[idx];
       const isDecluttered = declutter && hiddenByDeclutter[idx] === 1;
       const vis = onScreen && !isDecluttered;
-      // Dirty-check so panning/animating never rewrites unchanged pins (avoids layout churn).
+      // Dirty-check & GPU-composited translate3d() positioning (zero Blink layout/paint thrash).
       const key = vis ? `${Math.round(sx * 2)}|${Math.round(sy * 2)}` : (isDecluttered ? 'decluttered' : 'hidden');
       if (pin._key !== key) {
         pin._key = key;
         if (vis) {
-          pin.style.left = `${sx}px`;
-          pin.style.top = `${sy}px`;
-          pin.style.display = 'block';
+          pin.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -100%)`;
+          if (pin.style.display !== 'block') pin.style.display = 'block';
         } else {
-          pin.style.display = 'none';
+          if (pin.style.display !== 'none') pin.style.display = 'none';
         }
       }
       if (pin._decluttered !== isDecluttered) {
@@ -749,7 +698,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     }
   }
 
-  // Minimap: cache the scaled overview once per mode/size; each frame only paints the viewport box.
+  // Minimap: cache the scaled overview once per mode/size; dirty-check camera so idle animation frames skip redraw.
   let minimapBase = null;
   function sizeMinimap() {
     const rect = minimapCanvas.getBoundingClientRect();
@@ -761,6 +710,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
       minimapCanvas.width = w;
       minimapCanvas.height = h;
       minimapBase = null;
+      lastMinimapKey = '';
     }
   }
 
@@ -768,6 +718,13 @@ import { createTrafficSim } from './js/sim/traffic.js';
     if (!minimapCtx || !ov) return;
     const mw = minimapCanvas.width;
     const mh = minimapCanvas.height;
+    const scale = camState.scale;
+    const offsetX = camState.offsetX;
+    const offsetY = camState.offsetY;
+    const mmKey = `${currentMode}|${mw}|${mh}|${Math.round(offsetX)}|${Math.round(offsetY)}|${scale.toFixed(5)}|${canvas.width}|${canvas.height}`;
+    if (mmKey === lastMinimapKey && minimapBase && minimapBase.ov === ov) return;
+    lastMinimapKey = mmKey;
+
     if (!minimapBase || minimapBase.mode !== currentMode || minimapBase.w !== mw || minimapBase.h !== mh || minimapBase.ov !== ov) {
       const off = document.createElement('canvas');
       off.width = mw;
@@ -802,6 +759,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
     const mag = 6;
     const lw = loupeCanvas.width;
     const lh = loupeCanvas.height;
+    const scale = camState.scale;
+    const offsetX = camState.offsetX;
+    const offsetY = camState.offsetY;
     const srcSpan = Math.floor(lw / mag);
     const wxCenter = (lastMouse.x - offsetX) / scale;
     const wyCenter = (lastMouse.y - offsetY) / scale;
@@ -821,11 +781,13 @@ import { createTrafficSim } from './js/sim/traffic.js';
       let drewAll = true;
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
-          const tImg = requestTile(currentMode, 'l2', c, r, '');
-          if (tImg && tImg !== 'loading' && tImg !== 'error') {
+          const tImg = tileMgr.getTileImage(currentMode, 'l2', c, r, '');
+          if (tImg) {
             const dx = (c * ts - sx0) * mag;
             const dy = (r * ts - sy0) * mag;
-            loupeCtx.drawImage(tImg, dx, dy, tImg.width * mag, tImg.height * mag);
+            const tw = tImg.width || tImg.naturalWidth || ts;
+            const th = tImg.height || tImg.naturalHeight || ts;
+            loupeCtx.drawImage(tImg, dx, dy, tw * mag, th * mag);
           } else {
             drewAll = false;
           }
@@ -854,8 +816,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     }
     const lx = Math.min(canvas.width / dpr - lw - 16, Math.max(14, lastMouse.x / dpr + 22));
     const ly = Math.min(canvas.height / dpr - lh - 16, Math.max(14, lastMouse.y / dpr - lw * 0.5));
-    loupeCanvas.style.left = `${lx}px`;
-    loupeCanvas.style.top = `${ly}px`;
+    loupeCanvas.style.transform = `translate3d(${lx.toFixed(1)}px, ${ly.toFixed(1)}px, 0)`;
   }
 
   function setActiveLandmark(id) {
@@ -940,7 +901,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
   }
 
   function hitTestEntity(clientX, clientY, wasFollowing) {
-    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.11;
     const refScale = 0.25 / mppMaster;
     if (!showAnimations || (!wasFollowing && (cssScale() * refScale) < 0.85) || lastHitTestEntities.length === 0) return false;
     const rect = viewport.getBoundingClientRect();
@@ -950,8 +911,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
     let bestDist = Infinity;
     for (let i = 0; i < lastHitTestEntities.length; i++) {
       const ent = lastHitTestEntities[i];
-      const sx = (offsetX + ent.wx * scale) / dpr;
-      const sy = (offsetY + ent.wy * scale) / dpr;
+      const sx = (camState.offsetX + ent.wx * camState.scale) / dpr;
+      const sy = (camState.offsetY + ent.wy * camState.scale) / dpr;
       const dist = Math.hypot(sx - clickX, sy - clickY);
       const isFollowedKind = wasFollowing && ent.kind === wasFollowing;
       const maxR = isFollowedKind ? Math.max(ent.radiusCss, 32) : ent.radiusCss;
@@ -971,8 +932,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
     const rect = viewport.getBoundingClientRect();
     const mx = (clientX - rect.left) * dpr;
     const my = (clientY - rect.top) * dpr;
-    const u = (mx - offsetX) / (width * scale);
-    const v = (my - offsetY) / (height * scale);
+    const u = (mx - camState.offsetX) / (width * camState.scale);
+    const v = (my - camState.offsetY) / (height * camState.scale);
     if (u < 0 || u > 1 || v < 0 || v > 1) return;
 
     let best = null;
@@ -990,11 +951,12 @@ import { createTrafficSim } from './js/sim/traffic.js';
   }
 
   // ---------------------------------------------------------------------------
-  // Bulletproof Unified Pointer Pan + Multi-Touch Pinch Zoom + Minimap Drag
+  // Unified Pointer Pan (with iOS Flick Inertia) + Multi-Touch Pinch + Minimap Drag
   // ---------------------------------------------------------------------------
   const activePointers = new Map();
   let gestureMovedDist = 0;
   let downTarget = null;
+  let isSingleDragging = false;
 
   viewport.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -1002,12 +964,17 @@ import { createTrafficSim } from './js/sim/traffic.js';
     if (e.target.closest('.viewport-ui') || e.target.closest('.exit-cinema-btn')) return;
     pointerDownFollow = followTarget;
     if (followTarget) setFollowMode(null);
-    camAnim = null;
+    camCtrl.cancelMotion();
     e.preventDefault();
     viewport.focus({ preventScroll: true });
     if (activePointers.size === 0) {
       gestureMovedDist = 0;
       downTarget = e.target;
+      isSingleDragging = true;
+      camCtrl.beginDrag(e.clientX * dpr, e.clientY * dpr, performance.now());
+    } else {
+      isSingleDragging = false;
+      camCtrl.endDrag(performance.now());
     }
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try {
@@ -1035,7 +1002,12 @@ import { createTrafficSim } from './js/sim/traffic.js';
       if (gestureMovedDist > 3) {
         viewport.classList.add('is-dragging');
       }
-      panBy(dx * dpr, dy * dpr);
+      if (isSingleDragging) {
+        camCtrl.moveDrag(e.clientX * dpr, e.clientY * dpr, performance.now());
+        scheduleDraw();
+      } else {
+        panBy(dx * dpr, dy * dpr);
+      }
     } else if (activePointers.size >= 2) {
       const pts = Array.from(activePointers.entries());
       const [idA, pA] = pts[0];
@@ -1056,8 +1028,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
 
       gestureMovedDist += 20;
       viewport.classList.add('is-dragging');
-      offsetX += (newMidX - prevMidX) * dpr;
-      offsetY += (newMidY - prevMidY) * dpr;
+      camState.offsetX += (newMidX - prevMidX) * dpr;
+      camState.offsetY += (newMidY - prevMidY) * dpr;
       zoomAt(newDist / prevDist, (newMidX - rect.left) * dpr, (newMidY - rect.top) * dpr);
     }
   });
@@ -1070,6 +1042,16 @@ import { createTrafficSim } from './js/sim/traffic.js';
     } catch (_) {}
     if (activePointers.size === 0) {
       viewport.classList.remove('is-dragging');
+      if (isSingleDragging) {
+        isSingleDragging = false;
+        if (gestureMovedDist >= 5) {
+          camCtrl.endDrag(performance.now());
+          scheduleDraw();
+        } else {
+          camCtrl.cancelMotion();
+          scheduleDraw();
+        }
+      }
       if (gestureMovedDist < 5) {
         const pinEl = downTarget && downTarget.closest ? downTarget.closest('.lm-pin') : null;
         if (pinEl && meta) {
@@ -1087,32 +1069,33 @@ import { createTrafficSim } from './js/sim/traffic.js';
   viewport.addEventListener('pointerup', finishPointer);
   viewport.addEventListener('pointercancel', finishPointer);
 
-  // Wheel / Trackpad: smooth pinch-zoom, smooth scroll-zoom, or two-finger pan!
+  // Wheel / Trackpad: log-space smooth pinch-zoom, smooth scroll-zoom, or two-finger pan
   viewport.addEventListener('wheel', (e) => {
     e.preventDefault();
     const rect = viewport.getBoundingClientRect();
     const cx = (e.clientX - rect.left) * dpr;
     const cy = (e.clientY - rect.top) * dpr;
 
-    const lineMult = e.deltaMode === 1 ? 18 : (e.deltaMode === 2 ? 240 : 1);
-    const dx = e.deltaX * lineMult;
-    const dy = e.deltaY * lineMult;
-
     // Pinch-to-zoom on trackpad sets ctrlKey = true
     if (e.ctrlKey || e.metaKey) {
-      const factor = Math.exp(-dy * 0.0085);
-      zoomAt(factor, cx, cy);
+      camCtrl.wheelZoom(e.deltaY, e.deltaMode, true, cx, cy);
+      updateZoomReadout();
+      scheduleDraw();
       return;
     }
+
+    const lineMult = e.deltaMode === 1 ? 16 : (e.deltaMode === 2 ? window.innerHeight : 1);
+    const dx = e.deltaX * lineMult;
+    const dy = e.deltaY * lineMult;
 
     // Pan when wheelMode === 'pan', Shift is held, or user swipes horizontally/diagonally on a trackpad
     const isTrackpad2DPan = Math.abs(dx) > 1.5 && Math.abs(dx) > Math.abs(dy) * 0.4;
     if (wheelMode === 'pan' || e.shiftKey || isTrackpad2DPan) {
       panBy(-dx * dpr, -dy * dpr);
     } else {
-      const clampedDy = Math.max(-160, Math.min(160, dy));
-      const factor = Math.exp(-clampedDy * 0.0028);
-      zoomAt(factor, cx, cy);
+      camCtrl.wheelZoom(e.deltaY, e.deltaMode, false, cx, cy);
+      updateZoomReadout();
+      scheduleDraw();
     }
   }, { passive: false });
 
@@ -1120,12 +1103,13 @@ import { createTrafficSim } from './js/sim/traffic.js';
   let minimapDragging = false;
   function panFromMinimap(clientX, clientY) {
     if (followTarget) setFollowMode(null);
+    camCtrl.cancelMotion();
     const rect = minimapCanvas.getBoundingClientRect();
     const u = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const v = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
     const { width, height } = getWorldSize();
-    offsetX = canvas.width * 0.5 - u * width * scale;
-    offsetY = canvas.height * 0.5 - v * height * scale;
+    camState.offsetX = canvas.width * 0.5 - u * width * camState.scale;
+    camState.offsetY = canvas.height * 0.5 - v * height * camState.scale;
     clampOffsets();
     scheduleDraw();
   }
@@ -1154,9 +1138,10 @@ import { createTrafficSim } from './js/sim/traffic.js';
     if (followTarget) setFollowMode(null);
     const { width, height } = getWorldSize();
     const rect = viewport.getBoundingClientRect();
-    const cu = ((e.clientX - rect.left) * dpr - offsetX) / (width * scale);
-    const cv = ((e.clientY - rect.top) * dpr - offsetY) / (height * scale);
-    animateCamera(pendingScale() * 2, Math.min(1, Math.max(0, cu)), Math.min(1, Math.max(0, cv)), 360);
+    const cu = ((e.clientX - rect.left) * dpr - camState.offsetX) / (width * camState.scale);
+    const cv = ((e.clientY - rect.top) * dpr - camState.offsetY) / (height * camState.scale);
+    camCtrl.flyTo(Math.min(1, Math.max(0, cu)), Math.min(1, Math.max(0, cv)), pendingScale() * 2, { ms: 360, noArc: true });
+    scheduleDraw();
   });
 
   // On-screen D-Pad buttons
@@ -1171,20 +1156,27 @@ import { createTrafficSim } from './js/sim/traffic.js';
     fitToScreen();
   });
 
-  // Keyboard Pan (Arrows / WASD), Zoom (+ / - / 0) & Masterpiece Shortcuts (1/2/3, F, H, M, Space, Esc)
+  // Continuous Keyboard Pan (Arrows / WASD), Zoom (+ / - / 0) & Masterpiece Shortcuts
   window.addEventListener('keydown', (e) => {
-    if (!document.getElementById('modal-overlay').classList.contains('hidden')) {
-      if (e.key === 'Escape') document.getElementById('modal-overlay').classList.add('hidden');
-      return;
-    }
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const step = (e.shiftKey ? 320 : 140) * dpr;
-    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { e.preventDefault(); panBy(step, 0); }
-    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { e.preventDefault(); panBy(-step, 0); }
-    else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { e.preventDefault(); panBy(0, step); }
-    else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { e.preventDefault(); panBy(0, -step); }
-    else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomStep(1.35); }
+    if (e.key === 'Shift') {
+      camCtrl.setHeldKey('Shift', true);
+      return;
+    }
+    if (
+      e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown'
+      || e.key === 'a' || e.key === 'A' || e.key === 'd' || e.key === 'D'
+      || e.key === 'w' || e.key === 'W' || e.key === 's' || e.key === 'S'
+    ) {
+      e.preventDefault();
+      if (followTarget) setFollowMode(null);
+      camCtrl.setHeldKey('Shift', !!e.shiftKey);
+      camCtrl.setHeldKey(e.code || e.key, true);
+      scheduleDraw();
+      return;
+    }
+    if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomStep(1.35); }
     else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomStep(1 / 1.35); }
     else if (e.key === '0') { e.preventDefault(); if (followTarget) setFollowMode(null); fitToScreen(); }
     else if (e.key === '1') { const b = document.getElementById('btn-mode-day'); if (b) b.click(); }
@@ -1204,107 +1196,15 @@ import { createTrafficSim } from './js/sim/traffic.js';
     }
   });
 
-  // ---------------------------------------------------------------------------
-  // Interactive Pan/Zoom Modal for 0.22 m/px Detail Plates
-  // ---------------------------------------------------------------------------
-  const modalOverlay = document.getElementById('modal-overlay');
-  const modalViewport = document.getElementById('modal-viewport');
-  const modalCanvas = document.getElementById('modal-canvas');
-  const modalCtx = modalCanvas.getContext('2d');
-  let modalImg = null;
-  let mScale = 1.0;
-  let mOffX = 0;
-  let mOffY = 0;
-  let mDrag = false;
-  let mPrev = { x: 0, y: 0 };
-
-  function drawModal() {
-    if (!modalImg) return;
-    const rect = modalViewport.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) return;
-    const mdpr = getDeviceRatio();
-    modalCanvas.width = Math.floor(rect.width * mdpr);
-    modalCanvas.height = Math.floor(rect.height * mdpr);
-    modalCtx.setTransform(mdpr, 0, 0, mdpr, 0, 0);
-    modalCtx.fillStyle = '#0f1520';
-    modalCtx.fillRect(0, 0, rect.width, rect.height);
-    modalCtx.imageSmoothingEnabled = mScale < 0.92;
-    modalCtx.drawImage(
-      modalImg,
-      Math.round(mOffX),
-      Math.round(mOffY),
-      Math.round(modalImg.width * mScale),
-      Math.round(modalImg.height * mScale)
-    );
-  }
-
-  function fitModal(exact = null) {
-    if (!modalImg) return;
-    const rect = modalViewport.getBoundingClientRect();
-    mScale = exact !== null ? exact : Math.min((rect.width - 24) / modalImg.width, (rect.height - 24) / modalImg.height);
-    mOffX = (rect.width - modalImg.width * mScale) * 0.5;
-    mOffY = (rect.height - modalImg.height * mScale) * 0.5;
-    drawModal();
-  }
-
-  let modalCrop = null;
-  function openCropModal(c) {
-    modalCrop = c;
-    document.getElementById('modal-title').textContent = `${c.label} — Ultra-Fine Isometric Pixel Art (Drag to Pan · Scroll to Zoom)`;
-    modalOverlay.classList.remove('hidden');
-    const img = new Image();
-    img.onload = () => {
-      modalImg = img;
-      fitModal(1.0);
-    };
-    img.src = `assets/${c.file}?v=${ASSET_VER}`;
-  }
-
-  modalViewport.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    mDrag = true;
-    mPrev = { x: e.clientX, y: e.clientY };
-    modalViewport.classList.add('is-dragging');
-    try { modalViewport.setPointerCapture(e.pointerId); } catch (_) {}
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift') {
+      camCtrl.setHeldKey('Shift', false);
+      return;
+    }
+    camCtrl.setHeldKey(e.code || e.key, false);
   });
-  modalViewport.addEventListener('pointermove', (e) => {
-    if (!mDrag) return;
-    e.preventDefault();
-    mOffX += e.clientX - mPrev.x;
-    mOffY += e.clientY - mPrev.y;
-    mPrev = { x: e.clientX, y: e.clientY };
-    drawModal();
-  });
-  modalViewport.addEventListener('pointerup', (e) => {
-    mDrag = false;
-    modalViewport.classList.remove('is-dragging');
-    try { modalViewport.releasePointerCapture(e.pointerId); } catch (_) {}
-  });
-  modalViewport.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    if (!modalImg) return;
-    const rect = modalViewport.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    const prev = mScale;
-    mScale = Math.min(8.0, Math.max(0.2, mScale * Math.exp(-e.deltaY * 0.003)));
-    mOffX = cx - ((cx - mOffX) / prev) * mScale;
-    mOffY = cy - ((cy - mOffY) / prev) * mScale;
-    drawModal();
-  }, { passive: false });
-
-  document.getElementById('btn-modal-1x').addEventListener('click', () => fitModal(1.0));
-  document.getElementById('btn-modal-2x').addEventListener('click', () => fitModal(2.0));
-  document.getElementById('btn-modal-4x').addEventListener('click', () => fitModal(4.0));
-  document.getElementById('btn-modal-fit').addEventListener('click', () => fitModal(null));
-  document.getElementById('btn-modal-fly').addEventListener('click', () => {
-    const lm = modalCrop && meta ? meta.landmarks.find((l) => l.id === modalCrop.lmId) : null;
-    modalOverlay.classList.add('hidden');
-    if (lm) flyToLandmark(lm);
-  });
-  document.getElementById('btn-close-modal').addEventListener('click', () => modalOverlay.classList.add('hidden'));
-  modalOverlay.addEventListener('click', (e) => {
-    if (e.target.id === 'modal-overlay') modalOverlay.classList.add('hidden');
+  window.addEventListener('blur', () => {
+    camCtrl.clearHeldKeys();
   });
 
   // ---------------------------------------------------------------------------
@@ -1327,40 +1227,65 @@ import { createTrafficSim } from './js/sim/traffic.js';
       btn.addEventListener('click', () => flyToLandmark(lm));
       list.appendChild(btn);
     });
-
-    const gal = document.getElementById('crop-gallery');
-    gal.innerHTML = '';
-    CROPS.forEach((c) => {
-      const card = document.createElement('div');
-      card.className = 'crop-thumb';
-      card.innerHTML = `<img src="assets/${c.file}?v=${ASSET_VER}" alt="${c.label}" loading="lazy" /><span>${c.label}</span>`;
-      card.addEventListener('click', () => openCropModal(c));
-      gal.appendChild(card);
-    });
   }
 
   document.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const prevWorld = getWorldSize();
-      const centerU = (canvas.width * 0.5 - offsetX) / (prevWorld.width * scale);
-      const centerV = (canvas.height * 0.5 - offsetY) / (prevWorld.height * scale);
-      const relZoom = (prevWorld.width * pendingScale()) / canvas.width;
-      camAnim = null;
+      const nextMode = btn.dataset.mode;
+      if (nextMode === currentMode) return;
+      const myGen = ++modeSwitchGen;
+      if (!modeSwitchAnchor) {
+        const prevWorld = getWorldSize();
+        const centerU = ((canvas.width / 2) - camState.offsetX) / (camState.scale * prevWorld.width);
+        const centerV = ((canvas.height / 2) - camState.offsetY) / (camState.scale * prevWorld.height);
+        const relZoom = camState.scale * prevWorld.width;
+        modeSwitchAnchor = { centerU, centerV, relZoom };
+      }
+      camCtrl.cancelMotion();
+
+      // Snapshot previous canvas for smooth 220 ms crossfade (bypassed when fixedAnimTime !== null).
+      // Preserve the original settled snapshot across overlapping rapid mode switches.
+      if (fixedAnimTime === null && canvas.width > 0 && canvas.height > 0) {
+        if (!modeFade || modeFade.ready) {
+          if (!modeFadeCanvas) modeFadeCanvas = document.createElement('canvas');
+          if (modeFadeCanvas.width !== canvas.width || modeFadeCanvas.height !== canvas.height) {
+            modeFadeCanvas.width = canvas.width;
+            modeFadeCanvas.height = canvas.height;
+          }
+          const fctx = modeFadeCanvas.getContext('2d');
+          fctx.drawImage(canvas, 0, 0);
+        }
+        modeFade = { startMs: 0, durationMs: 220, ready: false };
+      } else {
+        modeFade = null;
+      }
 
       document.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      currentMode = btn.dataset.mode;
+      currentMode = nextMode;
+      tileMgr.setMode(currentMode);
       document.body.dataset.mode = currentMode;
       // Recompute audio gain targets immediately (crickets/birds balance) rather than waiting for the throttle
       audioEngine.forceUpdate();
       viewport.classList.add('mode-switching');
-      await Promise.all([loadModeOverview(currentMode), loadTileManifest(currentMode)]);
+      await Promise.all([loadModeOverview(nextMode), loadTileManifest(nextMode)]);
+      if (myGen !== modeSwitchGen) return;
       viewport.classList.remove('mode-switching');
 
+      const anchor = modeSwitchAnchor;
+      modeSwitchAnchor = null;
       const nextWorld = getWorldSize();
-      scale = (relZoom * canvas.width) / nextWorld.width;
-      offsetX = canvas.width * 0.5 - centerU * nextWorld.width * scale;
-      offsetY = canvas.height * 0.5 - centerV * nextWorld.height * scale;
+      if (anchor) {
+        const nextScale = anchor.relZoom / nextWorld.width;
+        camState.scale = nextScale;
+        camState.targetScale = nextScale;
+        camState.offsetX = (canvas.width / 2) - anchor.centerU * nextWorld.width * nextScale;
+        camState.offsetY = (canvas.height / 2) - anchor.centerV * nextWorld.height * nextScale;
+      }
+      if (modeFade) {
+        modeFade.startMs = performance.now();
+        modeFade.ready = true;
+      }
       updateZoomReadout();
       scheduleDraw();
     });
@@ -1377,7 +1302,14 @@ import { createTrafficSim } from './js/sim/traffic.js';
   // 90s Isometric Pixel-Art Moving Elements Engine (Trains, Cars, Ships, Steam & Flags)
   // ---------------------------------------------------------------------------
   function getCamState() {
-    return { scale, offsetX, offsetY, width: canvas.width, height: canvas.height, dpr };
+    return {
+      scale: camState.scale,
+      offsetX: camState.offsetX,
+      offsetY: camState.offsetY,
+      width: canvas.width,
+      height: canvas.height,
+      dpr,
+    };
   }
 
   function drawDepthMasked(wx, wy, boundsOrPadW, vehD16, worldW, worldH, drawFn, extraVertPx = 4.0) {
@@ -1390,8 +1322,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
   };
 
   function drawAnimations(worldW, worldH, tSec) {
-    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
-    const wScale = (worldW / (animData.canvas_width || 12331)) * (0.25 / mppMaster);
+    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.11;
+    const wScale = (worldW / (animData.canvas_width || 28024)) * (0.25 / mppMaster);
     const isNight = currentMode === 'night';
     const isSunset = currentMode === 'sunset';
     const cam = getCamState();
@@ -1498,7 +1430,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
           ],
         });
       }
-      if ((scale * wScale) >= 0.35) {
+      if ((camState.scale * wScale) >= 0.35) {
         for (const cycItem of drawables.cyclists) {
           if (!hasDepth && cycItem.pos.occ) continue;
           livingFrameCounts.cyclists++;
@@ -1537,7 +1469,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     }
 
     // M4 Purposeful O-D Pedestrians (Bahnhof, Bus Stops, Bendlikon Pier, Lindt, Crosswalks, Micro-Archetypes)
-    if (pedSim && (scale * wScale) >= 0.35) {
+    if (pedSim && (camState.scale * wScale) >= 0.35) {
       const pedItems = pedSim.getDrawablePedestrians(worldW, worldH, wScale, cam, depthMgr);
       for (let i = 0; i < pedItems.length; i++) {
         const pItem = pedItems[i];
@@ -1631,9 +1563,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
         } else if (v.type === 'stop_commuter') {
           drawMiniPerson(
             targetCtx,
-            offsetX + v.pos.wx * scale,
-            offsetY + v.pos.wy * scale,
-            scale * wScale * 0.90,
+            camState.offsetX + v.pos.wx * camState.scale,
+            camState.offsetY + v.pos.wy * camState.scale,
+            camState.scale * wScale * 0.90,
             v.coat, v.pants, v.hair, isNight, v.stride, v.bag,
             canvas.width, canvas.height,
           );
@@ -1823,7 +1755,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
         animateCamera(2.0 * dpr, getCenterUV().u, getCenterUV().v, 360, true);
       }
       showFollowInspector(followTarget);
-      updateFollowCamera(getAnimTimeSec(), true);
+      updateFollowCamera(getAnimTimeSec(), true, 0.016, true);
       scheduleDraw();
     }
   }
@@ -1836,51 +1768,109 @@ import { createTrafficSim } from './js/sim/traffic.js';
     setTimeout(() => { resizeViewport(); scheduleDraw(); }, 30);
   }
 
-  function updateFollowCamera(tSec, snap) {
-    if (!followTarget || !animData) return;
+  function updateFollowCamera(tSec, snap, dt = 0.016, stepSimIfNeeded = false) {
+    if (!followTarget || !animData || !trafficSim) return;
     const { width: worldW, height: worldH } = getWorldSize();
-    let targetPos = null;
-    if (trafficSim) {
+    if (stepSimIfNeeded) {
       const cwOcc = pedSim ? pedSim.getOccupiedCrosswalks() : null;
-      trafficSim.updateToTime(tSec, currentMode, cwOcc);
-      targetPos = trafficSim.getFollowTarget(followTarget, worldW, worldH);
+      lastSimSnapshot = trafficSim.updateToTime(tSec, currentMode, cwOcc);
     }
+    const targetPos = trafficSim.getFollowTarget(followTarget, worldW, worldH);
     if (!targetPos) return;
-    const desiredX = canvas.width * 0.5 - targetPos.wx * scale;
-    const desiredY = canvas.height * 0.5 - targetPos.wy * scale;
-    const jumpDist = Math.hypot(desiredX - offsetX, desiredY - offsetY);
+    const desiredX = canvas.width * 0.5 - targetPos.wx * camState.scale;
+    const desiredY = canvas.height * 0.5 - targetPos.wy * camState.scale;
+    const jumpDist = Math.hypot(desiredX - camState.offsetX, desiredY - camState.offsetY);
     if (snap || jumpDist > canvas.width * 0.8) {
-      offsetX = desiredX;
-      offsetY = desiredY;
+      camState.offsetX = desiredX;
+      camState.offsetY = desiredY;
+      clampOffsets();
     } else {
-      offsetX += (desiredX - offsetX) * 0.14;
-      offsetY += (desiredY - offsetY) * 0.14;
+      camCtrl.followStep(desiredX, desiredY, dt);
     }
-    clampOffsets();
   }
 
-  let lastAnimPaint = 0;
-  let animLoopId = 0;
+  function recordFrameTiming(frameMs) {
+    if (!(frameMs > 0 && frameMs < 1000)) return;
+    lastFrameMs = frameMs;
+    if (frameMs > 28) droppedFrames++;
+    frameDurations.push(frameMs);
+    if (frameDurations.length > MAX_FRAME_SAMPLES) frameDurations.shift();
+    if (frameDurations.length >= 4) {
+      const sorted = frameDurations.slice().sort((a, b) => a - b);
+      const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95));
+      p95FrameMs = sorted[idx];
+    } else {
+      p95FrameMs = frameMs;
+    }
+  }
+
+  // Single unified 60fps requestAnimationFrame loop (guarantees <= 1 pending rAF at all times)
   function startAnimLoop() {
-    if (!animLoopId && showAnimations && animData && !document.hidden) {
-      animLoopId = requestAnimationFrame(animLoop);
+    if (!rafId && !document.hidden) {
+      lastRafTs = 0;
+      rafId = requestAnimationFrame(frameTick);
     }
   }
+
   function stopAnimLoop() {
-    if (animLoopId) {
-      cancelAnimationFrame(animLoopId);
-      animLoopId = 0;
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
     }
+    lastRafTs = 0;
   }
-  function animLoop(nowMs) {
-    animLoopId = 0;
-    if (showAnimations && animData && !document.hidden) {
-      if (nowMs - lastAnimPaint >= 33 && !drawScheduled) {
-        lastAnimPaint = nowMs;
-        if (followTarget) updateFollowCamera(getAnimTimeSec(), false);
-        draw();
+
+  function frameTick(nowMs) {
+    rafId = 0;
+    if (document.hidden) {
+      lastRafTs = 0;
+      return;
+    }
+    const frameMs = lastRafTs > 0 ? (nowMs - lastRafTs) : 16.67;
+    lastRafTs = nowMs;
+    const dt = Math.max(0.001, Math.min(0.05, frameMs * 0.001));
+
+    const { width: worldW, height: worldH } = getWorldSize();
+    const camChanged = camCtrl.step(dt, nowMs, {
+      vpW: canvas.width || 1,
+      vpH: canvas.height || 1,
+      worldW,
+      worldH,
+      dpr,
+    });
+    if (camChanged) {
+      updateZoomReadout();
+    }
+
+    // Step living-world simulation ONCE per frame (no duplicate trafficSim.updateToTime()!)
+    let animSec = null;
+    if (animData) {
+      animSec = getAnimTimeSec();
+      const liveSnap = (lastSimSnapshot && lastSimSnapshot.mode === currentMode) ? lastSimSnapshot : null;
+      if (pedSim) {
+        pedSim.updateToTime(animSec, currentMode, liveSnap);
       }
-      startAnimLoop();
+      if (trafficSim) {
+        const cwOcc = pedSim ? pedSim.getOccupiedCrosswalks() : null;
+        if (pedSim) trafficSim.setExternalPedestrianStats(pedSim.getStats());
+        lastSimSnapshot = trafficSim.updateToTime(animSec, currentMode, cwOcc);
+      }
+      if (followTarget) {
+        updateFollowCamera(animSec, false, dt, false);
+      }
+    }
+
+    const activeFades = draw(nowMs, animSec);
+    recordFrameTiming(frameMs);
+
+    const keepRunning = (showAnimations && !!animData && fixedAnimTime === null)
+      || camCtrl.isAnimating()
+      || activeFades
+      || needsDraw;
+    if (keepRunning && !document.hidden) {
+      rafId = requestAnimationFrame(frameTick);
+    } else {
+      lastRafTs = 0;
     }
   }
 
@@ -1925,6 +1915,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
   document.addEventListener('visibilitychange', () => {
     audioEngine.handleVisibilityChange(document.hidden);
     if (document.hidden) {
+      camCtrl.clearHeldKeys();
       stopAnimLoop();
     } else if (showAnimations && animData) {
       startAnimLoop();
@@ -1971,6 +1962,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
   const initMode = ['day', 'sunset', 'night'].includes(urlParams.get('mode')) ? urlParams.get('mode') : 'day';
   // Always normalise the preset (malformed ?mode= falls back to day) & expose it for atmospheric theming
   currentMode = initMode;
+  tileMgr.setMode(currentMode);
   document.body.dataset.mode = currentMode;
   document.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === currentMode));
   resizeViewport();
@@ -2005,7 +1997,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
   }
 
-  // ---- Instant address & landmark search (1,887 swisstopo addresses + 10 landmarks)
+  // ---- Instant address & landmark search (1,887 swisstopo addresses + 16 landmarks)
   const searchInput = document.getElementById('search-input');
   const searchList = document.getElementById('search-results');
   let searchIndex = null;
@@ -2175,7 +2167,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     btnShare.addEventListener('click', async () => {
       const link = buildPermalink();
       const copied = await copyText(link);
-      try { window.history.replaceState(null, '', link); } catch (_) { /* sandboxed */ }
+      safeReplaceState(link);
       showToast(copied ? 'Permalink copied to clipboard' : 'Permalink set in the address bar');
     });
   }
@@ -2269,13 +2261,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
     if (qLandmark) {
       flyToLandmark(qLandmark, (Number.isFinite(qZoom) && qZoom > 0) ? qZoom : null, true);
     } else if (Number.isFinite(qZoom) && qZoom > 0) {
-      const { width, height } = getWorldSize();
       const cu = Number.isFinite(qU) ? Math.min(1, Math.max(0, qU)) : 0.5;
       const cv = Number.isFinite(qV) ? Math.min(1, Math.max(0, qV)) : 0.5;
-      scale = clampScale(qZoom * dpr);
-      offsetX = canvas.width * 0.5 - cu * width * scale;
-      offsetY = canvas.height * 0.5 - cv * height * scale;
-      clampOffsets();
+      camCtrl.setView(cu, cv, clampScale(qZoom * dpr));
       updateZoomReadout();
       draw();
     } else {
@@ -2289,16 +2277,18 @@ import { createTrafficSim } from './js/sim/traffic.js';
     if (showAnimations && animData) {
       startAnimLoop();
     }
-    // Preload remaining lighting modes
-    for (const m of ['day', 'sunset', 'night']) {
-      if (m !== currentMode) {
-        loadModeOverview(m);
-        loadTileManifest(m);
+    // Preload remaining lighting modes after initial viewport tiles settle (avoids saturating boot bandwidth)
+    setTimeout(() => {
+      for (const m of ['day', 'sunset', 'night']) {
+        if (m !== currentMode) {
+          loadModeOverview(m);
+          loadTileManifest(m);
+        }
       }
-    }
+    }, 600);
   });
 
-  // Non-intrusive read-only telemetry snapshot (PROJECT.md § Interface Contract #5)
+  // Non-intrusive read-only telemetry snapshot (PROJECT.md § Interface Contracts)
   Object.defineProperty(window, '__dioramaDebug', {
     configurable: true,
     enumerable: false,
@@ -2321,12 +2311,20 @@ import { createTrafficSim } from './js/sim/traffic.js';
           overlapCount: 0,
           cyclists: 0,
         };
+      const tStats = tileMgr.getStats();
+      const cssZoom = camState.scale / dpr;
       return {
         mode: currentMode,
-        scale: scale / dpr,
+        zoom: cssZoom,
+        scale: cssZoom,
         u: cu,
         v: cv,
+        offsetX: camState.offsetX,
+        offsetY: camState.offsetY,
         dpr,
+        tileLevel: lastTileLevel,
+        tilesLoaded: lastTilesLoaded,
+        animEnabled: showAnimations,
         fps: renderStamps.length,
         audioEnabled: audioEngine.isEnabled(),
         audioState: audioEngine.getStateName(),
@@ -2342,6 +2340,16 @@ import { createTrafficSim } from './js/sim/traffic.js';
         depthStats: depthMgr.getDepthStats(),
         livingCounts: { ...livingFrameCounts },
         simStats,
+        frameStats: {
+          fps: renderStamps.length,
+          p95FrameMs: Number(p95FrameMs.toFixed(2)),
+          lastFrameMs: Number(lastFrameMs.toFixed(2)),
+          droppedFrames,
+          tileInflight: tStats.inflight,
+          tileCacheSize: tStats.cacheSize,
+          camSpeedPxPerSec: Number(Math.hypot(camState.vx, camState.vy).toFixed(1)),
+          rafActive: rafId !== 0,
+        },
       };
     },
   });

@@ -241,42 +241,45 @@ async function runTests(harness, test) {
       await sleep(100);
     });
 
-    await test('T1.FA3.07', 'Detail-plate modal opens, renders, has 1:1/2x/4x/Fit & Fly Here, closes on Esc', async () => {
-      await tab.clickSelector('#crop-gallery .crop-thumb:first-child');
-      const opened = await tab.waitFor(
-        `(() => {
-          const ov = document.getElementById('modal-overlay');
-          if (!ov || ov.classList.contains('hidden')) return false;
-          const c = document.getElementById('modal-canvas');
-          if (!c || c.width < 10 || c.height < 10) return false;
-          const ctx = c.getContext('2d');
-          const d = ctx.getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 2, 2).data;
-          return (d[0] + d[1] + d[2]) > 0;
-        })()`,
-        { timeoutMs: 3000, intervalMs: 60 },
+    await test('T1.FA3.07', 'Detail-plate modal/gallery removed; clicking landmark in sidebar flies smoothly on live 0.11 m/px diorama', async () => {
+      const plateUi = await tab.evaluate(`({
+        cropGallery: Boolean(document.getElementById('crop-gallery')),
+        cropsSection: Boolean(document.querySelector('.crops-section')),
+        cropThumbs: document.querySelectorAll('.crop-thumb').length,
+        modalOverlay: Boolean(document.getElementById('modal-overlay')),
+        plateModal: Boolean(document.getElementById('plate-modal')),
+        modalCanvas: Boolean(document.getElementById('modal-canvas')),
+        modalFly: Boolean(document.getElementById('btn-modal-fly')),
+      })`);
+      assert(
+        !plateUi.cropGallery &&
+          !plateUi.cropsSection &&
+          plateUi.cropThumbs === 0 &&
+          !plateUi.modalOverlay &&
+          !plateUi.plateModal &&
+          !plateUi.modalCanvas &&
+          !plateUi.modalFly,
+        `Removed Detail Plates UI still present in DOM: ${JSON.stringify(plateUi)}`,
       );
-      assert(Boolean(opened), 'Detail-plate modal (#modal-overlay) did not open & render canvas');
 
-      const controls = await tab.evaluate(`(() => {
-        const box = document.getElementById('modal-overlay');
-        const btns = [...box.querySelectorAll('button')];
-        const texts = btns.map((b) => (b.textContent || '').trim());
-        const has1x = texts.some((t) => /1:1/i.test(t));
-        const has2x = texts.some((t) => /2[x×]/i.test(t));
-        const has4x = texts.some((t) => /4[x×]/i.test(t));
-        const hasFit = texts.some((t) => /^fit$/i.test(t));
-        const hasFlyHere = btns.some((b) => /fly\\s*here/i.test(b.textContent || '') || /fly/i.test(b.id || ''));
-        return { has1x, has2x, has4x, hasFit, hasFlyHere, texts };
-      })()`);
+      tab.resetNetworkCounters();
+      // Click a previously unvisited landmark (#12 stockengut_farm, opposite side of Kilchberg)
+      // so L2 tiles are not already warm in the shared tab's LRU cache.
+      await tab.clickSelector('#landmark-list .lm-item:nth-child(12)');
+      await tab.waitForCameraSettled();
+      const dbg = await tab.getDebug();
+      assert(dbg && dbg.activeLandmark, `Expected activeLandmark after clicking landmark #12, got ${JSON.stringify(dbg?.activeLandmark)}`);
+      assert(typeof dbg.scale === 'number' && dbg.scale >= 1.0, `Expected scale >= 1.0 on landmark fly-to, got ${dbg?.scale}`);
 
-      await tab.pressKey('Escape', 'Escape', 27);
+      await tab.clickSelector('#btn-zoom-2x');
+      await tab.waitForCameraSettled();
       await sleep(140);
-      const closed = await tab.evaluate(`document.getElementById('modal-overlay')?.classList.contains('hidden')`);
-      assert(closed, 'Modal did not close on Escape key');
-
-      assert(controls.has1x && controls.has2x && controls.hasFit, `Missing standard modal zoom buttons: ${controls.texts.join(', ')}`);
-      assert(controls.has4x, `Detail-plate modal missing 4x zoom button (F25): found [${controls.texts.join(', ')}]`);
-      assert(controls.hasFlyHere, `Detail-plate modal missing "Fly Here" button (F25): found [${controls.texts.join(', ')}]`);
+      const dbg2x = await tab.getDebug();
+      assert(dbg2x && typeof dbg2x.scale === 'number' && dbg2x.scale >= 1.8, `Expected scale >= 1.8 at 2x zoom, got ${dbg2x?.scale}`);
+      assert(dbg2x && typeof dbg2x.tilesLoaded === 'number' && dbg2x.tilesLoaded >= 1, `Expected tilesLoaded >= 1 at 2x zoom, got ${dbg2x?.tilesLoaded}`);
+      assert(tab.tileResponses.length >= 1, `Expected live 0.11 m/px tile HTTP 200 streaming at 2x, got ${tab.tileResponses.length}`);
+      const sample = await tab.captureCanvasSample('#diorama-canvas', 48, 27);
+      assert(sample.meanLuma > 5, `Canvas appears blank after landmark 2x fly-to (meanLuma=${sample.meanLuma.toFixed(2)})`);
     });
 
     await test('T1.FA3.08', 'Cinema Mode hides chrome on H and restores on Escape', async () => {
@@ -490,78 +493,47 @@ async function runTests(harness, test) {
       assert(tab.exceptions.length === 0, `Runtime JS exceptions: ${tab.exceptions.join('; ')}`);
     });
 
-    await test('T1.FA3.14', 'v9.0 sidebar renders >=16 stops with dynamic count tag & >=10 detail plates (07..10 modal opens cleanly)', async () => {
+    await test('T1.FA3.14', 'Sidebar renders >=16 stops with dynamic count tag, zero detail-plate gallery, and clicking stop #7 flies cleanly', async () => {
       const snap = await tab.evaluate(`(() => {
         const lmCount = document.querySelectorAll('#landmark-list .lm-item').length;
         const stopTag = (document.querySelector('.tour-section .mono-tag')?.textContent || '').trim();
-        const cropCount = document.querySelectorAll('#crop-gallery .crop-thumb').length;
-        const cropSrcs = Array.from(document.querySelectorAll('#crop-gallery .crop-thumb img')).map(
-          (img) => img.getAttribute('src') || '',
-        );
-        return { lmCount, stopTag, cropCount, cropSrcs };
+        const cropCount = document.querySelectorAll('#crop-gallery .crop-thumb, .crop-thumb').length;
+        const hasCropGallery = Boolean(document.getElementById('crop-gallery') || document.querySelector('.crops-section'));
+        const hasModal = Boolean(document.getElementById('modal-overlay') || document.getElementById('plate-modal'));
+        return { lmCount, stopTag, cropCount, hasCropGallery, hasModal };
       })()`);
 
-      // Preconditions first: fail cleanly on v8.0 with AssertionError (zero selector/timeout errors)
-      assert(snap.lmCount >= 16, `Expected >= 16 landmarks in #landmark-list (v9.0), got ${snap.lmCount}`);
+      assert(snap.lmCount >= 16, `Expected >= 16 landmarks in #landmark-list, got ${snap.lmCount}`);
       assert(
         new RegExp(`^${snap.lmCount}\\s+STOPS$`, 'i').test(snap.stopTag),
         `Expected dynamic stop-count tag '${snap.lmCount} STOPS', got '${snap.stopTag}'`,
       );
-      assert(snap.cropCount >= 10, `Expected >= 10 detail plates in #crop-gallery (v9.0), got ${snap.cropCount}`);
-
-      const expectedPlates = [
-        '01_lindt_home_of_chocolate.webp',
-        '02_reformierte_kirche_dorf.webp',
-        '03_bendlikon_harbor_pier.webp',
-        '04_bahnhof_kilchberg_weinberg.webp',
-        '05_schooren_seebad.webp',
-        '06_sanatorium_ridge.webp',
-        '07_st_elisabeth_church.webp',
-        '08_cf_meyer_haus.webp',
-        '09_gemeindehaus_alte_landstrasse.webp',
-        '10_stockengut_ridge_farm.webp',
-      ];
-      for (let i = 0; i < expectedPlates.length; i++) {
-        const src = snap.cropSrcs[i] || '';
-        assert(
-          src.includes(expectedPlates[i]),
-          `Plate index ${i} expected '${expectedPlates[i]}', got '${src}'`,
-        );
-      }
+      assert(snap.cropCount === 0 && !snap.hasCropGallery, `Expected Detail Plates gallery removed, got cropCount=${snap.cropCount}, hasCropGallery=${snap.hasCropGallery}`);
+      assert(!snap.hasModal, 'Expected detail-plate modal (#modal-overlay/#plate-modal) removed from DOM');
 
       const prevExc = tab.exceptions.length;
       const prevErr = tab.consoleErrors.length;
       const prevHttp = tab.localHttpErrors.length;
       const prevLoad = tab.localLoadFailures.length;
 
-      await tab.clickSelector('#crop-gallery .crop-thumb:nth-child(7)');
-      const modalReady = await tab.waitFor(
-        `(() => {
-          const ov = document.getElementById('modal-overlay');
-          const cv = document.getElementById('modal-canvas');
-          if (!ov || ov.classList.contains('hidden') || !cv || cv.width < 10 || cv.height < 10) return false;
-          const ctx = cv.getContext('2d');
-          const p = ctx.getImageData(Math.floor(cv.width / 2), Math.floor(cv.height / 2), 1, 1).data;
-          return (p[0] + p[1] + p[2]) > 0;
-        })()`,
-        { timeoutMs: 3000, intervalMs: 60 },
-      );
-      assert(modalReady, 'New v9.0 detail plate #7 modal failed to open or render pixels on #modal-canvas');
-
-      const modalTitle = await tab.evaluate(`(document.getElementById('modal-title')?.textContent || '').trim()`);
-      assert(modalTitle.length > 0, 'Plate #7 modal #modal-title is empty');
-
-      await tab.pressKey('Escape', 'Escape', 27);
+      await tab.clickSelector('#landmark-list .lm-item:nth-child(7)');
+      await tab.waitForCameraSettled();
       await sleep(140);
-      const modalClosed = await tab.evaluate(
-        `Boolean(document.getElementById('modal-overlay')?.classList.contains('hidden'))`,
-      );
-      assert(modalClosed, 'Plate #7 modal did not close on Escape');
 
-      assert(tab.exceptions.length === prevExc, `New JS exceptions on plate #7 modal: ${tab.exceptions.slice(prevExc).join('; ')}`);
-      assert(tab.consoleErrors.length === prevErr, `New console errors on plate #7 modal: ${tab.consoleErrors.slice(prevErr).join('; ')}`);
-      assert(tab.localHttpErrors.length === prevHttp, `New HTTP errors on plate #7 modal: ${tab.localHttpErrors.slice(prevHttp).map((e) => `${e.status} ${e.url}`).join('; ')}`);
-      assert(tab.localLoadFailures.length === prevLoad, `New load failures on plate #7 modal: ${tab.localLoadFailures.slice(prevLoad).map((e) => `${e.errorText} ${e.url}`).join('; ')}`);
+      const dbg = await tab.getDebug();
+      assert(dbg && dbg.activeLandmark === 'st_elisabeth', `Expected stop #7 to activate 'st_elisabeth', got '${dbg?.activeLandmark}'`);
+      assert(typeof dbg.scale === 'number' && dbg.scale >= 1.0, `Expected stop #7 fly-to scale >= 1.0, got ${dbg?.scale}`);
+
+      const inspTitle = await tab.evaluate(`(document.getElementById('insp-title')?.textContent || '').trim()`);
+      assert(inspTitle.length > 0, 'Inspector #insp-title is empty after clicking landmark stop #7');
+
+      const sample = await tab.captureCanvasSample('#diorama-canvas', 48, 27);
+      assert(sample.meanLuma > 5, `Canvas appears blank after flying to stop #7 (meanLuma=${sample.meanLuma.toFixed(2)})`);
+
+      assert(tab.exceptions.length === prevExc, `New JS exceptions on stop #7 fly-to: ${tab.exceptions.slice(prevExc).join('; ')}`);
+      assert(tab.consoleErrors.length === prevErr, `New console errors on stop #7 fly-to: ${tab.consoleErrors.slice(prevErr).join('; ')}`);
+      assert(tab.localHttpErrors.length === prevHttp, `New HTTP errors on stop #7 fly-to: ${tab.localHttpErrors.slice(prevHttp).map((e) => `${e.status} ${e.url}`).join('; ')}`);
+      assert(tab.localLoadFailures.length === prevLoad, `New load failures on stop #7 fly-to: ${tab.localLoadFailures.slice(prevLoad).map((e) => `${e.errorText} ${e.url}`).join('; ')}`);
     });
   } finally {
     await harness.closeTab(tab);

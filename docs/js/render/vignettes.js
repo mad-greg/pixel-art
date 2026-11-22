@@ -22,6 +22,49 @@ function hash01(n) {
   return s - Math.floor(s);
 }
 
+// Cached 64x64 offscreen radial glow sprites (replaces per-frame ctx.createRadialGradient calls)
+const glowSpriteCache = new Map();
+function getGlowSprite(rgbStr) {
+  let sprite = glowSpriteCache.get(rgbStr);
+  if (sprite) return sprite;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 64;
+  const gctx = c.getContext('2d');
+  const grad = gctx.createRadialGradient(32, 32, 2, 32, 32, 31);
+  grad.addColorStop(0, `rgba(${rgbStr}, 1)`);
+  grad.addColorStop(0.55, `rgba(${rgbStr}, 0.38)`);
+  grad.addColorStop(1, `rgba(${rgbStr}, 0)`);
+  gctx.fillStyle = grad;
+  gctx.fillRect(0, 0, 64, 64);
+  glowSpriteCache.set(rgbStr, c);
+  return c;
+}
+
+function blitGlow(ctx, cx, cy, rx, ry, rgbStr, alpha, rotRad = 0) {
+  if (rx <= 0.5 || ry <= 0.5 || alpha <= 0.005) return;
+  const sprite = getGlowSprite(rgbStr);
+  const prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = prevAlpha * alpha;
+  if (rotRad !== 0) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotRad);
+    ctx.drawImage(sprite, -rx, -ry, rx * 2, ry * 2);
+    ctx.restore();
+  } else {
+    ctx.drawImage(sprite, cx - rx, cy - ry, rx * 2, ry * 2);
+  }
+  ctx.globalAlpha = prevAlpha;
+}
+
+// Reusable scratch buffers for drawShorelineWaves (zero per-frame array allocations)
+const WAVE_MAX_PTS = 16;
+const waveBufX = new Float64Array(WAVE_MAX_PTS);
+const waveBufY = new Float64Array(WAVE_MAX_PTS);
+const waveRunStart = new Int32Array(8);
+const waveRunLen = new Int32Array(8);
+
 // Precomputed park/meadow anchors for nighttime fireflies (real Kilchberg parks & lake meadows)
 const FIREFLY_GROVES = [
   [0.24, 0.42], [0.27, 0.34], [0.33, 0.48], [0.39, 0.65],
@@ -241,9 +284,10 @@ export function drawShorelineWaves(ctx, cam, depthMgr, shoreline, worldW, worldH
       const wcx = wx + st.nx * bowW;
       const wcy = wy + st.ny * bowW;
 
-      const subRuns = [];
-      let curRun = [];
       const N_SUB = 8;
+      let runCount = 0;
+      let curStart = 0;
+      let curLen = 0;
       for (let k = 0; k <= N_SUB; k++) {
         const t = k / N_SUB;
         const omt = 1 - t;
@@ -253,25 +297,39 @@ export function drawShorelineWaves(ctx, cam, depthMgr, shoreline, worldW, worldH
           ? depthMgr.isWaterUV(pwx / worldW, pwy / worldH)
           : true;
         if (ok) {
-          curRun.push([offsetX + pwx * scale, offsetY + pwy * scale]);
+          if (curLen === 0) curStart = k;
+          waveBufX[k] = offsetX + pwx * scale;
+          waveBufY[k] = offsetY + pwy * scale;
+          curLen++;
         } else {
-          if (curRun.length >= 2) subRuns.push(curRun);
-          curRun = [];
+          if (curLen >= 2) {
+            waveRunStart[runCount] = curStart;
+            waveRunLen[runCount] = curLen;
+            runCount++;
+          }
+          curLen = 0;
         }
       }
-      if (curRun.length >= 2) subRuns.push(curRun);
-      if (subRuns.length === 0) continue;
+      if (curLen >= 2) {
+        waveRunStart[runCount] = curStart;
+        waveRunLen[runCount] = curLen;
+        runCount++;
+      }
+      if (runCount === 0) continue;
 
       const shX = st.nx * 2.1 * s;
       const shY = st.ny * 2.1 * s;
-      for (const run of subRuns) {
+      for (let ri = 0; ri < runCount; ri++) {
+        const rStart = waveRunStart[ri];
+        const rLen = waveRunLen[ri];
         ctx.globalAlpha = alpha * 0.65;
         ctx.strokeStyle = troughCol;
         ctx.lineWidth = Math.max(1.1, 1.8 * s);
         ctx.beginPath();
-        for (let k = 0; k < run.length; k++) {
-          if (k === 0) ctx.moveTo(run[k][0] + shX, run[k][1] + shY);
-          else ctx.lineTo(run[k][0] + shX, run[k][1] + shY);
+        for (let k = 0; k < rLen; k++) {
+          const idx = rStart + k;
+          if (k === 0) ctx.moveTo(waveBufX[idx] + shX, waveBufY[idx] + shY);
+          else ctx.lineTo(waveBufX[idx] + shX, waveBufY[idx] + shY);
         }
         ctx.stroke();
 
@@ -279,18 +337,19 @@ export function drawShorelineWaves(ctx, cam, depthMgr, shoreline, worldW, worldH
         ctx.strokeStyle = isBreaking ? foamCol : swellCol;
         ctx.lineWidth = Math.max(1.0, (isBreaking ? 1.9 : 1.35) * s);
         ctx.beginPath();
-        for (let k = 0; k < run.length; k++) {
-          if (k === 0) ctx.moveTo(run[k][0], run[k][1]);
-          else ctx.lineTo(run[k][0], run[k][1]);
+        for (let k = 0; k < rLen; k++) {
+          const idx = rStart + k;
+          if (k === 0) ctx.moveTo(waveBufX[idx], waveBufY[idx]);
+          else ctx.lineTo(waveBufX[idx], waveBufY[idx]);
         }
         ctx.stroke();
 
-        if (isBreaking && alpha > 0.35 && run.length >= 3) {
-          const mid = run[Math.floor(run.length / 2)];
+        if (isBreaking && alpha > 0.35 && rLen >= 3) {
+          const midIdx = rStart + Math.floor(rLen / 2);
           const pxSz = Math.max(1.2, 1.5 * s);
           ctx.globalAlpha = alpha * 0.9;
           ctx.fillStyle = foamCol;
-          ctx.fillRect(Math.round(mid[0] - pxSz * 1.4), Math.round(mid[1] - pxSz * 0.5), Math.round(pxSz * 2.8), Math.max(1, Math.round(pxSz)));
+          ctx.fillRect(Math.round(waveBufX[midIdx] - pxSz * 1.4), Math.round(waveBufY[midIdx] - pxSz * 0.5), Math.round(pxSz * 2.8), Math.max(1, Math.round(pxSz)));
         }
       }
     }
@@ -327,13 +386,7 @@ function drawSwissClockDial(ctx, cx, cy, rDial, s, tSec, mode, style = 'civic', 
     const sbbSec = sec < 58.5 ? (sec / 58.5) * 60 : 0;
     const sAng = (sbbSec / 60) * Math.PI * 2 - Math.PI * 0.5;
     if (isNight || isSunset) {
-      const g = ctx.createRadialGradient(cx, cy, rDial * 0.4, cx, cy, rDial * 2.1);
-      g.addColorStop(0, isNight ? 'rgba(248, 250, 252, 0.34)' : 'rgba(248, 250, 252, 0.18)');
-      g.addColorStop(1, 'rgba(248, 250, 252, 0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(cx, cy, rDial * 2.1, 0, Math.PI * 2);
-      ctx.fill();
+      blitGlow(ctx, cx, cy, rDial * 2.1, rDial * 2.1, '248, 250, 252', isNight ? 0.34 : 0.18);
     }
     ctx.fillStyle = '#f8fafc';
     ctx.beginPath();
@@ -439,14 +492,7 @@ function drawRotatedSignText(ctx, x, y, text, s, alpha, rotRad, opts = {}) {
 
 function drawLanternGlow(ctx, sx, sy, r, isNight, warmRgb = '255, 224, 146', coreHex = '#fff1c2', coreAlpha = 0.90) {
   if (r < 1.5) return;
-  const grad = ctx.createRadialGradient(sx, sy, Math.max(0.5, r * 0.10), sx, sy, r);
-  grad.addColorStop(0, `rgba(${warmRgb}, ${(isNight ? 0.42 : 0.24).toFixed(2)})`);
-  grad.addColorStop(0.55, `rgba(${warmRgb}, ${(isNight ? 0.16 : 0.08).toFixed(2)})`);
-  grad.addColorStop(1, `rgba(${warmRgb}, 0)`);
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.ellipse(sx, sy, r * 1.12, r * 0.74, 0, 0, Math.PI * 2);
-  ctx.fill();
+  blitGlow(ctx, sx, sy, r * 1.12, r * 0.74, warmRgb, isNight ? 0.42 : 0.24);
   const cSz = Math.max(1.5, Math.round(r * 0.18));
   ctx.fillStyle = coreHex;
   ctx.globalAlpha = isNight ? coreAlpha : coreAlpha * 0.72;
@@ -734,13 +780,7 @@ export function drawPreTrainVignettes(ctx, cam, animData, worldW, worldH, wScale
     const bw = Math.max(6, 8.2 * s);
     const bhPx = Math.max(3, 3.8 * s);
     if (isNight || isSunset) {
-      const bGrad = ctx.createRadialGradient(bx, by, 1 * s, bx, by, 9.5 * s);
-      bGrad.addColorStop(0, isNight ? 'rgba(59, 130, 246, 0.42)' : 'rgba(59, 130, 246, 0.22)');
-      bGrad.addColorStop(1, 'rgba(59, 130, 246, 0)');
-      ctx.fillStyle = bGrad;
-      ctx.beginPath();
-      ctx.arc(bx, by, 9.5 * s, 0, Math.PI * 2);
-      ctx.fill();
+      blitGlow(ctx, bx, by, 9.5 * s, 9.5 * s, '59, 130, 246', isNight ? 0.42 : 0.22);
     }
     ctx.fillStyle = isNight ? '#1d4ed8' : '#2563eb';
     ctx.fillRect(Math.round(bx - bw * 0.5), Math.round(by - bhPx * 0.5), Math.round(bw), Math.round(bhPx));
@@ -870,13 +910,7 @@ export function drawKilchbergDetails(
         const flick = 0.86 + 0.14 * Math.sin(tSec * 2.4 + li * 1.7);
         const rw = Math.max(1.8, 2.2 * s);
         const rh = Math.max(3.5, 4.8 * s);
-        const grad = ctx.createRadialGradient(lx, ly, 0.8 * s, lx, ly, 7.5 * s);
-        grad.addColorStop(0, `rgba(${lancetCols[li].rgb}, ${((isNight ? 0.44 : 0.26) * flick).toFixed(2)})`);
-        grad.addColorStop(1, `rgba(${lancetCols[li].rgb}, 0)`);
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(lx, ly, 7.5 * s, 0, Math.PI * 2);
-        ctx.fill();
+        blitGlow(ctx, lx, ly, 7.5 * s, 7.5 * s, lancetCols[li].rgb, (isNight ? 0.44 : 0.26) * flick);
         ctx.fillStyle = lancetCols[li].hex;
         ctx.fillRect(Math.round(lx - rw * 0.5), Math.round(ly - rh * 0.5), Math.round(rw), Math.round(rh));
       }
@@ -936,13 +970,7 @@ export function drawKilchbergDetails(
 
     if (isNight || isSunset) {
       const gRad = 28 * s;
-      const grad = ctx.createRadialGradient(fx, toY(lindtAtrium[1] + 0.0008), 2 * s, fx, toY(lindtAtrium[1] + 0.0034), gRad);
-      grad.addColorStop(0, isNight ? `rgba(255, 206, 98, ${(0.38 * shimmer).toFixed(2)})` : `rgba(255, 200, 106, ${(0.24 * shimmer).toFixed(2)})`);
-      grad.addColorStop(1, 'rgba(255, 198, 104, 0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.ellipse(fx, toY(lindtAtrium[1] + 0.0034), gRad * 1.28, gRad * 0.74, -0.15, 0, Math.PI * 2);
-      ctx.fill();
+      blitGlow(ctx, fx, toY(lindtAtrium[1] + 0.0034), gRad * 1.28, gRad * 0.74, isNight ? '255, 206, 98' : '255, 200, 106', (isNight ? 0.38 : 0.24) * shimmer, -0.15);
     }
 
     // Curved rotunda facade uplights & entrance canopy bar (sunset/night)
@@ -952,13 +980,7 @@ export function drawKilchbergDetails(
         const ux = toX(lindtAtrium[0] + uplightDu[ui]);
         const uy = toY(lindtAtrium[1] + 0.0016);
         const coneH = 9.5 * s;
-        const grad = ctx.createRadialGradient(ux, uy, 0.8 * s, ux, uy - coneH * 0.45, coneH);
-        grad.addColorStop(0, isNight ? 'rgba(255, 218, 126, 0.40)' : 'rgba(255, 210, 122, 0.24)');
-        grad.addColorStop(1, 'rgba(255, 210, 122, 0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.ellipse(ux, uy - coneH * 0.35, 4.2 * s, coneH * 0.75, 0, 0, Math.PI * 2);
-        ctx.fill();
+        blitGlow(ctx, ux, uy - coneH * 0.35, 4.2 * s, coneH * 0.75, isNight ? '255, 218, 126' : '255, 210, 122', isNight ? 0.40 : 0.24);
       }
       const ex = toX(lindtPlaza[0]);
       const ey = toY(lindtPlaza[1] - 0.0018);
@@ -1130,14 +1152,7 @@ export function drawKilchbergDetails(
         const gx = toX(p.u);
         const gy = toY(p.v);
         const rad = 52 * s;
-        const grad = ctx.createRadialGradient(gx, gy, 2 * s, gx, gy, rad);
-        grad.addColorStop(0, 'rgba(255, 240, 195, 0.26)');
-        grad.addColorStop(0.55, 'rgba(255, 224, 155, 0.10)');
-        grad.addColorStop(1, 'rgba(255, 210, 120, 0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.ellipse(gx, gy, rad * 1.15, rad * 0.68, -0.32, 0, Math.PI * 2);
-        ctx.fill();
+        blitGlow(ctx, gx, gy, rad * 1.15, rad * 0.68, '255, 234, 178', 0.26, -0.32);
       }
     } else {
       const ballAng = tSec * 0.42;
@@ -1316,13 +1331,7 @@ export function drawKilchbergDetails(
     const poolY = toY(seebadPool[1]);
     if (isNight) {
       if (boxInView(seebadPool[0] - 0.005, seebadPool[1] - 0.006, seebadPool[0] + 0.006, seebadPool[1] + 0.007)) {
-        const grad = ctx.createRadialGradient(poolX, poolY, 2 * s, poolX, poolY, 22 * s);
-        grad.addColorStop(0, 'rgba(64, 228, 240, 0.34)');
-        grad.addColorStop(1, 'rgba(32, 160, 200, 0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.ellipse(poolX, poolY, 22 * s, 14 * s, -0.35, 0, Math.PI * 2);
-        ctx.fill();
+        blitGlow(ctx, poolX, poolY, 22 * s, 14 * s, '64, 228, 240', 0.34, -0.35);
       }
     } else {
       if (boxInView(seebadPool[0] - 0.004, seebadPool[1] - 0.005, seebadPool[0] + 0.005, seebadPool[1] + 0.006)) {
@@ -1920,14 +1929,7 @@ export function drawKilchbergDetails(
       const ty = toY(tc.v);
       if (!inView(tx, ty, 36)) continue;
       const rad = tc.r * s;
-      const grad = ctx.createRadialGradient(tx, ty, 1.5 * s, tx, ty, rad);
-      grad.addColorStop(0, isNight ? 'rgba(255, 198, 112, 0.30)' : 'rgba(255, 198, 112, 0.24)');
-      grad.addColorStop(0.55, isNight ? 'rgba(255, 184, 96, 0.12)' : 'rgba(255, 184, 96, 0.09)');
-      grad.addColorStop(1, 'rgba(255, 180, 88, 0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.ellipse(tx, ty, rad * 1.15, rad * 0.72, 0, 0, Math.PI * 2);
-      ctx.fill();
+      blitGlow(ctx, tx, ty, rad * 1.15, rad * 0.72, '255, 198, 112', isNight ? 0.30 : 0.24);
       if (isSunset && s >= 0.45) {
         for (let g = 0; g < 2; g++) {
           const gu = tc.u + (g - 0.5) * 0.0011 + Math.sin(tSec * 0.3 + ti + g * 2.1) * 0.0002;
@@ -2002,13 +2004,7 @@ export function drawKilchbergDetails(
         const ly = toY(lv);
         if (!inView(lx, ly, 36)) continue;
         const gr = 14 * s;
-        const grad = ctx.createRadialGradient(lx, ly, 1 * s, lx, ly, gr);
-        grad.addColorStop(0, isNight ? 'rgba(255, 224, 146, 0.36)' : 'rgba(255, 214, 140, 0.18)');
-        grad.addColorStop(1, 'rgba(255, 214, 140, 0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(lx, ly, gr, 0, Math.PI * 2);
-        ctx.fill();
+        blitGlow(ctx, lx, ly, gr, gr, isNight ? '255, 224, 146' : '255, 214, 140', isNight ? 0.36 : 0.18);
       }
       // Station house & Schulhaus Dorfstrasse warm evening windows
       if (s >= 0.32) {
@@ -2082,14 +2078,7 @@ export function drawKilchbergDetails(
         const sy = toY(pts[i][1]);
         if (!inView(sx, sy, 24)) continue;
         const lr = Math.max(6, 12.5 * s);
-        const grad = ctx.createRadialGradient(sx, sy, 0.5, sx, sy, lr);
-        grad.addColorStop(0, 'rgba(255, 214, 128, 0.30)');
-        grad.addColorStop(0.55, 'rgba(255, 190, 96, 0.11)');
-        grad.addColorStop(1, 'rgba(255, 180, 80, 0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.ellipse(sx, sy, lr * 1.15, lr * 0.72, 0, 0, Math.PI * 2);
-        ctx.fill();
+        blitGlow(ctx, sx, sy, lr * 1.15, lr * 0.72, '255, 208, 120', 0.30);
         if (s >= 0.8) {
           const gSz = Math.max(1.5, Math.round(1.5 * s));
           ctx.fillStyle = 'rgba(255, 236, 176, 0.86)';
@@ -2348,13 +2337,7 @@ export function drawKilchbergDetails(
       const ph = Math.max(2, 3.0 * s);
       if (isSunset || isNight) {
         const aRad = 18 * s;
-        const aGrad = ctx.createRadialGradient(px, py, 1.5 * s, px, py, aRad);
-        aGrad.addColorStop(0, `rgba(210, 236, 232, ${((isNight ? 0.38 : 0.22) * aqPulse).toFixed(2)})`);
-        aGrad.addColorStop(1, 'rgba(110, 198, 204, 0)');
-        ctx.fillStyle = aGrad;
-        ctx.beginPath();
-        ctx.ellipse(px, py, aRad * 1.25, aRad * 0.72, -0.18, 0, Math.PI * 2);
-        ctx.fill();
+        blitGlow(ctx, px, py, aRad * 1.25, aRad * 0.72, '210, 236, 232', (isNight ? 0.38 : 0.22) * aqPulse, -0.18);
       }
       ctx.fillStyle = isNight
         ? `rgba(232, 240, 228, ${(0.55 * aqPulse).toFixed(2)})`

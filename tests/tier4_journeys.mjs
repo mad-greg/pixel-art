@@ -83,7 +83,7 @@ async function runTests(harness, test) {
   });
 
   // ── T4.02: Journey 2 — Lindt HoC & Schooren Seebad Deep-Zoom Inspection ──
-  await test('T4.02', 'Journey 2: Lindt HoC 2x tiles + 0.22m/px plate + Schooren Seebad water/SUP motion', async () => {
+  await test('T4.02', 'Journey 2: Lindt HoC 2x/4x live 0.11m/px tiles + Schooren Seebad water/SUP motion', async () => {
     const tab = await harness.openTab('/?mode=day&t=10', { width: 1280, height: 800, dpr: 2, waitReady: true });
     let s10, s16;
     try {
@@ -94,28 +94,25 @@ async function runTests(harness, test) {
       await tab.clickSelector('#btn-zoom-2x');
       await tab.waitForCameraSettled();
       await sleep(160);
-      assert(tab.tileResponses.length >= 1, `Expected 0.25m/px tile HTTP 200 streaming at Lindt 2x, got ${tab.tileResponses.length}`);
+      assert(tab.tileResponses.length >= 1, `Expected 0.11m/px tile HTTP 200 streaming at Lindt 2x, got ${tab.tileResponses.length}`);
 
-      // Open 01_lindt_home_of_chocolate.webp detail plate
-      await tab.clickSelector('#crop-gallery .crop-thumb:first-child');
-      const modalReady = await tab.waitFor(
-        `!document.getElementById('modal-overlay')?.classList.contains('hidden') && document.getElementById('modal-canvas')?.width > 50`,
-        { timeoutMs: 2500 },
+      // Verify Detail Plates UI is removed and inspect Lindt HoC directly at live 4x zoom
+      const plateDom = await tab.evaluate(`({
+        hasCropGallery: Boolean(document.getElementById('crop-gallery') || document.querySelector('.crops-section')),
+        hasModal: Boolean(document.getElementById('modal-overlay') || document.getElementById('plate-modal')),
+      })`);
+      assert(
+        !plateDom.hasCropGallery && !plateDom.hasModal,
+        `Removed Detail Plates UI still present in DOM: ${JSON.stringify(plateDom)}`,
       );
-      assert(Boolean(modalReady), 'Lindt 0.22 m/px detail-plate modal did not open');
 
-      const modalInfo = await tab.evaluate(`(() => {
-        const btns = [...document.querySelectorAll('#modal-overlay button')];
-        return {
-          has4x: btns.some((b) => /4[x×]/i.test(b.textContent || '')),
-          hasFlyHere: btns.some((b) => /fly\\s*here/i.test(b.textContent || '') || /fly/i.test(b.id || '')),
-        };
-      })()`);
-      assert(modalInfo.has4x, 'Lindt detail-plate modal missing 4x zoom button (F25)');
-      assert(modalInfo.hasFlyHere, 'Lindt detail-plate modal missing "Fly Here" button (F25)');
-
-      await tab.pressKey('Escape', 'Escape', 27);
-      await sleep(140);
+      await tab.clickSelector('#btn-zoom-4x');
+      await tab.waitForCameraSettled();
+      await sleep(160);
+      const dbg4x = await tab.getDebug();
+      assert(dbg4x && dbg4x.scale >= 3.5, `Expected live 4x zoom scale >= 3.5 at Lindt HoC, got ${dbg4x?.scale}`);
+      const snap4x = await tab.captureCanvasSample('#diorama-canvas', 48, 27);
+      assert(snap4x.meanLuma > 5, `Canvas appears blank at Lindt HoC 4x zoom (meanLuma=${snap4x.meanLuma.toFixed(2)})`);
 
       // Reuse same incognito context via same-tab navigate to verify water/SUP motion at Schooren Seebad
       await tab.navigate('/?mode=day&zoom=2&u=0.41&v=0.70&t=10', { waitReady: true });
@@ -767,8 +764,8 @@ async function runTests(harness, test) {
     }
   });
 
-  // ── T4.13: Journey 8 — Kilchberg Heritage & New Landmarks Tour (v9.0) ──
-  await test('T4.13', 'Journey 8: Kilchberg Heritage & New Landmarks Tour (7 landmarks, new plate Fly Here, tiles, zero clipping)', async () => {
+  // ── T4.13: Journey 8 — Kilchberg Heritage & New Landmarks Tour ──
+  await test('T4.13', 'Journey 8: Kilchberg Heritage & New Landmarks Tour (7 landmarks, live 0.11m/px pin/sidebar fly, tiles, zero clipping)', async () => {
     const tab = await harness.openTab('/?mode=day&t=10', {
       width: 1280,
       height: 800,
@@ -786,14 +783,14 @@ async function runTests(harness, test) {
         'morfanlage_promenade',
       ];
 
-      // Precondition check before clicking so v8.0 fails cleanly with AssertionError (zero selector timeout)
+      // Precondition check before clicking so missing items fail cleanly with AssertionError
       const presentIds = await tab.evaluate(
         `Array.from(document.querySelectorAll('#landmark-list .lm-item')).map((el) => el.dataset.lmId || '')`,
       );
       const missingIds = tourIds.filter((id) => !presentIds.includes(id));
       assert(
         missingIds.length === 0,
-        `Missing v9.0 landmark items in #landmark-list (found ${presentIds.length}): ${missingIds.join(', ')}`,
+        `Missing landmark items in #landmark-list (found ${presentIds.length}): ${missingIds.join(', ')}`,
       );
 
       // Navigate across all 7 heritage & new landmarks
@@ -814,45 +811,35 @@ async function runTests(harness, test) {
         `Expected HTTP 200 tile streaming during Journey 8 tour, got ${tab.tileResponses.length}`,
       );
 
-      // Open a new v9.0 detail plate (08_cf_meyer_haus or 09_gemeindehaus_alte_landstrasse) and click Fly Here
-      const plateInfo = await tab.evaluate(`(() => {
-        const targets = [
-          { file: '08_cf_meyer_haus.webp', expectedLmId: 'cf_meyer_haus' },
-          { file: '09_gemeindehaus_alte_landstrasse.webp', expectedLmId: 'gemeindehaus_alte_landstr' },
-        ];
-        const thumbs = Array.from(document.querySelectorAll('#crop-gallery .crop-thumb'));
-        for (const t of targets) {
-          const el = thumbs.find((node) => (node.querySelector('img')?.getAttribute('src') || '').includes(t.file));
-          if (el) {
-            el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-            const r = el.getBoundingClientRect();
-            return { x: r.left + r.width / 2, y: r.top + r.height / 2, file: t.file, expectedLmId: t.expectedLmId };
-          }
-        }
-        return null;
-      })()`);
-      assert(Boolean(plateInfo), 'Missing new v9.0 detail plate thumbnail (08_cf_meyer_haus.webp or 09_gemeindehaus_alte_landstrasse.webp)');
-
-      await tab.clickPoint(plateInfo.x, plateInfo.y);
-      const modalOpen = await tab.waitFor(
-        `Boolean(!document.getElementById('modal-overlay')?.classList.contains('hidden') && (document.getElementById('modal-canvas')?.width || 0) > 50)`,
-        { timeoutMs: 3000, intervalMs: 60 },
+      // Verify Detail Plates UI is removed and fly directly to cf_meyer_haus at 2x on the live 0.11 m/px diorama
+      const plateDom = await tab.evaluate(`({
+        hasCropGallery: Boolean(document.getElementById('crop-gallery') || document.querySelector('.crops-section')),
+        hasModal: Boolean(document.getElementById('modal-overlay') || document.getElementById('plate-modal')),
+      })`);
+      assert(
+        !plateDom.hasCropGallery && !plateDom.hasModal,
+        `Removed Detail Plates UI still present in DOM: ${JSON.stringify(plateDom)}`,
       );
-      assert(modalOpen, `Detail plate modal for ${plateInfo.file} did not open and paint #modal-canvas`);
 
-      await tab.clickSelector('#btn-modal-fly');
+      await tab.clickSelector('#landmark-list .lm-item[data-lm-id="cf_meyer_haus"]');
       await tab.waitForCameraSettled();
-
-      const modalClosed = await tab.evaluate(
-        `Boolean(document.getElementById('modal-overlay')?.classList.contains('hidden'))`,
-      );
-      assert(modalClosed, 'Detail plate modal did not close after clicking #btn-modal-fly');
+      await tab.clickSelector('#btn-zoom-2x');
+      await tab.waitForCameraSettled();
+      await sleep(140);
 
       const dbgAfterFly = await tab.getDebug();
       assert(
-        dbgAfterFly && dbgAfterFly.activeLandmark === plateInfo.expectedLmId,
-        `Expected Fly Here from ${plateInfo.file} to activate '${plateInfo.expectedLmId}', got '${dbgAfterFly?.activeLandmark}'`,
+        dbgAfterFly && dbgAfterFly.activeLandmark === 'cf_meyer_haus',
+        `Expected direct fly-to to activate 'cf_meyer_haus', got '${dbgAfterFly?.activeLandmark}'`,
       );
+      assert(
+        typeof dbgAfterFly.scale === 'number' && dbgAfterFly.scale >= 1.8,
+        `Expected 2x zoom scale >= 1.8 at cf_meyer_haus, got ${dbgAfterFly?.scale}`,
+      );
+      const cfSnap = await tab.captureCanvasSample('#diorama-canvas', 48, 27);
+      assert(cfSnap.meanLuma > 5, `Canvas appears blank at cf_meyer_haus 2x zoom (meanLuma=${cfSnap.meanLuma.toFixed(2)})`);
+      const hasActivePin = await tab.evaluate(`Boolean(document.querySelector('#pins-layer .lm-pin.active'))`);
+      assert(hasActivePin, 'Expected active #pins-layer .lm-pin.active after flying to cf_meyer_haus');
 
       // Desktop layout zero clipping check
       const clipped = await tab.evaluate(`(() => {

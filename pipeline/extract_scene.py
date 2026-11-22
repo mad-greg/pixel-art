@@ -328,56 +328,85 @@ def _rasterize_centerline_field(
     lines_with_hw: list[tuple[LineString, float]],
     max_dist_m: float = 12.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Compute exact 0.5m Euclidean distance, arc-length s, half-width, and tangent angle
-    to a set of LineStrings using fast C-speed distance_transform_edt."""
-    seed_mask = np.zeros((GRID_H, GRID_W), dtype=np.bool_)
-    seed_s = np.zeros((GRID_H, GRID_W), dtype=np.float32)
-    seed_hw = np.zeros((GRID_H, GRID_W), dtype=np.float32)
-    seed_ang = np.zeros((GRID_H, GRID_W), dtype=np.float32)
+    """Compute exact continuous 0.5m point-to-segment Euclidean distance, arc-length s,
+    half-width, and tangent angle to a set of LineStrings (zero Bresenham staircase bias!)."""
+    best_key = np.full((GRID_H, GRID_W), 1e9, dtype=np.float32)
+    best_dist = np.full((GRID_H, GRID_W), max_dist_m, dtype=np.float32)
+    best_s = np.zeros((GRID_H, GRID_W), dtype=np.float32)
+    best_hw = np.zeros((GRID_H, GRID_W), dtype=np.float32)
+    best_ang = np.zeros((GRID_H, GRID_W), dtype=np.float32)
 
+    pad_px = int(math.ceil(max_dist_m / GRID_RES)) + 1
+    max_d2 = float(max_dist_m * max_dist_m)
     s_accum = 0.0
+
     for ls, hw in lines_with_hw:
         length = float(ls.length)
         if length < 0.4:
             continue
-        n_pts = max(2, int(math.ceil(length / 0.25)) + 1)
-        s_local = np.linspace(0.0, length, n_pts, dtype=np.float32)
         coords = np.asarray(ls.coords, dtype=np.float64)
-        seg_d = np.hypot(np.diff(coords[:, 0]), np.diff(coords[:, 1]))
-        cum_d = np.concatenate([[0.0], np.cumsum(seg_d)])
-        if cum_d[-1] < 0.2:
+        if len(coords) < 2:
             continue
-        es = np.interp(s_local, cum_d, coords[:, 0])
-        ns = np.interp(s_local, cum_d, coords[:, 1])
-        de = np.gradient(es)
-        dn = np.gradient(ns)
-        ang = np.arctan2(dn, de).astype(np.float32)
+        hw_f = float(hw)
+        s_seg = s_accum
+        for k in range(len(coords) - 1):
+            x0, y0 = float(coords[k, 0]), float(coords[k, 1])
+            x1, y1 = float(coords[k + 1, 0]), float(coords[k + 1, 1])
+            dx = x1 - x0
+            dy = y1 - y0
+            seg_len2 = dx * dx + dy * dy
+            if seg_len2 < 1e-6:
+                continue
+            seg_len = math.sqrt(seg_len2)
+            inv_len2 = 1.0 / seg_len2
+            seg_ang = math.atan2(dy, dx)
 
-        cols = np.clip(((es - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
-        rows = np.clip(((N_MAX - ns) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
-        # Wider road wins if two centerlines cross at an intersection
-        take = (~seed_mask[rows, cols]) | (hw >= seed_hw[rows, cols])
-        rr, cc = rows[take], cols[take]
-        seed_mask[rr, cc] = True
-        seed_s[rr, cc] = s_accum + s_local[take]
-        seed_hw[rr, cc] = hw
-        seed_ang[rr, cc] = ang[take]
-        s_accum = (s_accum + length + 10.0) % 10000.0
+            e_lo, e_hi = (x0, x1) if x0 <= x1 else (x1, x0)
+            n_lo, n_hi = (y0, y1) if y0 <= y1 else (y1, y0)
+            c0 = max(0, int(math.floor((e_lo - E_MIN) / GRID_RES)) - pad_px)
+            c1 = min(GRID_W, int(math.ceil((e_hi - E_MIN) / GRID_RES)) + pad_px + 1)
+            r0 = max(0, int(math.floor((N_MAX - n_hi) / GRID_RES)) - pad_px)
+            r1 = min(GRID_H, int(math.ceil((N_MAX - n_lo) / GRID_RES)) + pad_px + 1)
+            if c0 >= c1 or r0 >= r1:
+                s_seg += seg_len
+                continue
 
-    if not seed_mask.any():
-        return (
-            np.full((GRID_H, GRID_W), max_dist_m, dtype=np.float16),
-            np.zeros((GRID_H, GRID_W), dtype=np.float16),
-            np.zeros((GRID_H, GRID_W), dtype=np.float16),
-            np.zeros((GRID_H, GRID_W), dtype=np.float16),
-        )
+            ec = E_MIN + (np.arange(c0, c1, dtype=np.float32) + 0.5) * GRID_RES
+            nc = N_MAX - (np.arange(r0, r1, dtype=np.float32) + 0.5) * GRID_RES
+            de = ec[None, :] - x0
+            dn = nc[:, None] - y0
+            t = np.clip((de * dx + dn * dy) * inv_len2, 0.0, 1.0)
+            pe = de - t * dx
+            pn = dn - t * dy
+            d2 = pe * pe + pn * pn
 
-    dist_px, (ir, ic) = ndimage.distance_transform_edt(~seed_mask, return_indices=True)
-    dist_m = np.minimum(max_dist_m, dist_px * GRID_RES).astype(np.float16)
-    along_m = (seed_s[ir, ic] % 1024.0).astype(np.float16)
-    hw_m = seed_hw[ir, ic].astype(np.float16)
-    ang_r = seed_ang[ir, ic].astype(np.float16)
-    return dist_m, along_m, hw_m, ang_r
+            in_range = d2 < max_d2
+            if not in_range.any():
+                s_seg += seg_len
+                continue
+            d = np.sqrt(np.where(in_range, d2, max_d2))
+            # Priority: inside road (d <= hw) always beats outside; wider road wins overlaps;
+            # same width prefers exact closest centerline; outside prefers closest road edge (d - hw).
+            key = np.where(d <= hw_f, -1000.0 - hw_f * 50.0 + d, d - hw_f)
+
+            sub_key = best_key[r0:r1, c0:c1]
+            win = in_range & (key < sub_key)
+            if win.any():
+                sub_key[win] = key[win]
+                best_dist[r0:r1, c0:c1][win] = d[win]
+                best_s[r0:r1, c0:c1][win] = (s_seg + t[win] * seg_len) % 256.0
+                best_hw[r0:r1, c0:c1][win] = hw_f
+                best_ang[r0:r1, c0:c1][win] = seg_ang
+
+            s_seg += seg_len
+        s_accum = (s_accum + length + 10.0) % 256.0
+
+    return (
+        best_dist.astype(np.float16),
+        best_s.astype(np.float16),
+        best_hw.astype(np.float16),
+        best_ang.astype(np.float16),
+    )
 
 
 def _extend_bridge_ramp(
@@ -1352,12 +1381,17 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
 
     # Clean, continuous trimmed garden hedges & low shrubs (0.90m <= chm < 2.25m, strictly clear of roads/pitches)
     raw_hedge = diorama_mask & (~non_veg) & (chm >= 0.95) & (chm < 2.25) & is_veg_low
-    # Close tiny 1-cell gaps along real trimmed hedge lines, then strip noisy isolated specks!
-    closed_hedge = ndimage.binary_closing(raw_hedge, structure=np.ones((3, 3), dtype=bool)) & diorama_mask & (~non_veg)
-    lbl_h, n_h = ndimage.label(closed_hedge)
+    # v12: Morphological closing (5x5 disk) + opening (3x3 disk) rounds jagged 1-cell LiDAR spurs into smooth pillow hedges
+    _yy5, _xx5 = np.ogrid[-2:3, -2:3]
+    _disk5 = (_xx5 * _xx5 + _yy5 * _yy5) <= 4
+    _yy3, _xx3 = np.ogrid[-1:2, -1:2]
+    _disk3 = (_xx3 * _xx3 + _yy3 * _yy3) <= 1
+    closed_hedge = ndimage.binary_closing(raw_hedge, structure=_disk5) & diorama_mask & (~non_veg)
+    opened_hedge = ndimage.binary_opening(closed_hedge, structure=_disk3) & diorama_mask & (~non_veg)
+    lbl_h, n_h = ndimage.label(opened_hedge)
     if n_h > 0:
         h_counts = np.bincount(lbl_h.ravel())
-        keep_h = h_counts >= 8
+        keep_h = h_counts >= 12
         keep_h[0] = False
         hedge_mask = keep_h[lbl_h]
         # Inside parks/cemeteries only keep true long continuous hedges (>=18 cells), never noisy gravestone specks!
@@ -1369,7 +1403,7 @@ def extract_scene(cache_dir: Path = RAW_CACHE_DIR, force: bool = False) -> Path:
             drop_c[0] = False
             hedge_mask[drop_c[lbl_c]] = False
     else:
-        hedge_mask = closed_hedge
+        hedge_mask = opened_hedge
     print(f"[scene] Extracted {len(tree_e):,} individual 3D trees & {int(hedge_mask.sum()):,} clean hedge cells across Kilchberg ZH!")
 
     # 7. Detect real moored boats on Lake Zurich from SWISSIMAGE DOP10

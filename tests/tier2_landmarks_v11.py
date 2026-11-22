@@ -15,7 +15,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from pipeline import config, signage
-from tests.lib.assets_helper import ALL_LANDMARK_IDS_V9, load_plate_rgb
+from tests.lib.assets_helper import ALL_LANDMARK_IDS_V9, crop_landmark_meter_box
 from tests.lib.report import parse_cli_args_for_module, run_unittest_module, test_meta
 
 VIGNETTES_JS = REPO_ROOT / "docs" / "js" / "render" / "vignettes.js"
@@ -250,15 +250,10 @@ class TestLandmarksV11PhotoRealism(unittest.TestCase):
             f"signage.CLOCKS contains phantom/duplicate v10 clocks that must be removed: {offenders}",
         )
 
-    @test_meta("T2.LM.04", "Plate 07 St. Elisabeth bell tower is bright neutral white concrete with zero clock dial")
+    @test_meta("T2.LM.04", "Master tiles St. Elisabeth bell tower is bright neutral white concrete with zero clock dial")
     def test_04_st_elisabeth_plate_white_concrete_no_clock(self) -> None:
-        img = load_plate_rgb("07_st_elisabeth_church.webp").astype(np.float32)
-        h, w = img.shape[:2]
-
-        # 1. Bell tower concrete shaft ROI (upper + mid exposed concrete shaft)
-        sx0, sx1 = int(round(0.5270 * w)), int(round(0.5335 * w))
-        sy0, sy1 = int(round(0.4340 * h)), int(round(0.4680 * h))
-        shaft = img[sy0:sy1, sx0:sx1]
+        # 1. Bell tower concrete shaft ROI (upper + mid exposed concrete shaft) on day master tiles
+        shaft = crop_landmark_meter_box("day", "st_elisabeth", 13.83, -19.02, 17.13, -5.73).astype(np.float32)
         sr, sg, sb = shaft[..., 0], shaft[..., 1], shaft[..., 2]
         slum = shaft.mean(axis=2)
 
@@ -297,10 +292,8 @@ class TestLandmarksV11PhotoRealism(unittest.TestCase):
             f"St. Elisabeth tower concrete is not neutral white (|mean(R)-mean(B)|={abs(rb_diff):.1f} > 14.0)",
         )
 
-        # 2. Pure-white upper crown check (cleanly above v11 in_belfry dark louvers at y~1539..1635)
-        cx0, cx1 = int(round(0.5285 * w)), int(round(0.5320 * w))
-        cy0, cy1 = int(round(0.4265 * h)), int(round(0.4310 * h))
-        crown_roi = img[cy0:cy1, cx0:cx1]
+        # 2. Pure-white upper crown check (cleanly above v11 in_belfry dark louvers)
+        crown_roi = crop_landmark_meter_box("day", "st_elisabeth", 14.59, -21.95, 16.37, -20.19).astype(np.float32)
         dlum = crown_roi.mean(axis=2)
 
         very_dark = dlum < 55.0
@@ -318,9 +311,7 @@ class TestLandmarksV11PhotoRealism(unittest.TestCase):
         )
 
         # 3. Zero gold clock-ring/hands pixels across the FULL tower (crown + shaft)
-        gx0, gx1 = int(round(0.5270 * w)), int(round(0.5335 * w))
-        gy0, gy1 = int(round(0.4265 * h)), int(round(0.4680 * h))
-        tower_full = img[gy0:gy1, gx0:gx1]
+        tower_full = crop_landmark_meter_box("day", "st_elisabeth", 13.83, -21.95, 17.13, -5.73).astype(np.float32)
         tr, tg, tb = tower_full[..., 0], tower_full[..., 1], tower_full[..., 2]
         gold_ring = (tr > 130.0) & (tg > 100.0) & (tb < 80.0) & ((tr - tb) > 55.0)
         self.assertLessEqual(

@@ -11,26 +11,46 @@
 
 export function createDepthManager() {
   let animData = null;
-  let depthPixels = null; // Uint8ClampedArray (R/G = 16-bit scene depth, B = 255 if 3D occluder)
+  let depthU16 = null;    // Uint16Array (16-bit scene depth)
+  let occMask = null;     // Uint8Array (1 = 3D occluder, 0 = ground/open)
   let depthW = 0;
   let depthH = 0;
   let waterMask = null;   // Uint8Array (1 = eroded pure open water, 0 = shore/rock/boat/pier/land)
   let waterW = 0;
   let waterH = 0;
+  let cachedDepthConstants = null;
 
   const vehScratch = document.createElement('canvas');
-  vehScratch.width = 320;
-  vehScratch.height = 240;
+  vehScratch.width = 512;
+  vehScratch.height = 384;
   const vehScratchCtx = vehScratch.getContext('2d', { willReadFrequently: true });
 
   const depthFrameStats = { direct: 0, fullCull: 0, partial: 0 };
 
+  function computeDepthConstants(data) {
+    const depthMin = (data && typeof data.depth_min === 'number') ? data.depth_min : -2400.0;
+    const depthMax = (data && typeof data.depth_max === 'number') ? data.depth_max : 2400.0;
+    const mppMaster = (data && typeof data.mpp === 'number') ? data.mpp : 0.11;
+    const u16PerM = 65535.0 / Math.max(1.0, depthMax - depthMin);
+    const depthSlopeGround = mppMaster * Math.sqrt(3) * u16PerM;
+    const depthSlopeVert = depthSlopeGround / 3.0;
+    const shiftY = (data && Number.isFinite(data.shift_y))
+      ? data.shift_y
+      : (2927.412592 * (0.25 / mppMaster));
+    const c0 = (0 - depthMin) * u16PerM + depthSlopeGround * shiftY;
+    const slopeZ = 2.0 * 1.16 * u16PerM;
+    return { depthMin, depthMax, mppMaster, u16PerM, depthSlopeGround, depthSlopeVert, c0, slopeZ };
+  }
+
+  cachedDepthConstants = computeDepthConstants(null);
+
   function setAnimData(data) {
     animData = data || null;
+    cachedDepthConstants = computeDepthConstants(animData);
   }
 
   function hasDepthMap() {
-    return !!(depthPixels && depthW > 0 && depthH > 0);
+    return !!(depthU16 && occMask && depthW > 0 && depthH > 0);
   }
 
   function isWaterMaskReady() {
@@ -45,7 +65,7 @@ export function createDepthManager() {
     return waterMask[my * waterW + mx] === 1;
   }
 
-  function loadDepthMap(assetVer = '11.0') {
+  function loadDepthMap(assetVer = '12.0') {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -55,11 +75,21 @@ export function createDepthManager() {
           dc.height = img.naturalHeight;
           const dctx = dc.getContext('2d', { willReadFrequently: true });
           dctx.drawImage(img, 0, 0);
-          depthPixels = dctx.getImageData(0, 0, dc.width, dc.height).data;
+          const rgba = dctx.getImageData(0, 0, dc.width, dc.height).data;
+          const total = dc.width * dc.height;
+          const u16 = new Uint16Array(total);
+          const occ = new Uint8Array(total);
+          for (let i = 0, p = 0; i < total; i++, p += 4) {
+            u16[i] = (rgba[p] << 8) | rgba[p + 1];
+            occ[i] = rgba[p + 2] > 128 ? 1 : 0;
+          }
+          depthU16 = u16;
+          occMask = occ;
           depthW = dc.width;
           depthH = dc.height;
         } catch (_err) {
-          depthPixels = null;
+          depthU16 = null;
+          occMask = null;
           depthW = 0;
           depthH = 0;
         }
@@ -82,8 +112,9 @@ export function createDepthManager() {
       wctx.drawImage(dayImg, 0, 0, mw, mh);
       const px = wctx.getImageData(0, 0, mw, mh).data;
       const raw = new Uint8Array(mw * mh);
+      const hasOcc = !!(occMask && depthW > 0 && depthH > 0);
       for (let y = 0; y < mh; y++) {
-        const dy = depthPixels ? Math.min(depthH - 1, Math.floor((y / mh) * depthH)) : 0;
+        const dy = hasOcc ? Math.min(depthH - 1, Math.floor((y / mh) * depthH)) : 0;
         const dRow = dy * depthW;
         for (let x = 0; x < mw; x++) {
           const i = (y * mw + x) * 4;
@@ -91,9 +122,9 @@ export function createDepthManager() {
           const g = px[i + 1];
           const b = px[i + 2];
           if (b > r + 10 && g > r + 6 && b > 66 && r < 126) {
-            if (depthPixels) {
+            if (hasOcc) {
               const dx = Math.min(depthW - 1, Math.floor((x / mw) * depthW));
-              if (depthPixels[(dRow + dx) * 4 + 2] > 128) continue;
+              if (occMask[dRow + dx]) continue;
             }
             raw[y * mw + x] = 1;
           }
@@ -125,26 +156,15 @@ export function createDepthManager() {
   }
 
   function getDepthConstants() {
-    const depthMin = (animData && typeof animData.depth_min === 'number') ? animData.depth_min : -2400.0;
-    const depthMax = (animData && typeof animData.depth_max === 'number') ? animData.depth_max : 2400.0;
-    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
-    const u16PerM = 65535.0 / Math.max(1.0, depthMax - depthMin);
-    const depthSlopeGround = mppMaster * Math.sqrt(3) * u16PerM;
-    const depthSlopeVert = depthSlopeGround / 3.0;
-    const shiftY = (animData && Number.isFinite(animData.shift_y))
-      ? animData.shift_y
-      : (2927.412592 * (0.25 / mppMaster));
-    const c0 = (0 - depthMin) * u16PerM + depthSlopeGround * shiftY;
-    const slopeZ = 2.0 * 1.16 * u16PerM;
-    return { depthMin, depthMax, mppMaster, u16PerM, depthSlopeGround, depthSlopeVert, c0, slopeZ };
+    return cachedDepthConstants;
   }
 
   function evalWalkerD16(wx, wy, zGnd, worldW, worldH, onElevatedDeck = false) {
-    const dc = getDepthConstants();
-    const masterH = (animData && animData.canvas_height) ? animData.canvas_height : 10888;
+    const dc = cachedDepthConstants;
+    const masterH = (animData && animData.canvas_height) ? animData.canvas_height : 12373;
     const wyMaster = wy * (masterH / Math.max(1, worldH));
     let d16 = Math.round(dc.c0 - dc.depthSlopeGround * wyMaster - dc.slopeZ * (zGnd - 348.0) - 10);
-    if (onElevatedDeck && depthPixels && depthW > 0 && depthH > 0) {
+    if (onElevatedDeck && depthU16 && occMask && depthW > 0 && depthH > 0) {
       const dx = Math.min(depthW - 1, Math.max(0, Math.floor((wx / Math.max(1, worldW)) * depthW)));
       const dy = Math.min(depthH - 1, Math.max(0, Math.floor((wy / Math.max(1, worldH)) * depthH)));
       const DECK_BAND = 60;
@@ -154,12 +174,13 @@ export function createDepthManager() {
       for (let oy = -8; oy <= 1; oy++) {
         const yy = dy + oy;
         if (yy < 0 || yy >= depthH) continue;
+        const rowOff = yy * depthW;
         for (let ox = -3; ox <= 3; ox++) {
           const xx = dx + ox;
           if (xx < 0 || xx >= depthW) continue;
-          const di = (yy * depthW + xx) * 4;
-          if (depthPixels[di + 2] > 128) {
-            const deckD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
+          const idx = rowOff + xx;
+          if (occMask[idx]) {
+            const deckD16 = depthU16[idx];
             if (Math.abs(deckD16 - ref) <= DECK_BAND && deckD16 < deckMin) deckMin = deckD16;
           }
         }
@@ -198,7 +219,7 @@ export function createDepthManager() {
     const padDn = Math.ceil(eyDn * scale) + padPx;
     if (cx + padX < 0 || cx - padX > canvasW || cy + padDn < 0 || cy - padUp > canvasH) return;
 
-    if (!depthPixels || !vehD16 || depthW <= 0 || depthH <= 0) {
+    if (!depthU16 || !occMask || !vehD16 || depthW <= 0 || depthH <= 0) {
       depthFrameStats.direct++;
       drawFn(ctx);
       return;
@@ -212,15 +233,15 @@ export function createDepthManager() {
     const bh = y1 - y0;
     if (bw <= 0 || bh <= 0) return;
 
-    const dc = getDepthConstants();
+    const dc = cachedDepthConstants;
     const depthSlopeGround = dc.depthSlopeGround;
     const depthSlopeVert = dc.depthSlopeVert;
-    const masterW = (animData && animData.canvas_width) ? animData.canvas_width : 24661;
+    const masterW = (animData && animData.canvas_width) ? animData.canvas_width : 28024;
     const wScaleInv = masterW / Math.max(1, worldW);
     const invWorldScaleX = depthW / (worldW * scale);
     const invWorldScaleY = depthH / (worldH * scale);
 
-    // Row-wise conservative 3-way pre-check over depthPixels before touching vehScratch or getImageData().
+    // Row-wise conservative 3-way pre-check over packed depthU16/occMask before touching vehScratch or getImageData().
     // dyW >= 0 (down along ground toward camera): closer by depthSlopeGround.
     // dyW < 0 (up vertically on vehicle roof): closer by depthSlopeVert, capped at excess height extraVertPx * resFactor.
     const resFactor = 0.25 / dc.mppMaster;
@@ -261,9 +282,9 @@ export function createDepthManager() {
         const rowMaxD16 = (rawTop <= 0 && rawBot >= 0) ? vehD16 : Math.max(dTop, dBot);
         const rowOff = dy * depthW;
         for (let dx = dx0; dx <= dx1; dx++) {
-          const di = (rowOff + dx) * 4;
-          if (depthPixels[di + 2] > 128) {
-            const sd = (depthPixels[di] << 8) | depthPixels[di + 1];
+          const idx = rowOff + dx;
+          if (occMask[idx]) {
+            const sd = depthU16[idx];
             if (sd < rowMaxD16) anyFrontOcc = true;
             if (sd >= rowMinD16) anyClear = true;
           } else {
@@ -284,14 +305,16 @@ export function createDepthManager() {
       }
     }
 
-    // Genuine partial occlusion: render to vehScratch (never silently drops at 5x-8x zoom)
+    // Genuine partial occlusion: render to vehScratch capped at <= 1.0x world-pixel density
+    // (cuts getImageData/putImageData pixel count 4x-16x at 2x-4x zoom with zero visual loss).
     depthFrameStats.partial++;
     const MAX_SCRATCH = 2048;
-    const scratchScale = Math.min(1.0, MAX_SCRATCH / Math.max(bw, bh));
-    const sw = Math.min(MAX_SCRATCH, Math.max(1, Math.ceil(bw * scratchScale)));
-    const sh = Math.min(MAX_SCRATCH, Math.max(1, Math.ceil(bh * scratchScale)));
-    if (sw > vehScratch.width) vehScratch.width = Math.min(MAX_SCRATCH, sw + 32);
-    if (sh > vehScratch.height) vehScratch.height = Math.min(MAX_SCRATCH, sh + 32);
+    const worldDensityCap = scale > 1.0 ? (1.0 / scale) : 1.0;
+    const scratchScale = Math.min(1.0, worldDensityCap, MAX_SCRATCH / Math.max(bw, bh));
+    const sw = Math.min(MAX_SCRATCH, Math.max(2, Math.ceil(bw * scratchScale)));
+    const sh = Math.min(MAX_SCRATCH, Math.max(2, Math.ceil(bh * scratchScale)));
+    if (sw > vehScratch.width) vehScratch.width = Math.min(MAX_SCRATCH, Math.max(vehScratch.width, sw + 64));
+    if (sh > vehScratch.height) vehScratch.height = Math.min(MAX_SCRATCH, Math.max(vehScratch.height, sh + 64));
 
     vehScratchCtx.clearRect(0, 0, sw, sh);
     vehScratchCtx.save();
@@ -322,13 +345,10 @@ export function createDepthManager() {
           const sx = x0 + (lx + 0.5) * invScratch;
           const dx = Math.floor((sx - offsetX) * invWorldScaleX);
           if (dx >= 0 && dx < depthW) {
-            const di = (rowOff + dx) * 4;
-            if (depthPixels[di + 2] > 128) {
-              const sceneD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
-              if (rowD16 > sceneD16) {
-                d[p + 3] = 0;
-                continue;
-              }
+            const idx = rowOff + dx;
+            if (occMask[idx] && rowD16 > depthU16[idx]) {
+              d[p + 3] = 0;
+              continue;
             }
           }
         }
@@ -340,7 +360,7 @@ export function createDepthManager() {
       if (scratchScale < 1.0) {
         ctx.save();
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(vehScratch, 0, 0, sw, sh, x0, y0, bw, bh);
+        ctx.drawImage(vehScratch, 0, 0, sw, sh, x0, y0, sw * invScratch, sh * invScratch);
         ctx.restore();
       } else {
         ctx.drawImage(vehScratch, 0, 0, sw, sh, x0, y0, bw, bh);
@@ -349,13 +369,12 @@ export function createDepthManager() {
   }
 
   function isOccludedAt(wx, wy, d16, worldW, worldH) {
-    if (!depthPixels || depthW <= 0 || depthH <= 0 || !Number.isFinite(d16)) return false;
+    if (!depthU16 || !occMask || depthW <= 0 || depthH <= 0 || !Number.isFinite(d16)) return false;
     const dx = Math.min(depthW - 1, Math.max(0, Math.floor((wx / Math.max(1, worldW)) * depthW)));
     const dy = Math.min(depthH - 1, Math.max(0, Math.floor((wy / Math.max(1, worldH)) * depthH)));
-    const di = (dy * depthW + dx) * 4;
-    if (depthPixels[di + 2] <= 128) return false;
-    const sceneD16 = (depthPixels[di] << 8) | depthPixels[di + 1];
-    return d16 > sceneD16 + 8;
+    const idx = dy * depthW + dx;
+    if (!occMask[idx]) return false;
+    return d16 > depthU16[idx] + 8;
   }
 
   return {

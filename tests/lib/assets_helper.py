@@ -19,25 +19,24 @@ ASSETS_DIR = DOCS_DIR / "assets"
 DATA_DIR = DOCS_DIR / "data"
 AUDIO_DIR = ASSETS_DIR / "audio"
 TILES_DIR = ASSETS_DIR / "tiles"
+RENDERS_CROPS_DIR = REPO_ROOT / "renders" / "crops"
 
 PRESETS = ("day", "sunset", "night")
 
-DETAIL_PLATES = (
+OBSOLETE_DETAIL_PLATES = (
     "01_lindt_home_of_chocolate.webp",
     "02_reformierte_kirche_dorf.webp",
     "03_bendlikon_harbor_pier.webp",
     "04_bahnhof_kilchberg_weinberg.webp",
     "05_schooren_seebad.webp",
     "06_sanatorium_ridge.webp",
-)
-
-NEW_DETAIL_PLATES_V9 = (
     "07_st_elisabeth_church.webp",
     "08_cf_meyer_haus.webp",
     "09_gemeindehaus_alte_landstrasse.webp",
     "10_stockengut_ridge_farm.webp",
+    "10_stockengut_farm.webp",
 )
-ALL_DETAIL_PLATES_V9 = DETAIL_PLATES + NEW_DETAIL_PLATES_V9
+OBSOLETE_DETAIL_PLATE_STEMS = tuple(Path(p).stem for p in OBSOLETE_DETAIL_PLATES)
 
 AUDIO_FILES = (
     "bells.mp3",
@@ -140,20 +139,65 @@ def load_depth_rgb() -> np.ndarray:
         return np.asarray(im.convert("RGB"), dtype=np.uint8)
 
 
-@functools.lru_cache(maxsize=16)
-def load_plate_rgb(filename: str) -> np.ndarray:
-    path = ASSETS_DIR / filename
-    with Image.open(path) as im:
-        im.load()
-        return np.asarray(im.convert("RGB"), dtype=np.uint8)
-
-
-@functools.lru_cache(maxsize=32)
+@functools.lru_cache(maxsize=64)
 def load_tile_rgb(preset: str, col: int, row: int) -> np.ndarray:
     path = TILES_DIR / preset / f"{col}_{row}.webp"
     with Image.open(path) as im:
         im.load()
         return np.asarray(im.convert("RGB"), dtype=np.uint8)
+
+
+def crop_master_rgb(preset: str, x0: float, y0: float, x1: float, y1: float) -> np.ndarray:
+    """Stitch an exact pixel box [y0:y1, x0:x1] across enclosing 1024px master tiles."""
+    mf = load_manifest(preset)
+    W, H, ts = int(mf["width"]), int(mf["height"]), int(mf.get("tileSize", 1024))
+    if not (math.isfinite(x0) and math.isfinite(y0) and math.isfinite(x1) and math.isfinite(y1)):
+        raise ValueError(f"Non-finite crop bounds: ({x0}, {y0}, {x1}, {y1})")
+    ix0, ix1 = int(round(x0)), int(round(x1))
+    iy0, iy1 = int(round(y0)), int(round(y1))
+    if ix1 <= ix0 or iy1 <= iy0:
+        raise ValueError(f"Empty crop box: x=[{ix0}, {ix1}), y=[{iy0}, {iy1})")
+    if ix0 < 0 or iy0 < 0 or ix1 > W or iy1 > H:
+        raise ValueError(
+            f"Crop box x=[{ix0}, {ix1}), y=[{iy0}, {iy1}) out of master bounds ({W}x{H}) for preset '{preset}'"
+        )
+    out = np.zeros((iy1 - iy0, ix1 - ix0, 3), dtype=np.uint8)
+    for r in range(iy0 // ts, (iy1 - 1) // ts + 1):
+        for c in range(ix0 // ts, (ix1 - 1) // ts + 1):
+            tile = load_tile_rgb(preset, c, r)
+            tx0, ty0 = c * ts, r * ts
+            sx0, sy0 = max(ix0, tx0), max(iy0, ty0)
+            sx1, sy1 = min(ix1, tx0 + tile.shape[1]), min(iy1, ty0 + tile.shape[0])
+            out[sy0 - iy0 : sy1 - iy0, sx0 - ix0 : sx1 - ix0] = tile[
+                sy0 - ty0 : sy1 - ty0, sx0 - tx0 : sx1 - tx0
+            ]
+    return out
+
+
+def crop_landmark_meter_box(
+    preset: str,
+    landmark_id: str,
+    dx0_m: float,
+    dy0_m: float,
+    dx1_m: float,
+    dy1_m: float,
+) -> np.ndarray:
+    """Crop a resolution-independent world-meter box relative to landmark (u*W, v*H)."""
+    mf = load_manifest(preset)
+    W, H, mpp = int(mf["width"]), int(mf["height"]), float(mf["mpp"])
+    lms = load_interactive_json().get("landmarks", [])
+    lm = next((l for l in lms if l.get("id") == landmark_id), None)
+    if lm is None:
+        raise ValueError(f"Unknown landmark_id '{landmark_id}' in kilchberg_interactive.json")
+    u, v = get_landmark_uv(lm)
+    cx, cy = u * W, v * H
+    return crop_master_rgb(
+        preset,
+        cx + dx0_m / mpp,
+        cy + dy0_m / mpp,
+        cx + dx1_m / mpp,
+        cy + dy1_m / mpp,
+    )
 
 
 def get_canvas_dims() -> Tuple[int, int]:
@@ -171,13 +215,7 @@ def get_overview_dims() -> Tuple[int, int]:
 def get_master_mpp() -> float:
     """Return master meters-per-pixel dynamically from day tile manifest."""
     m = load_manifest("day")
-    return float(m.get("mpp", 0.25))
-
-
-def plate_cartouche_margins(arr: np.ndarray) -> tuple[int, int, int]:
-    """Return (margin_top, margin_bot, margin_lr) scaled for v9 (cs=1) vs v10 >=3200px (cs=2) plates."""
-    cs = 2 if arr.shape[1] >= 3200 else 1
-    return (110 * cs, 90 * cs, 24 * cs)
+    return float(m.get("mpp", 0.11))
 
 
 def clear_caches() -> None:
@@ -188,7 +226,6 @@ def clear_caches() -> None:
         load_manifest,
         load_overview_rgb,
         load_depth_rgb,
-        load_plate_rgb,
         load_tile_rgb,
         ffprobe_audio,
         get_day_island_and_exterior_masks,

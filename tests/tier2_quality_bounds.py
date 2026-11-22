@@ -18,16 +18,16 @@ from tests.lib.assets_helper import (
     CANVAS_H,
     CANVAS_W,
     DATA_DIR,
-    DETAIL_PLATES,
     DOCS_DIR,
     LINDT_HOC_ID,
-    NEW_DETAIL_PLATES_V9,
     OVERVIEW_H,
     OVERVIEW_W,
     PRESETS,
     REQUIRED_ROAD_IDS,
     TILES_DIR,
     compute_sky_reference,
+    crop_landmark_meter_box,
+    crop_master_rgb,
     distance_to_exterior_sky_m,
     entropy_32b,
     extract_vignette_uv_anchors,
@@ -43,11 +43,9 @@ from tests.lib.assets_helper import (
     load_interactive_json,
     load_manifest,
     load_overview_rgb,
-    load_plate_rgb,
     load_tile_rgb,
     max_channel_abs_diff_u8,
     pixel_turn_angles_deg,
-    plate_cartouche_margins,
     pool2x_max,
     rec709_luma,
     signed_hsv_hue_deg,
@@ -156,14 +154,15 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
         horiz_pairs = [((c_lo, cy), (cx, cy)), ((cx, r_lo), (c_hi, r_lo))]
         vert_pairs = [((cx, r_lo), (cx, cy)), ((c_hi, r_lo), (c_hi, cy))]
 
+        k = 4  # Multi-column interior control baseline ([-4..-1, +1..+4])
         for preset in ("day", "night"):
             for (c1, r1), (c2, r2) in horiz_pairs:
                 a = load_tile_rgb(preset, c1, r1).astype(np.float32)
                 b = load_tile_rgb(preset, c2, r2).astype(np.float32)
                 b_mad = float(np.mean(np.abs(a[:, -1, :] - b[:, 0, :])))
                 i_mad = 0.5 * (
-                    float(np.mean(np.abs(a[:, -2, :] - a[:, -1, :])))
-                    + float(np.mean(np.abs(b[:, 0, :] - b[:, 1, :])))
+                    float(np.mean(np.abs(a[:, -(k + 1) : -1, :] - a[:, -k:, :])))
+                    + float(np.mean(np.abs(b[:, :k, :] - b[:, 1 : k + 1, :])))
                 )
                 ratio = b_mad / max(i_mad, 1.0)
                 self.assertLess(
@@ -177,8 +176,8 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
                 b = load_tile_rgb(preset, c2, r2).astype(np.float32)
                 b_mad = float(np.mean(np.abs(a[-1, :, :] - b[0, :, :])))
                 i_mad = 0.5 * (
-                    float(np.mean(np.abs(a[-2, :, :] - a[-1, :, :])))
-                    + float(np.mean(np.abs(b[0, :, :] - b[1, :, :])))
+                    float(np.mean(np.abs(a[-(k + 1) : -1, :, :] - a[-k:, :, :])))
+                    + float(np.mean(np.abs(b[:k, :, :] - b[1 : k + 1, :, :])))
                 )
                 ratio = b_mad / max(i_mad, 1.0)
                 self.assertLess(
@@ -241,24 +240,58 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
             f"diorama_night.webp has {len(n_big)} floating bright clusters in exterior sky (F4)",
         )
 
-    @test_meta("T2.FA1.05", "Zero floating cropped sports props across all 6 detail plates")
+    @test_meta("T2.FA1.05", "Zero floating exterior-sky artifact clusters on 0.11 m/px master exterior-sky tiles")
     def test_05_zero_floating_plate_props(self) -> None:
-        bad = []
-        for fname in DETAIL_PLATES:
-            arr = load_plate_rgb(fname)
-            mt, mb, mlr = plate_cartouche_margins(arr)
-            comps = find_interior_components(
-                arr,
-                tol=18,
-                margin_top=mt,
-                margin_bot=mb,
-                margin_lr=mlr,
-                min_raw_2x=4,
-                min_dilated_2x=45,
-            )
-            if len(comps) != 1:
-                bad.append(f"{fname} ({len(comps) - 1} floating clusters)")
-        self.assertEqual(bad, [], f"Floating cropped props found in detail plates (F4): {', '.join(bad)}")
+        masks = get_day_island_and_exterior_masks()
+        ext_sky = masks["ext_sky_eroded_full"]
+        oh, ow = ext_sky.shape
+        m_day = load_manifest("day")
+        W, H = int(m_day["width"]), int(m_day["height"])
+        ts = int(m_day.get("tileSize", 1024))
+        cols, rows = int(m_day["cols"]), int(m_day["rows"])
+
+        # Identify master L2 tiles whose entire footprint lies strictly inside eroded exterior sky
+        sky_tiles: list[tuple[int, int]] = []
+        for r in range(rows):
+            ty0, ty1 = r * ts, min(H, (r + 1) * ts)
+            oy0 = max(0, int(math.floor(ty0 * oh / H)))
+            oy1 = min(oh, int(math.ceil(ty1 * oh / H)))
+            for c in range(cols):
+                tx0, tx1 = c * ts, min(W, (c + 1) * ts)
+                ox0 = max(0, int(math.floor(tx0 * ow / W)))
+                ox1 = min(ow, int(math.ceil(tx1 * ow / W)))
+                if oy1 > oy0 and ox1 > ox0 and bool(np.all(ext_sky[oy0:oy1, ox0:ox1])):
+                    sky_tiles.append((c, r))
+
+        self.assertGreaterEqual(
+            len(sky_tiles),
+            4,
+            f"Expected >=4 exterior-sky master tiles to audit, found {len(sky_tiles)}",
+        )
+        # Audit a deterministic spread of up to 12 exterior-sky tiles across day & sunset
+        step = max(1, len(sky_tiles) // 12)
+        audit_tiles = sky_tiles[::step][:12]
+
+        bad: list[str] = []
+        for preset in ("day", "sunset"):
+            tol = 18 if preset == "day" else 28
+            for c, r in audit_tiles:
+                tile = load_tile_rgb(preset, c, r)
+                row_ref = np.rint(np.median(tile, axis=1)).astype(np.uint8)
+                diff = max_channel_abs_diff_u8(tile, row_ref)
+                comps = filter_dilated_components(
+                    pool2x_max(diff > tol),
+                    dilate_size=5,
+                    min_raw_2x=4,
+                    min_dilated_2x=45,
+                )
+                if comps:
+                    bad.append(f"{preset}/{c}_{r}.webp ({len(comps)} floating sky clusters)")
+        self.assertEqual(
+            bad,
+            [],
+            f"Floating exterior-sky artifact clusters found on master tiles (F4): {', '.join(bad)}",
+        )
 
     @test_meta("T2.FA1.06", "Spotless Lake Zurich open water & near-shore (zero reed blotches)")
     def test_06_spotless_lake_water(self) -> None:
@@ -421,27 +454,21 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
                 f"Night warm streetlamp pool fraction along {rid} is {street_warm * 100:.3f}% < 0.50% (F7)",
             )
 
-    @test_meta("T2.FA1.09", "Guardrail #4: Lindt HoC id=1443 DOP10 roof texture variance/entropy")
+    @test_meta("T2.FA1.09", "Guardrail #4: Lindt HoC id=1443 DOP10 roof texture variance/entropy on master tiles")
     def test_09_lindt_25cm_roof_texture(self) -> None:
-        # Dynamically derive Lindt HoC (id=1443) tile (col, row) and local (tx, ty) from manifest & interactive metadata
+        # Dynamically crop Lindt HoC (id=1443) across enclosing master tiles (no single-tile clamping)
         inter = load_interactive_json()
         lindt = next((b for b in inter.get("buildings", []) if b.get("id") == LINDT_HOC_ID), None)
         self.assertIsNotNone(lindt, f"Lindt HoC building id={LINDT_HOC_ID} missing from kilchberg_interactive.json")
         manifest = load_manifest("day")
         cw = int(manifest["width"])
         ch = int(manifest["height"])
-        mpp = float(manifest.get("mpp", 0.25))
-        tile_sz = int(manifest.get("tileSize", 1024))
+        mpp = float(manifest.get("mpp", 0.11))
         rad = max(16, int(round(32 * (0.25 / mpp))))
         px = float(lindt["u"]) * cw
         py = float(lindt["v"]) * ch
-        col = int(px // tile_sz)
-        row = int(py // tile_sz)
-        tile = load_tile_rgb("day", col, row)
-        th, tw = tile.shape[:2]
-        tx = max(rad, min(tw - rad, int(round(px - col * tile_sz))))
-        ty = max(rad, min(th - rad, int(round(py - row * tile_sz))))
-        patch = tile[ty - rad : ty + rad, tx - rad : tx + rad, :]
+
+        patch = crop_master_rgb("day", px - rad, py - rad, px + rad, py + rad)
         luma = rec709_luma(patch)
         std_l = float(np.std(luma))
         ent = entropy_32b(luma)
@@ -451,52 +478,46 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
             | patch[..., 2].astype(np.uint32)
         )
         uniq = int(np.unique(packed).size)
-        self.assertGreaterEqual(std_l, 18.0, f"Lindt tile ({col},{row}) roof std_luma={std_l:.2f} < 18.0")
-        self.assertGreaterEqual(ent, 1.8, f"Lindt tile ({col},{row}) roof entropy={ent:.2f} < 1.8")
-        self.assertGreaterEqual(uniq, 12, f"Lindt tile ({col},{row}) roof uniq_colors={uniq} < 12")
+        self.assertGreaterEqual(std_l, 18.0, f"Lindt HoC master roof std_luma={std_l:.2f} < 18.0")
+        self.assertGreaterEqual(ent, 1.8, f"Lindt HoC master roof entropy={ent:.2f} < 1.8")
+        self.assertGreaterEqual(uniq, 12, f"Lindt HoC master roof uniq_colors={uniq} < 12")
 
-        # Detail plate 01 center patch (scaled proportionally with plate width)
-        plate = load_plate_rgb("01_lindt_home_of_chocolate.webp")
-        cy, cx = plate.shape[0] // 2, plate.shape[1] // 2
-        prad = max(80, int(round(80 * plate.shape[1] / 2794)))
-        pp = plate[cy - prad : cy + prad, cx - prad : cx + prad, :]
-        p_luma = rec709_luma(pp)
-        self.assertGreaterEqual(float(np.std(p_luma)), 25.0, "Plate 01 Lindt center std_luma < 25.0")
-        self.assertGreaterEqual(entropy_32b(p_luma), 2.8, "Plate 01 Lindt center entropy < 2.8")
+        # Wider +-16 m footprint patch centered on Lindt HoC directly on master tiles
+        rad_wide = max(32, int(round(16.0 / mpp)))
+        wide_patch = crop_master_rgb("day", px - rad_wide, py - rad_wide, px + rad_wide, py + rad_wide)
+        w_luma = rec709_luma(wide_patch)
+        self.assertGreaterEqual(
+            float(np.std(w_luma)),
+            22.0,
+            f"Lindt HoC wide master patch std_luma={float(np.std(w_luma)):.2f} < 22.0",
+        )
+        self.assertGreaterEqual(
+            entropy_32b(w_luma),
+            2.5,
+            f"Lindt HoC wide master patch entropy={entropy_32b(w_luma):.2f} < 2.5",
+        )
 
-    @test_meta("T2.FA1.10", "v9.0 plates 07..10 zero floating sky clusters & visual richness (std>=20, ent>=2.5)")
+    @test_meta("T2.FA1.10", "Heritage landmarks visual richness directly on 0.11 m/px day master tiles (std>=20, ent>=2.5)")
     def test_10_new_plates_no_floating_and_richness(self) -> None:
-        missing = [fname for fname in NEW_DETAIL_PLATES_V9 if not (ASSETS_DIR / fname).is_file()]
-        self.assertEqual(missing, [], f"Missing v9.0 detail plates: {', '.join(missing)}")
-        for fname in NEW_DETAIL_PLATES_V9:
-            arr = load_plate_rgb(fname)
-            mt, mb, mlr = plate_cartouche_margins(arr)
-            comps = find_interior_components(
-                arr,
-                tol=18,
-                margin_top=mt,
-                margin_bot=mb,
-                margin_lr=mlr,
-                min_raw_2x=4,
-                min_dilated_2x=45,
-            )
-            self.assertEqual(
-                len(comps),
-                1,
-                f"{fname} has {len(comps) - 1} floating sky clusters",
-            )
-            body = arr[mt:-mb, mlr:-mlr, :]
-            luma = rec709_luma(body)
+        landmark_ids = (
+            "st_elisabeth",
+            "cf_meyer_haus",
+            "gemeindehaus_alte_landstr",
+            "stockengut_farm",
+        )
+        for lid in landmark_ids:
+            region = crop_landmark_meter_box("day", lid, -80.0, -80.0, 80.0, 80.0)
+            luma = rec709_luma(region)
             std_l = float(np.std(luma))
             ent = entropy_32b(luma)
-            self.assertGreaterEqual(std_l, 20.0, f"{fname} body std_luma={std_l:.2f} < 20.0")
-            self.assertGreaterEqual(ent, 2.5, f"{fname} body entropy={ent:.2f} < 2.5")
+            self.assertGreaterEqual(std_l, 20.0, f"Landmark '{lid}' master region std_luma={std_l:.2f} < 20.0")
+            self.assertGreaterEqual(ent, 2.5, f"Landmark '{lid}' master region entropy={ent:.2f} < 2.5")
 
-    @test_meta("T2.FA1.11", "v10 high-frequency sharpness & genuine >=2x detail (anti-NN-upscale check)")
+    @test_meta("T2.FA1.11", "0.11 m/px high-frequency sharpness & genuine native detail (anti-NN-upscale check)")
     def test_11_v10_sharpness_and_anti_upscale(self) -> None:
         m_day = load_manifest("day")
         mpp = float(m_day.get("mpp", 1.0))
-        self.assertLessEqual(mpp, 0.125, f"day manifest mpp={mpp} > 0.125 (v10 >=2x required)")
+        self.assertLessEqual(mpp, 0.115, f"day manifest mpp={mpp} > 0.115 (0.11 m/px required)")
 
         cols_n, rows_n = int(m_day["cols"]), int(m_day["rows"])
         cx, cy = cols_n // 2, rows_n // 2
@@ -546,12 +567,12 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
         self.assertGreaterEqual(
             mean_grad,
             4.5,
-            f"Central 0.125 m/px tiles mean 1px gradient energy {mean_grad:.2f} < 4.5 (blurred/flat)",
+            f"Central 0.11 m/px tiles mean 1px gradient energy {mean_grad:.2f} < 4.5 (blurred/flat)",
         )
         self.assertGreaterEqual(
             max_grad,
             7.0,
-            f"Central 0.125 m/px village tile peak 1px gradient energy {max_grad:.2f} < 7.0",
+            f"Central 0.11 m/px village tile peak 1px gradient energy {max_grad:.2f} < 7.0",
         )
         self.assertLess(
             max_nn,

@@ -92,9 +92,9 @@ function activeBusCountForRoad(rd, busMode) {
 }
 
 export function createTrafficSim(animData) {
-  const masterW = (animData && animData.canvas_width) ? animData.canvas_width : 12331;
-  const masterH = (animData && animData.canvas_height) ? animData.canvas_height : 5444;
-  const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+  const masterW = (animData && animData.canvas_width) ? animData.canvas_width : 28024;
+  const masterH = (animData && animData.canvas_height) ? animData.canvas_height : 12373;
+  const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.11;
   const resFactor = 0.25 / mppMaster;
   const roads = (animData && Array.isArray(animData.roads)) ? animData.roads : [];
   const trains = (animData && Array.isArray(animData.trains)) ? animData.trains : [];
@@ -1088,7 +1088,13 @@ export function createTrafficSim(animData) {
     for (const fv of feederVehicles) {
       const fd = feederDefs[fv.feederIdx];
       if (!fd || fd.pts.length < 2) continue;
-      const rawFrac = fd.entryAtStart ? fv.distFrac : (1.0 - fv.distFrac);
+      const dirSign = fv.state === 'outbound_feeder' ? 1 : (fv.state === 'inbound_feeder' ? -1 : 0);
+      const visDistFrac = clamp(
+        fv.distFrac + dirSign * (fv.v / Math.max(1, fd.lengthM)) * subStepRem,
+        0.01,
+        0.99,
+      );
+      const rawFrac = fd.entryAtStart ? visDistFrac : (1.0 - visDistFrac);
       const clampedFrac = clamp(rawFrac, 0.01, 0.99);
       const pos = samplePathAt(fd.pts, clampedFrac, worldW, worldH, 2);
       if (!pos) continue;

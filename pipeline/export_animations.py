@@ -1455,12 +1455,13 @@ def _build_network(
         else:
             raise AssertionError(f"feeder {fid} endpoints did not snap within 30 m of any main road")
 
-        # Verify screen-pixel snap distance <= 25 px at connects_road @ connects_frac
+        # Verify screen-pixel snap distance <= 3.125 m (25 px at 0.125 m/px) at connects_road @ connects_frac
+        max_feeder_snap_px = 3.125 / cam.mpp
         cu, cv, _ = _proj_uv_d16(cam, shift_x, shift_y, W_full, H_full, conn_e, conn_n, _dem_z(conn_e, conn_n) + 0.35, vehicle_h=2.0)
         d_px_0 = math.hypot((float(pts[0][0]) - cu) * W_full, (float(pts[0][1]) - cv) * H_full)
         d_px_1 = math.hypot((float(pts[-1][0]) - cu) * W_full, (float(pts[-1][1]) - cv) * H_full)
-        assert min(d_px_0, d_px_1) <= 25.0, (
-            f"feeder {fid} endpoint snap to {conn_road}@{conn_frac} too far: {min(d_px_0, d_px_1):.1f} px"
+        assert min(d_px_0, d_px_1) <= max_feeder_snap_px, (
+            f"feeder {fid} endpoint snap to {conn_road}@{conn_frac} too far: {min(d_px_0, d_px_1):.1f} px (limit {max_feeder_snap_px:.1f} px)"
         )
 
         f_entry: dict = {
@@ -1557,8 +1558,9 @@ def _build_network(
         tu0, tv0 = poi_uv[to_poi]
         d_from_px = math.hypot((float(pts[0][0]) - fu0) * W_full, (float(pts[0][1]) - fv0) * H_full)
         d_to_px = math.hypot((float(pts[-1][0]) - tu0) * W_full, (float(pts[-1][1]) - tv0) * H_full)
-        assert d_from_px <= 40.0 and d_to_px <= 40.0, (
-            f"footpath {fpid} endpoint gap too large: d_from={d_from_px:.1f} px, d_to={d_to_px:.1f} px"
+        max_fp_gap_px = 5.0 / cam.mpp
+        assert d_from_px <= max_fp_gap_px and d_to_px <= max_fp_gap_px, (
+            f"footpath {fpid} endpoint gap too large: d_from={d_from_px:.1f} px, d_to={d_to_px:.1f} px (limit {max_fp_gap_px:.1f} px)"
         )
         footpaths_out.append({
             "id": fpid,
@@ -1622,7 +1624,7 @@ def _build_network(
     return network_out
 
 
-def export_animations(mpp_full: float = 0.125) -> Path:
+def export_animations(mpp_full: float = 0.11) -> Path:
     scene = _load_anim_scene(RAW_CACHE_DIR)
     cam = IsometricCamera(mpp=mpp_full)
     cam, _, _, W_full, H_full, shift_x, shift_y, *_ = compute_full_canvas_geometry(scene, cam, None, True)
@@ -2249,4 +2251,9 @@ def export_animations(mpp_full: float = 0.125) -> Path:
 
 
 if __name__ == "__main__":
-    export_animations()
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Export Kilchberg living-world animations JSON.")
+    ap.add_argument("--mpp-full", type=float, default=0.11)
+    args = ap.parse_args()
+    export_animations(mpp_full=args.mpp_full)

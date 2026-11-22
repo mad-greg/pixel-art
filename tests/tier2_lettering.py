@@ -17,7 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from pipeline import signage
 from pipeline.config import IsometricCamera
-from tests.lib.assets_helper import load_plate_rgb
+from tests.lib.assets_helper import crop_landmark_meter_box, get_master_mpp
 from tests.lib.report import parse_cli_args_for_module, run_unittest_module, test_meta
 
 VIGNETTES_JS = REPO_ROOT / "docs" / "js" / "render" / "vignettes.js"
@@ -135,19 +135,14 @@ class TestLetteringProjection(unittest.TestCase):
 
 
 class TestLetteringRendered(unittest.TestCase):
-    @test_meta("T2.LET.05", "Rendered Lindt plate: metallic gold 'LINDT & SPRÜNGLI' ink lies along the projected wall direction (not red)")
+    @test_meta("T2.LET.05", "Rendered master tiles: metallic gold 'LINDT & SPRÜNGLI' ink lies along the projected wall direction (not red)")
     def test_05_rendered_main_sign_angle(self) -> None:
-        img = load_plate_rgb("01_lindt_home_of_chocolate.webp").astype(int)
-        h, w = img.shape[:2]
+        # Restrict to the historic factory lake-facade roofline sign window directly on day master tiles
+        img = crop_landmark_meter_box("day", "lindt_hoc", -54.03, 49.02, -25.76, 68.94).astype(int)
         r, g, b = img[..., 0], img[..., 1], img[..., 2]
-        # Restrict to the historic factory lake-facade roofline sign window (fractional of H, W; >=24 px margin around sign, excludes penthouse yellow wall)
-        y0, y1 = int(round(0.5850 * h)), int(round(0.6320 * h))
-        x0, x1 = int(round(0.4120 * w)), int(round(0.4580 * w))
-        win = np.zeros((h, w), dtype=bool)
-        win[y0:y1, x0:x1] = True
 
         # Photo-verified v11: red paint must NOT dominate the historic factory roofline sign
-        red_mask = win & (r > 90) & (g < 0.30 * r) & (b < 0.30 * r)
+        red_mask = (r > 90) & (g < 0.30 * r) & (b < 0.30 * r)
         red_px = int(red_mask.sum())
         self.assertLess(
             red_px,
@@ -156,7 +151,7 @@ class TestLetteringRendered(unittest.TestCase):
         )
 
         # Metallic gold fg=(212, 168, 56) under bin-4 day shading (~0.45..1.05x)
-        gold_mask = win & (r >= 82) & (g > 0.60 * r) & (g < 0.90 * r) & (b < 0.45 * r) & ((r - b) >= 42)
+        gold_mask = (r >= 82) & (g > 0.60 * r) & (g < 0.90 * r) & (b < 0.45 * r) & ((r - b) >= 42)
         ys, xs = np.nonzero(gold_mask)
         self.assertGreater(
             len(xs),
@@ -180,17 +175,16 @@ class TestLetteringRendered(unittest.TestCase):
         self.assertLess(abs(measured - expected), 7.0,
                         f"lettering angle {measured:.1f}deg deviates from projected facade direction {expected:.1f}deg")
 
-    @test_meta("T2.LET.06", "Rendered Lindt plate: gold Home-of-Chocolate lettering exists on the white curved facade")
+    @test_meta("T2.LET.06", "Rendered master tiles: gold Home-of-Chocolate lettering exists on the white curved facade")
     def test_06_rendered_hoc_gold_on_white(self) -> None:
-        img = load_plate_rgb("01_lindt_home_of_chocolate.webp").astype(int)
-        h, w = img.shape[:2]
+        img = crop_landmark_meter_box("day", "lindt_hoc", -100.0, -80.0, 100.0, 80.0).astype(int)
+        mpp = get_master_mpp()
         r, g, b = img[..., 0], img[..., 1], img[..., 2]
         gold = (r > 100) & (r < 215) & (g > 0.62 * r) & (g < 0.80 * r) & (b < 0.40 * r)
-        gold[: int(round(0.0778 * h)), :] = False
         ys, xs = np.nonzero(gold)
         self.assertGreater(len(xs), 80, "no baked gold lettering found")
         # Most gold ink must have bright near-white wall pixels around it (it is painted ON the white facade)
-        rad = max(4, int(round(6 * w / 2100)))
+        rad = max(4, int(round(0.9 / mpp)))
         ok = 0
         pick = np.linspace(0, len(xs) - 1, min(400, len(xs))).astype(int)
         for i in pick:

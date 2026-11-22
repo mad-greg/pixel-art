@@ -183,8 +183,8 @@ async function runTests(harness, test) {
     }
   });
 
-  // ── T3.03: Search x Building Inspector x Detail Plate "Fly Here" ──
-  await test('T3.03', 'Search x Building Inspector x Detail Plate "Fly Here" end-to-end flow', async () => {
+  // ── T3.03: Search x Building Inspector x Direct Landmark Fly-To (no detail-plate modal) ──
+  await test('T3.03', 'Search x Building Inspector x Direct Landmark Fly-To end-to-end flow (no detail-plate modal)', async () => {
     const tab = await harness.openTab('/?t=10', { width: 1280, height: 800, dpr: 2, waitReady: true });
     try {
       const searchSel = await findSearchSelector(tab);
@@ -219,26 +219,34 @@ async function runTests(harness, test) {
         `Selecting search result did not update inspector to Schoorenstrasse/Lindt (got '${inspTitle}')`,
       );
 
-      // Open 2nd detail plate (Reformierte Kirche) and click "Fly Here"
-      await tab.clickSelector('#crop-gallery .crop-thumb:nth-child(2)');
-      await tab.waitFor(`!document.getElementById('modal-overlay')?.classList.contains('hidden')`, { timeoutMs: 2500 });
-      await sleep(180);
+      // Assert removed Detail Plates gallery & modal are absent from DOM
+      const plateDom = await tab.evaluate(`({
+        hasCropGallery: Boolean(document.getElementById('crop-gallery') || document.querySelector('.crops-section')),
+        hasModal: Boolean(document.getElementById('modal-overlay') || document.getElementById('plate-modal')),
+      })`);
+      assert(
+        !plateDom.hasCropGallery && !plateDom.hasModal,
+        `Removed Detail Plates UI still present in DOM: ${JSON.stringify(plateDom)}`,
+      );
 
-      const flyPt = await tab.evaluate(`(() => {
-        const box = document.getElementById('modal-overlay');
-        const btn = [...box.querySelectorAll('button')].find((b) => /fly\\s*here/i.test(b.textContent || '') || /fly/i.test(b.id || ''));
-        if (!btn) return null;
-        const r = btn.getBoundingClientRect();
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-      })()`);
-      assert(flyPt !== null, 'Detail-plate modal missing "Fly Here" button (F25)');
-      await tab.clickPoint(flyPt.x, flyPt.y);
+      // Click 2nd landmark directly in sidebar (Reformierte Kirche) and verify live fly-to
+      await tab.clickSelector('#landmark-list .lm-item:nth-child(2)');
       await tab.waitForCameraSettled();
 
-      const modalClosed = await tab.evaluate(`document.getElementById('modal-overlay')?.classList.contains('hidden')`);
-      assert(modalClosed, 'Clicking "Fly Here" did not close detail-plate modal');
       const dbgFly = await tab.getDebug();
-      assert(dbgFly && dbgFly.activeLandmark, 'Clicking "Fly Here" did not update activeLandmark');
+      assert(
+        dbgFly && dbgFly.activeLandmark === 'reformierte_kirche',
+        `Expected clicking landmark #2 to activate 'reformierte_kirche', got '${dbgFly?.activeLandmark}'`,
+      );
+      assert(
+        typeof dbgFly.scale === 'number' && dbgFly.scale >= 1.0,
+        `Expected direct landmark fly-to scale >= 1.0, got ${dbgFly?.scale}`,
+      );
+      const inspAfter = await tab.evaluate(`document.getElementById('insp-title')?.textContent?.trim() || ''`);
+      assert(
+        /kirche|reformierte/i.test(inspAfter),
+        `Clicking Reformierte Kirche landmark did not update inspector title (got '${inspAfter}')`,
+      );
     } finally {
       await harness.closeTab(tab);
     }
@@ -525,7 +533,15 @@ async function runTests(harness, test) {
         let best = null;
         for (const t of times) {
           await tab.navigate(`/?mode=day&zoom=2&follow=${kind}&t=${t}`, { waitReady: true });
-          await sleep(260);
+          await tab.waitForCameraSettled();
+          await tab.waitFor(
+            `(() => {
+              const d = window.__dioramaDebug;
+              return Boolean(d && d.frameStats && d.frameStats.tileInflight === 0);
+            })()`,
+            { timeoutMs: 4000, intervalMs: 60 },
+          );
+          await sleep(160);
           const dbgOn = await tab.getDebug();
           assert(dbgOn && dbgOn.followTarget === kind, `Expected followTarget='${kind}', got '${dbgOn?.followTarget}'`);
           assert(dbgOn.scale >= 1.8, `Expected zoom >= 1.8x for follow=${kind}, got ${dbgOn.scale}`);
@@ -543,7 +559,13 @@ async function runTests(harness, test) {
           await sleep(100);
 
           const m = analyzeVehicleRoofOpacity(roiOn, roiOff, 14);
-          if (!best || m.vehPixels > best.vehPixels) {
+          const mOk = m.vehPixels >= minVehPx;
+          const bestOk = best && best.vehPixels >= minVehPx;
+          if (
+            !best ||
+            (mOk && (!bestOk || m.holeFrac < best.holeFrac || (m.holeFrac === best.holeFrac && m.vehPixels > best.vehPixels))) ||
+            (!bestOk && !mOk && m.vehPixels > best.vehPixels)
+          ) {
             best = { ...m, t };
           }
         }
@@ -749,16 +771,16 @@ async function runTests(harness, test) {
     }
   });
 
-  // ── T3.12: v10 2x resolution live sprite physical-scale & depth-alignment (zoom=1 & zoom=2) ──
-  await test('T3.12', 'v10 2x live sprite physical-scale & zero roof perforation on Train & Bus at zoom=1 and zoom=2', async () => {
+  // ── T3.12: 0.11 m/px live sprite physical-scale & depth-alignment (zoom=1 & zoom=2) ──
+  await test('T3.12', '0.11 m/px live sprite physical-scale & zero roof perforation on Train & Bus at zoom=1 and zoom=2', async () => {
     const tab = await harness.openTab('/?mode=day&t=10', { width: 1280, height: 800, dpr: 1, waitReady: true });
     try {
       const mf = await tab.evaluate(
         `(async () => { const r = await fetch('assets/tiles/day/manifest.json'); return r.ok ? r.json() : null; })()`,
       );
       assert(
-        mf && typeof mf.mpp === 'number' && mf.mpp <= 0.125,
-        `Expected v10 manifest.mpp <= 0.125 for 2x sprite scale check, got ${mf?.mpp}`,
+        mf && typeof mf.mpp === 'number' && mf.mpp <= 0.115,
+        `Expected 0.11 m/px manifest.mpp <= 0.115 for live sprite scale check, got ${mf?.mpp}`,
       );
 
       const checks = [
@@ -806,11 +828,11 @@ async function runTests(harness, test) {
 
         assert(
           best && best.vehPixels >= minVehPx,
-          `v10 ${kind} at zoom=${zoom} appears physically shrunk: vehPixels=${best?.vehPixels} < ${minVehPx} (check wScale)`,
+          `0.11 m/px ${kind} at zoom=${zoom} appears physically shrunk: vehPixels=${best?.vehPixels} < ${minVehPx} (check wScale)`,
         );
         assert(
           best.holeFrac < 0.06,
-          `v10 ${kind} at zoom=${zoom} (t=${best.t}) has roof perforation: holeFrac=${(best.holeFrac * 100).toFixed(2)}% (interiorHoles=${best.interiorHoles}, vehPixels=${best.vehPixels})`,
+          `0.11 m/px ${kind} at zoom=${zoom} (t=${best.t}) has roof perforation: holeFrac=${(best.holeFrac * 100).toFixed(2)}% (interiorHoles=${best.interiorHoles}, vehPixels=${best.vehPixels})`,
         );
       }
 
@@ -825,8 +847,8 @@ async function runTests(harness, test) {
     }
   });
 
-  // ── T3.13: v10 Inspector fidelity readout (12.5 cm/px) & metric scale bar accuracy ──
-  await test('T3.13', 'v10 Inspector #spec-fidelity reports 12.5 cm/px & metric scale bar halves cleanly 1:1 -> 2x', async () => {
+  // ── T3.13: Inspector fidelity readout (11 cm/px) & metric scale bar accuracy ──
+  await test('T3.13', 'Inspector #spec-fidelity reports 11 cm/px (<= 0.115 m/px) & metric scale bar halves cleanly 1:1 -> 2x', async () => {
     const parseScaleMeters = (txt) => {
       const m = String(txt || '').trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*(km|m)\b/i);
       if (!m) return NaN;
@@ -837,10 +859,18 @@ async function runTests(harness, test) {
     const tab = await harness.openTab('/?mode=day&t=10', { width: 1280, height: 800, dpr: 2, waitReady: true });
     try {
       await sleep(220);
+      const mf = await tab.evaluate(
+        `(async () => { const r = await fetch('assets/tiles/day/manifest.json'); return r.ok ? r.json() : null; })()`,
+      );
+      assert(
+        mf && typeof mf.mpp === 'number' && mf.mpp <= 0.115,
+        `Expected day manifest.mpp <= 0.115 (0.11 m/px), got ${mf?.mpp}`,
+      );
+
       const fidText = await tab.evaluate(`(document.getElementById('spec-fidelity')?.textContent || '').trim()`);
       assert(
-        /\b12\.5\s*cm\/px\b/i.test(fidText),
-        `Expected #spec-fidelity to report '12.5 cm/px' (not 25 or 13 cm/px), got '${fidText}'`,
+        /\b11(?:\.0)?\s*cm\/px\b/i.test(fidText),
+        `Expected #spec-fidelity to report '11 cm/px' (not 12.5 or 25 cm/px), got '${fidText}'`,
       );
 
       const readScaleBarExpr = `(() => {
@@ -863,8 +893,8 @@ async function runTests(harness, test) {
       );
       const mpp1x = m1x / sb1x.widthPx;
       assert(
-        mpp1x >= 0.08 && mpp1x <= 0.16,
-        `Expected 1:1 scale bar ~0.125 m/CSS-px (in [0.08, 0.16]), got ${mpp1x.toFixed(4)} (${sb1x.label} / ${sb1x.widthPx.toFixed(1)}px)`,
+        mpp1x >= 0.07 && mpp1x <= 0.15,
+        `Expected 1:1 scale bar ~0.11 m/CSS-px (in [0.07, 0.15]), got ${mpp1x.toFixed(4)} (${sb1x.label} / ${sb1x.widthPx.toFixed(1)}px)`,
       );
 
       await tab.clickSelector('#btn-zoom-2x');

@@ -17,7 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests.lib.assets_helper import (
-    ALL_DETAIL_PLATES_V9,
+    ALL_LANDMARK_IDS_V9,
     ASSETS_DIR,
     AUDIO_DIR,
     AUDIO_FILES,
@@ -29,19 +29,22 @@ from tests.lib.assets_helper import (
     CANVAS_W,
     CF_MEYER_HAUS_LV95,
     DATA_DIR,
-    DETAIL_PLATES,
     DOCS_DIR,
     LINDT_HOC_ID,
     NEW_LANDMARK_IDS_V9,
+    OBSOLETE_DETAIL_PLATES,
+    OBSOLETE_DETAIL_PLATE_STEMS,
     OVERVIEW_H,
     OVERVIEW_W,
     PRESETS,
+    RENDERS_CROPS_DIR,
     REQUIRED_LANDMARK_IDS,
     REQUIRED_ROAD_IDS,
     REQUIRED_VIGNETTE_KEYS_V9,
     TILES_DIR,
     count_depth_roof_small_hits,
     count_unique_rgb_colors,
+    crop_landmark_meter_box,
     distance_to_exterior_sky_m,
     extract_vignette_uv_anchors,
     ffprobe_audio,
@@ -52,9 +55,7 @@ from tests.lib.assets_helper import (
     load_interactive_json,
     load_manifest,
     load_overview_rgb,
-    load_plate_rgb,
     load_tile_rgb,
-    plate_cartouche_margins,
     uv_pixel_distance,
     webp_encoding_type,
 )
@@ -82,7 +83,7 @@ class TestTier1FA1Assets(unittest.TestCase):
                 )
                 self.assertEqual(im.mode, "RGB", f"{p.name} mode {im.mode} != RGB")
 
-    @test_meta("T1.FA1.02", "Tile manifests >=24000x10600, <=0.125mpp, 1024px tiles & consistent z1 pyramid")
+    @test_meta("T1.FA1.02", "Tile manifests >=27500x12000, <=0.115mpp (0.11 m/px), 1024px tiles & consistent z1 pyramid")
     def test_02_tile_manifests(self) -> None:
         ref_sig = None
         for preset in PRESETS:
@@ -94,9 +95,9 @@ class TestTier1FA1Assets(unittest.TestCase):
             rows = int(m.get("rows", 0))
             mpp = float(m.get("mpp", 999.0))
 
-            self.assertGreaterEqual(w, 24000, f"{preset} manifest width {w} < 24000 (v10 >=2x)")
-            self.assertGreaterEqual(h, 10600, f"{preset} manifest height {h} < 10600 (v10 >=2x)")
-            self.assertLessEqual(mpp, 0.125, f"{preset} manifest mpp {mpp} > 0.125 (v10 >=2x)")
+            self.assertGreaterEqual(w, 27500, f"{preset} manifest width {w} < 27500 (0.11 m/px)")
+            self.assertGreaterEqual(h, 12000, f"{preset} manifest height {h} < 12000 (0.11 m/px)")
+            self.assertLessEqual(mpp, 0.115, f"{preset} manifest mpp {mpp} > 0.115 (0.11 m/px)")
             self.assertGreater(mpp, 0.0, f"{preset} manifest mpp {mpp} <= 0")
             self.assertEqual(ts, 1024, f"{preset} manifest tileSize {ts} != 1024")
             self.assertEqual(cols, math.ceil(w / ts), f"{preset} manifest cols {cols} != ceil({w}/{ts})")
@@ -121,7 +122,12 @@ class TestTier1FA1Assets(unittest.TestCase):
             z1_mpp = float(z1.get("mpp", 0.0))
             self.assertEqual(z1_w, w // 2, f"{preset} z1.width {z1_w} != {w // 2}")
             self.assertEqual(z1_h, h // 2, f"{preset} z1.height {z1_h} != {h // 2}")
-            self.assertAlmostEqual(z1_mpp, 0.25, places=2, msg=f"{preset} z1.mpp {z1_mpp} != ~0.25")
+            self.assertAlmostEqual(
+                z1_mpp,
+                mpp * 2.0,
+                places=3,
+                msg=f"{preset} z1.mpp {z1_mpp} != {mpp * 2.0:.3f} (2x master mpp)",
+            )
             self.assertEqual(z1_ts, 1024, f"{preset} z1.tileSize {z1_ts} != 1024")
             self.assertEqual(z1_cols, math.ceil(z1_w / z1_ts), f"{preset} z1.cols {z1_cols} != ceil({z1_w}/{z1_ts})")
             self.assertEqual(z1_rows, math.ceil(z1_h / z1_ts), f"{preset} z1.rows {z1_rows} != ceil({z1_h}/{z1_ts})")
@@ -212,24 +218,43 @@ class TestTier1FA1Assets(unittest.TestCase):
         self.assertGreaterEqual(int(valid_d16.min()), 10000, f"Valid d16 min {valid_d16.min()} suspiciously low")
         self.assertLessEqual(int(valid_d16.max()), 55000, f"Valid d16 max {valid_d16.max()} suspiciously high")
 
-    @test_meta("T1.FA1.05", "All 6 detail plates 01..06_*.webp lossless VP8L >= 2000x1400")
+    @test_meta("T1.FA1.05", "Zero obsolete separate detail plates remain in docs/assets/ or renders/crops/")
     def test_05_detail_plates(self) -> None:
-        for fname in DETAIL_PLATES:
-            p = ASSETS_DIR / fname
-            self.assertTrue(p.is_file(), f"Missing detail plate: {fname}")
-            enc = webp_encoding_type(p)
-            self.assertEqual(enc, "VP8L", f"Detail plate {fname} is {enc}, expected lossless VP8L")
-            with Image.open(p) as im:
-                w, h = im.size
-                self.assertEqual(im.mode, "RGB", f"{fname} mode {im.mode} != RGB")
-                self.assertGreaterEqual(w, 2000, f"{fname} width {w} < 2000")
-                self.assertGreaterEqual(h, 1400, f"{fname} height {h} < 1400")
-                im.load()
+        leftover_docs = sorted(
+            {
+                p.name
+                for p in list(ASSETS_DIR.glob("0[1-9]_*.webp")) + list(ASSETS_DIR.glob("10_*.webp"))
+                if p.is_file()
+            }
+            | {fname for fname in OBSOLETE_DETAIL_PLATES if (ASSETS_DIR / fname).is_file()}
+        )
+        self.assertEqual(
+            leftover_docs,
+            [],
+            f"Obsolete separate detail plates still exist in docs/assets/: {', '.join(leftover_docs)}",
+        )
 
-    @test_meta("T1.FA1.06", "Lossless tiles & detail-plate bodies strictly <= 256 SVGA colors")
+        leftover_crops: list[str] = []
+        if RENDERS_CROPS_DIR.is_dir():
+            leftover_crops = sorted(
+                {
+                    p.name
+                    for p in list(RENDERS_CROPS_DIR.glob("0[1-9]_*.png")) + list(RENDERS_CROPS_DIR.glob("10_*.png"))
+                    if p.is_file()
+                }
+                | {f"{stem}.png" for stem in OBSOLETE_DETAIL_PLATE_STEMS if (RENDERS_CROPS_DIR / f"{stem}.png").is_file()}
+            )
+        self.assertEqual(
+            leftover_crops,
+            [],
+            f"Obsolete detail plate PNGs still exist in renders/crops/: {', '.join(leftover_crops)}",
+        )
+
+    @test_meta("T1.FA1.06", "Lossless master tiles & landmark tiles strictly <= 256 SVGA colors")
     def test_06_svga_256_color_budget(self) -> None:
         m_day = load_manifest("day")
         cols, rows = int(m_day["cols"]), int(m_day["rows"])
+        wf, hf, ts = int(m_day["width"]), int(m_day["height"]), int(m_day.get("tileSize", 1024))
         cx, cy = cols // 2, rows // 2
         sample_tiles = (
             (max(0, cx - 1), cy),
@@ -237,6 +262,17 @@ class TestTier1FA1Assets(unittest.TestCase):
             (min(cols - 1, cx + 1), cy),
             (cx, cy),
         )
+
+        # Also include tiles covering key landmarks (Lindt HoC & St. Elisabeth)
+        inter = load_interactive_json()
+        lm_by_id = {lm["id"]: lm for lm in inter.get("landmarks", [])}
+        landmark_tiles: list[tuple[str, int, int]] = []
+        for lid in ("lindt_hoc", "st_elisabeth", "reformierte_kirche"):
+            if lid in lm_by_id:
+                u, v = get_landmark_uv(lm_by_id[lid])
+                tc = max(0, min(cols - 1, int((u * wf) // ts)))
+                tr = max(0, min(rows - 1, int((v * hf) // ts)))
+                landmark_tiles.append((lid, tc, tr))
 
         def _unique_packed_u32(arr: np.ndarray) -> np.ndarray:
             # Fast O(N) RGB->uint32 packing + 1D np.unique on strided/contiguous uint32
@@ -262,23 +298,21 @@ class TestTier1FA1Assets(unittest.TestCase):
             n_union = int(np.unique(np.concatenate(uniques)).size)
             return preset, tile_counts, n_union
 
-        def _check_plate(fname: str) -> tuple[str, int]:
-            arr = load_plate_rgb(fname)
-            mt, mb, mlr = plate_cartouche_margins(arr)
-            body = arr[mt:-mb, mlr:-mlr, :]
-            return fname, int(_unique_packed_u32(body).size)
-
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             preset_results = list(pool.map(_check_preset, PRESETS))
-            plate_results = list(pool.map(_check_plate, DETAIL_PLATES))
 
         for preset, tile_counts, n_union in preset_results:
             for c, r, n_tile in tile_counts:
                 self.assertLessEqual(n_tile, 256, f"Tile {preset}/{c}_{r}.webp has {n_tile} > 256 colors")
             self.assertLessEqual(n_union, 256, f"Preset '{preset}' tile union has {n_union} > 256 colors")
 
-        for fname, n_body in plate_results:
-            self.assertLessEqual(n_body, 256, f"Detail plate {fname} body has {n_body} > 256 colors")
+        for lid, c, r in landmark_tiles:
+            n_lm_tile = int(_unique_packed_u32(load_tile_rgb("day", c, r)).size)
+            self.assertLessEqual(
+                n_lm_tile,
+                256,
+                f"Landmark '{lid}' tile day/{c}_{r}.webp has {n_lm_tile} > 256 colors",
+            )
 
     @test_meta("T1.FA1.07", "index.html asset versions synced, zero CDN scripts, 550.5m stat")
     def test_07_index_html_contract(self) -> None:
@@ -387,42 +421,58 @@ class TestTier1FA1Assets(unittest.TestCase):
             f"Expected >=3 ES modules under docs/js/, found {len(js_modules)}",
         )
 
-    @test_meta("T1.FA1.10", "All 10 detail plates 01..10_*.webp lossless VP8L >=2000x1400 <=256 colors")
+    @test_meta("T1.FA1.10", "All 16 landmark regions cropped directly from 0.11 m/px day master tiles valid & <=256 colors")
     def test_10_all_10_detail_plates_v9(self) -> None:
-        for fname in ALL_DETAIL_PLATES_V9:
-            p = ASSETS_DIR / fname
-            self.assertTrue(p.is_file(), f"Missing detail plate: {fname}")
-            self.assertEqual(webp_encoding_type(p), "VP8L", f"{fname} must be lossless VP8L")
-            with Image.open(p) as im:
-                self.assertEqual(im.mode, "RGB", f"{fname} mode {im.mode} != RGB")
-                w, h = im.size
-                self.assertGreaterEqual(w, 2000, f"{fname} width {w} < 2000")
-                self.assertGreaterEqual(h, 1400, f"{fname} height {h} < 1400")
-            arr = load_plate_rgb(fname)
-            mt, mb, mlr = plate_cartouche_margins(arr)
-            body = arr[mt:-mb, mlr:-mlr, :]
-            n_colors = count_unique_rgb_colors(body)
+        m_day = load_manifest("day")
+        mpp = float(m_day.get("mpp", 999.0))
+        expected_min_px = max(100, int(round(36.0 / max(mpp, 0.05))))
+        for lid in ALL_LANDMARK_IDS_V9:
+            crop = crop_landmark_meter_box("day", lid, -20.0, -20.0, 20.0, 20.0)
+            self.assertEqual(crop.ndim, 3, f"Landmark '{lid}' crop must be HxWx3 RGB")
+            self.assertEqual(crop.shape[2], 3, f"Landmark '{lid}' crop must have 3 channels")
+            self.assertGreaterEqual(
+                crop.shape[0],
+                expected_min_px,
+                f"Landmark '{lid}' crop height {crop.shape[0]} < {expected_min_px}",
+            )
+            self.assertGreaterEqual(
+                crop.shape[1],
+                expected_min_px,
+                f"Landmark '{lid}' crop width {crop.shape[1]} < {expected_min_px}",
+            )
+            n_colors = count_unique_rgb_colors(crop)
+            self.assertGreater(n_colors, 4, f"Landmark '{lid}' master tile region appears blank ({n_colors} colors)")
             self.assertLessEqual(
                 n_colors,
                 256,
-                f"Detail plate {fname} body has {n_colors} colors > 256 SVGA cap",
+                f"Landmark '{lid}' master tile region has {n_colors} colors > 256 SVGA cap",
             )
 
-    @test_meta("T1.FA1.11", "v10 >=2x resolution contract (<=0.125mpp, JSON/manifest parity, shift_y & 10 >=3200x2200 plates)")
+    @test_meta("T1.FA1.11", "0.11 m/px resolution contract (<=0.115mpp, >=27500x12000, JSON/manifest/z1 parity & shift_y)")
     def test_11_v10_resolution_contract(self) -> None:
         m_day = load_manifest("day")
         day_w = int(m_day.get("width", 0))
         day_h = int(m_day.get("height", 0))
         day_mpp = float(m_day.get("mpp", 999.0))
-        self.assertLessEqual(day_mpp, 0.125, f"day manifest mpp {day_mpp} > 0.125 (v10 >=2x)")
-        self.assertGreaterEqual(day_w, 24000, f"day manifest width {day_w} < 24000")
-        self.assertGreaterEqual(day_h, 10600, f"day manifest height {day_h} < 10600")
+        self.assertLessEqual(day_mpp, 0.115, f"day manifest mpp {day_mpp} > 0.115 (0.11 m/px)")
+        self.assertGreaterEqual(day_w, 27500, f"day manifest width {day_w} < 27500 (0.11 m/px)")
+        self.assertGreaterEqual(day_h, 12000, f"day manifest height {day_h} < 12000 (0.11 m/px)")
 
         for preset in PRESETS:
             m = load_manifest(preset)
             self.assertEqual(int(m.get("width", 0)), day_w, f"{preset} manifest width != day {day_w}")
             self.assertEqual(int(m.get("height", 0)), day_h, f"{preset} manifest height != day {day_h}")
             self.assertAlmostEqual(float(m.get("mpp", 0.0)), day_mpp, places=5, msg=f"{preset} mpp != day {day_mpp}")
+            z1 = m.get("z1")
+            self.assertIsInstance(z1, dict, f"{preset} manifest missing 'z1' pyramid")
+            self.assertAlmostEqual(
+                float(z1.get("mpp", 0.0)),
+                day_mpp * 2.0,
+                places=3,
+                msg=f"{preset} z1.mpp != {day_mpp * 2.0:.3f} (0.22 m/px)",
+            )
+            self.assertEqual(int(z1.get("width", 0)), day_w // 2, f"{preset} z1.width != {day_w // 2}")
+            self.assertEqual(int(z1.get("height", 0)), day_h // 2, f"{preset} z1.height != {day_h // 2}")
 
         inter = load_interactive_json()
         self.assertEqual(int(inter.get("canvas_width", 0)), day_w, "kilchberg_interactive.json canvas_width != manifest")
@@ -444,48 +494,29 @@ class TestTier1FA1Assets(unittest.TestCase):
             msg="kilchberg_animations.json mpp != manifest",
         )
         shift_y = anim.get("shift_y")
-        self.assertIsInstance(shift_y, (int, float), "kilchberg_animations.json missing numeric 'shift_y' (v10 Contract #2)")
+        self.assertIsInstance(shift_y, (int, float), "kilchberg_animations.json missing numeric 'shift_y' (Contract #2)")
         self.assertFalse(isinstance(shift_y, bool), "kilchberg_animations.json shift_y must not be bool")
         self.assertTrue(
             math.isfinite(float(shift_y)) and float(shift_y) > 0.0,
             f"kilchberg_animations.json shift_y={shift_y!r} must be finite and > 0",
         )
 
-        for fname in ALL_DETAIL_PLATES_V9:
-            p = ASSETS_DIR / fname
-            self.assertTrue(p.is_file(), f"Missing detail plate: {fname}")
-            self.assertEqual(webp_encoding_type(p), "VP8L", f"{fname} must be lossless VP8L")
-            with Image.open(p) as im:
-                self.assertEqual(im.mode, "RGB", f"{fname} mode {im.mode} != RGB")
-                w, h = im.size
-                self.assertGreaterEqual(w, 3200, f"v10 plate {fname} width {w} < 3200")
-                self.assertGreaterEqual(h, 2200, f"v10 plate {fname} height {h} < 2200")
-            arr = load_plate_rgb(fname)
-            mt, mb, mlr = plate_cartouche_margins(arr)
-            body = arr[mt:-mb, mlr:-mlr, :]
-            n_colors = count_unique_rgb_colors(body)
-            self.assertLessEqual(
-                n_colors,
-                256,
-                f"v10 detail plate {fname} body has {n_colors} colors > 256 SVGA cap",
-            )
-
 
 class TestTier1FA2GeospatialData(unittest.TestCase):
     """FA2: Geospatial Metadata, Landmarks, Living-World Routes & Guardrails."""
 
-    @test_meta("T1.FA2.01", "kilchberg_interactive.json schema, >=24000x10600, <=0.125mpp & >=10 landmarks (0..9 preserved)")
+    @test_meta("T1.FA2.01", "kilchberg_interactive.json schema, >=27500x12000, <=0.115mpp & >=10 landmarks (0..9 preserved)")
     def test_01_interactive_schema(self) -> None:
         data = load_interactive_json()
         w = int(data.get("canvas_width", 0))
         h = int(data.get("canvas_height", 0))
-        self.assertGreaterEqual(w, 24000, f"interactive canvas_width {w} < 24000 (v10 >=2x)")
-        self.assertGreaterEqual(h, 10600, f"interactive canvas_height {h} < 10600 (v10 >=2x)")
+        self.assertGreaterEqual(w, 27500, f"interactive canvas_width {w} < 27500 (0.11 m/px)")
+        self.assertGreaterEqual(h, 12000, f"interactive canvas_height {h} < 12000 (0.11 m/px)")
 
         cam = data.get("camera", {})
         self.assertAlmostEqual(float(cam.get("azimuth_from_deg", 0)), 102.0, places=2)
         self.assertAlmostEqual(float(cam.get("pitch_deg", 0)), 30.0, places=2)
-        self.assertLessEqual(float(cam.get("mpp", 999.0)), 0.125, f"interactive camera.mpp {cam.get('mpp')} > 0.125")
+        self.assertLessEqual(float(cam.get("mpp", 999.0)), 0.115, f"interactive camera.mpp {cam.get('mpp')} > 0.115")
         self.assertGreater(float(cam.get("mpp", 0.0)), 0.0, "interactive camera.mpp <= 0")
         self.assertAlmostEqual(float(cam.get("z_exag", 0)), 1.16, places=3)
 
