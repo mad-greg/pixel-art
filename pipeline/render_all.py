@@ -67,7 +67,7 @@ PLATE_CARTOUCHE_META: dict[str, tuple[str, str]] = {
     ),
     "sanatorium_ridge": (
         "PLATE VI  —  SANATORIUM KILCHBERG & STOCKEN RIDGE",
-        "1906 HISTORIC PAVILIONS · ALPINE MEADOWS · UPLAND FORESTS",
+        "EST. 1867 · HISTORIC HAUS A & C · GUSTAV AMMANN PARK · TREIBHÄUSER",
     ),
     "st_elisabeth": (
         "PLATE VII  —  KATHOLISCHE KIRCHE ST. ELISABETH & BRUNNENMOOS",

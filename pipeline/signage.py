@@ -139,45 +139,34 @@ def sample_on_baseline(sign: SignAtlas, s, v, s0: float, v_base: float) -> np.nd
 #   lit       True if the real sign is illuminated (glows at night, warm glow at sunset)
 # ---------------------------------------------------------------------------------------------
 SIGNS = [
-    # Iconic roof-line letters of the 1899 Lindt & Sprüngli works (Seestrasse 204), seen from the lake
-    dict(key="lindt_main", text="LINDT & SPRÜNGLI", font="gothic", cap_m=2.7, top_off=1.7,
-         fg=(196, 28, 40), panel=None, lit=True, edge=(250, 236, 214), edge_m=0.07, sh_off=0.14, fit=0.80),
+    # Iconic roof-line gilded letters of the 1899 Lindt & Sprüngli works (Seestrasse 204), seen from the lake
+    dict(key="lindt_main", text="LINDT & SPRÜNGLI", font="serif", cap_m=2.7, top_off=1.5,
+         fg=(212, 168, 56), panel=None, lit=True, edge=(88, 68, 28), edge_m=0.06, sh_off=0.14, sh_mul=0.58, fit=0.80),
     # Home of Chocolate: applied serif capitals stacked on the 13 m wide, 22 m tall white glazed-ceramic
     # curved facade (3 lines because the real curve is far narrower than the one-line word length)
-    dict(key="lindt_hoc", text="LINDT", font="serif", cap_m=1.5, top_off=2.2, fg=(176, 124, 36), panel=None,
+    dict(key="lindt_hoc", text="LINDT", font="serif", cap_m=1.5, top_off=2.2, fg=(192, 144, 52), panel=None,
          lit=True, edge=None, sh_off=0.09, sh_mul=0.72, fit=0.96, thr=0.46, bins=[2, 3, 32, 33, 34, 35, 0, 1], curve=0.93, e_min=2684118.0, min_len=6.0),
-    dict(key="lindt_hoc", text="HOME OF", font="serif", cap_m=1.5, top_off=4.0, fg=(176, 124, 36), panel=None,
+    dict(key="lindt_hoc", text="HOME OF", font="serif", cap_m=1.5, top_off=4.0, fg=(192, 144, 52), panel=None,
          lit=True, edge=None, sh_off=0.09, sh_mul=0.72, fit=0.96, thr=0.46, bins=[2, 3, 32, 33, 34, 35, 0, 1], curve=0.93, e_min=2684118.0, min_len=6.0),
-    dict(key="lindt_hoc", text="CHOCOLATE", font="serif", cap_m=1.5, top_off=5.8, fg=(176, 124, 36), panel=None,
+    dict(key="lindt_hoc", text="CHOCOLATE", font="serif", cap_m=1.5, top_off=5.8, fg=(192, 144, 52), panel=None,
          lit=True, edge=None, sh_off=0.09, sh_mul=0.72, fit=0.96, thr=0.46, bins=[2, 3, 32, 33, 34, 35, 0, 1], curve=0.93, e_min=2684118.0, min_len=6.0),
-    # Station name board (SBB: dark lettering on white enamel)
-    dict(key="bahnhof_station", text="KILCHBERG", font="swiss", cap_m=1.0, top_off=1.0,
-         fg=(24, 26, 30), panel=(244, 244, 240), lit=False, edge=None, fit=0.70),
-    dict(key="seebad_bathhouse", text="SEEBAD KILCHBERG", font="swiss", cap_m=0.82, top_off=1.45,
-         fg=(250, 250, 244), panel=(30, 92, 150), lit=False, edge=None, fit=0.72),
-    dict(key="chez_fritz", text="CHEZ FRITZ", font="serif", cap_m=0.95, top_off=0.8,
-         fg=(246, 226, 168), panel=(112, 34, 30), lit=True, edge=None, fit=0.84),
-    dict(key="gemeindehaus_main", text="GEMEINDEHAUS", font="swiss", cap_m=1.1, top_off=1.7,
-         fg=(40, 34, 28), panel=(226, 214, 186), lit=False, edge=None, fit=0.62),
-    dict(key="cf_meyer_haus", text="C. F. MEYER-HAUS", font="serif", cap_m=0.75, top_off=2.2,
-         fg=(52, 40, 28), panel=(224, 212, 184), lit=False, edge=None, fit=0.66),
-    dict(key="schulhaus_dorfstr", text="SCHULHAUS", font="swiss", cap_m=0.95, top_off=1.6,
-         fg=(40, 34, 28), panel=(226, 214, 186), lit=False, edge=None, fit=0.60),
-    dict(key="sanatorium_483", text="SANATORIUM KILCHBERG", font="serif", cap_m=1.0, top_off=1.8,
-         fg=(60, 46, 34), panel=(228, 218, 192), lit=False, edge=None, fit=0.80),
-    dict(key="moenchhof_hafenbeiz_243", text="HAFENBEIZ", font="swiss", cap_m=0.85, top_off=0.7,
-         fg=(250, 240, 214), panel=(48, 78, 58), lit=True, edge=None, fit=0.80),
-    dict(key="st_elisabeth_nave", text="ST. ELISABETH", font="swiss", cap_m=1.0, top_off=2.4,
-         fg=(236, 232, 224), panel=(70, 72, 78), lit=False, edge=None, fit=0.60),
-    # v10 +4 new baked landmark signs (zero floating UI fonts)
-    dict(key="bendlikon_pavilion", text="KILCHBERG ZH (SEE)", font="swiss", cap_m=0.68, top_off=1.20,
-         fg=(250, 250, 246), panel=(22, 82, 148), lit=True, edge=None, fit=0.94, min_len=4.5),
-    dict(key="hallenbad_pool_1448", text="HALLENBAD HOCHWEID", font="swiss", cap_m=1.0, top_off=1.35,
-         fg=(248, 250, 250), panel=(24, 108, 144), lit=True, edge=None, fit=0.72, min_len=8.0),
-    dict(key="stockengut_barn_807", text="STOCKENGUT", font="serif", cap_m=0.95, top_off=1.45,
-         fg=(54, 42, 30), panel=(230, 220, 194), lit=False, edge=None, fit=0.62, min_len=6.0),
-    dict(key="tc_clubhouse_1287", text="TC KILCHBERG", font="swiss", cap_m=0.78, top_off=0.8,
-         fg=(248, 248, 242), panel=(36, 98, 56), lit=False, edge=None, fit=0.76, min_len=5.0),
+    # Station name board (SBB standard: white sans-serif "Kilchberg" on deep SBB blue, between upper floors)
+    dict(key="bahnhof_station", text="Kilchberg", font="swiss", cap_m=0.65, top_off=3.4,
+         fg=(248, 248, 246), panel=(36, 68, 128), lit=True, edge=None, fit=0.45),
+    # Gemeindehaus Alte Landstrasse 110: clean dark lettering in upper plaster frieze above windows
+    dict(key="gemeindehaus_main", text="GEMEINDEHAUS", font="swiss", cap_m=0.78, top_off=0.55,
+         fg=(46, 40, 34), panel=(218, 210, 184), lit=False, edge=None, fit=0.58),
+    # Hafenbeiz (Seestrasse 30): slab-serif cream on oxblood-red below attic gable taper
+    dict(key="moenchhof_hafenbeiz_243", text="HAFENBEIZ", font="serif", cap_m=0.80, top_off=3.6,
+         fg=(248, 240, 224), panel=(128, 44, 38), lit=True, edge=None, fit=0.78),
+    # Real ZSG Waiting Pavilion (Seestrasse 157.1): dark lettering painted directly on white ENE lakeside gable
+    dict(key="bendlikon_pavilion", text="Kilchberg-Bendlikon", font="serif", cap_m=0.52, top_off=2.55,
+         fg=(28, 30, 34), panel=None, lit=False, edge=None, fit=0.88, bins=[0, 1, 2, 3, 4, 34, 35], min_len=3.5),
+    # Real Hallenbad Kilchberg (Hochweidstr. 10) & Sporthalle Hochweid (Hochweidstr. 13): direct wall lettering
+    dict(key="hallenbad_main_1835", text="Hallenbad Kilchberg", font="swiss", cap_m=0.85, top_off=0.75,
+         fg=(62, 68, 74), panel=None, lit=False, edge=(244, 246, 246), edge_m=0.05, sh_off=0.08, fit=0.58, min_len=8.0),
+    dict(key="hallenbad_entry_1628", text="SPORTHALLE HOCHWEID", font="swiss", cap_m=0.82, top_off=1.20,
+         fg=(46, 50, 54), panel=None, lit=False, edge=None, fit=0.58, min_len=8.0),
 ]
 
 def best_wall_run(scene, bidx: int, cam_az_deg: float, bins=None):
@@ -337,13 +326,10 @@ def bake_signs(resolved, w_bi, w_dbin, w_e, w_n, w_z, w_base, f_mat, wi, lit_mat
 #   shift    metres along the wall from the wall-run centre (left negative)
 #   hm       (hour, minute) shown;   lit  glows at dusk/night (illuminated dial)
 # ---------------------------------------------------------------------------------------------
-CLOCKS = [
-    dict(key="lindt_main", r=1.9, top_off=7.4, shift=14.0, hm=(10, 10), lit=True, min_len=8.0, gilded=True),
-    dict(key="bahnhof_station", r=1.2, top_off=2.6, shift=7.0, hm=(10, 10), lit=True, min_len=8.0, sbb=True),
-    dict(key="gemeindehaus_main", r=1.3, top_off=3.2, shift=-9.0, hm=(10, 10), lit=False, min_len=8.0, gilded=True),
-    dict(key="ref_kirche", r=1.6, top_off=5.0, shift=0.0, hm=(10, 10), lit=True, min_len=3.0, gilded=True),
-    dict(key="st_elisabeth_twr", r=1.1, top_off=4.2, shift=0.0, hm=(10, 10), lit=True, min_len=2.0),
-]
+# v11: All duplicate/phantom wall clocks removed (St. Elisabeth & Gemeindehaus have NO clocks;
+# Reformierte Kirche's dark stone-tower dial, Lindt wing_twr clock, Bahnhof canopy clocks &
+# Schulhaus Alte Landstrasse Dachreiter cupola clock are rendered authentically in pixel_shader.py).
+CLOCKS = []
 
 
 def resolve_clocks(scene, cam_az_deg: float):
