@@ -49,7 +49,7 @@ const TREE_BIRD_PERCHES = [
 ];
 
 export function createAudioEngine({
-  assetVer = '10.0',
+  assetVer = '11.0',
   getCamera,
   getMode,
   getWorldSize,

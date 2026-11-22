@@ -2103,7 +2103,7 @@ export function drawKilchbergDetails(
   // 8. EXPANDED KILCHBERG LANDMARK VIGNETTES (v9.0 — ST. ELISABETH + 9 NEW)
   // =========================================================================
 
-  // 8a. Katholische Kirche St. Elisabeth — White concrete campanile uplight & 8-bay Fra Roberto Pasotti stained glass (NO clock)
+  // 8a. Katholische Kirche St. Elisabeth — White concrete campanile uplight (NO clock; nave stained-glass night glow is baked into shader tiles)
   {
     const seBelfry = (vig.st_elisabeth && vig.st_elisabeth.belfry) || [0.41165, 0.32675];
     const seApex = (vig.st_elisabeth && vig.st_elisabeth.apex) || [0.41165, 0.32232];
@@ -2119,30 +2119,6 @@ export function drawKilchbergDetails(
         ctx.fillStyle = tGrad;
         ctx.fillRect(Math.round(bx - 3.6 * s), Math.round(ay - 3 * s), Math.max(4, Math.round(7.2 * s)), Math.max(8, Math.round(by - ay + 9 * s)));
         drawLanternGlow(ctx, ax, ay, 3.6 * s, isNight, '252, 242, 216', '#fef9e7', 0.68);
-
-        // v11 8-bay Fra Roberto Pasotti stained-glass palette aligned onto nave north wall (sapphire, ruby-rose, golden-amber, emerald)
-        const pasottiCols = [
-          { rgb: '54, 116, 216', hex: '#3674d8' },
-          { rgb: '216, 58, 66', hex: '#d83a42' },
-          { rgb: '248, 196, 74', hex: '#f8c44a' },
-          { rgb: '56, 158, 104', hex: '#389e68' },
-        ];
-        for (let k = 0; k < 8; k++) {
-          const pc = pasottiCols[k % 4];
-          const gx = toX(seBelfry[0] - 0.0085 + k * 0.00095);
-          const gy = toY(seBelfry[1] + 0.0165 + k * 0.00040);
-          const pulse = 0.86 + 0.14 * Math.sin(tSec * 2.1 + k * 1.1);
-          const gRad = 5.4 * s;
-          const gGrad = ctx.createRadialGradient(gx, gy, 0.4 * s, gx, gy, gRad);
-          gGrad.addColorStop(0, `rgba(${pc.rgb}, ${((isNight ? 0.44 : 0.26) * pulse).toFixed(2)})`);
-          gGrad.addColorStop(1, `rgba(${pc.rgb}, 0)`);
-          ctx.fillStyle = gGrad;
-          ctx.beginPath();
-          ctx.arc(gx, gy, gRad, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = pc.hex;
-          ctx.fillRect(Math.round(gx - 1.0 * s), Math.round(gy - 1.6 * s), Math.max(2, Math.round(2.0 * s)), Math.max(2, Math.round(3.2 * s)));
-        }
       }
     }
   }

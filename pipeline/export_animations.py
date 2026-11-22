@@ -2157,7 +2157,7 @@ def export_animations(mpp_full: float = 0.125) -> Path:
         },
         "moenchhof_horn": {
             "hafenbeiz": _vig_land_uv("moenchhof_horn.hafenbeiz", 2683570.0, 1243005.0, dz=3.0),
-            "terrace": _vig_land_uv("moenchhof_horn.terrace", 2683578.0, 1243008.0, dz=1.2),
+            "terrace": _vig_land_uv("moenchhof_horn.terrace", 2683597.0, 1243007.0, dz=1.2),
             "boathouse": _vig_land_uv("moenchhof_horn.boathouse", 2683590.0, 1243016.0, dz=1.2),
             "water": _vig_water_uv("moenchhof_horn.water", 2683612.0, 1243025.0, dz=0.05),
         },
@@ -2183,9 +2183,8 @@ def export_animations(mpp_full: float = 0.125) -> Path:
             "greenhouse": _vig_land_uv("stockengut_farm.greenhouse", 2683252.0, 1241998.0, dz=2.0),
         },
         "hallenbad_hochweid": {
-            "pool_hall": _vig_land_uv("hallenbad_hochweid.pool_hall", 2683112.0, 1241399.0, dz=4.0),
-            "entry": _vig_land_uv("hallenbad_hochweid.entry", 2683080.0, 1241431.0, dz=2.0),
-            "track": _vig_land_uv("hallenbad_hochweid.track", 2683165.0, 1241435.0, dz=0.5),
+            "pool_hall": _vig_land_uv("hallenbad_hochweid.pool_hall", 2683207.0, 1241545.0, dz=4.0),
+            "entry": _vig_land_uv("hallenbad_hochweid.entry", 2683179.0, 1241517.0, dz=2.0),
         },
         "broelberggut_estate": {
             "manor": _vig_land_uv("broelberggut_estate.manor", 2683775.0, 1241245.0, dz=4.0),

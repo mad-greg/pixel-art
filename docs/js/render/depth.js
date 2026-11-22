@@ -45,7 +45,7 @@ export function createDepthManager() {
     return waterMask[my * waterW + mx] === 1;
   }
 
-  function loadDepthMap(assetVer = '10.0') {
+  function loadDepthMap(assetVer = '11.0') {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {

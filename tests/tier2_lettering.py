@@ -47,8 +47,25 @@ class TestLetteringTypography(unittest.TestCase):
     @test_meta("T2.LET.02", "Every registered sign resolves onto a camera-facing wall of its own building")
     def test_02_registry_is_complete(self) -> None:
         keys = {s["key"] for s in signage.SIGNS}
-        for must in ("lindt_main", "lindt_hoc", "bahnhof_station", "seebad_bathhouse", "gemeindehaus_main"):
+        for must in ("lindt_main", "lindt_hoc", "bahnhof_station", "gemeindehaus_main"):
             self.assertIn(must, keys)
+        self.assertNotIn(
+            "st_elisabeth_nave",
+            keys,
+            "fictional charcoal 'ST. ELISABETH' nave plaque must not be present in signage.SIGNS (v11)",
+        )
+        for s in signage.SIGNS:
+            fields = " ".join(str(s.get(k, "")) for k in ("key", "bldg", "text")).lower()
+            self.assertNotIn(
+                "st_elisabeth",
+                fields,
+                f"fictional St. Elisabeth sign must not be present in signage.SIGNS (v11): {s}",
+            )
+            self.assertNotIn(
+                "st. elisabeth",
+                fields,
+                f"fictional St. Elisabeth sign must not be present in signage.SIGNS (v11): {s}",
+            )
         texts = " ".join(s["text"] for s in signage.SIGNS)
         self.assertIn("LINDT & SPRÜNGLI", texts)
         for w in ("LINDT", "HOME OF", "CHOCOLATE"):
@@ -118,30 +135,47 @@ class TestLetteringProjection(unittest.TestCase):
 
 
 class TestLetteringRendered(unittest.TestCase):
-    @test_meta("T2.LET.05", "Rendered Lindt plate: red 'LINDT & SPRÜNGLI' ink lies along the projected wall direction")
+    @test_meta("T2.LET.05", "Rendered Lindt plate: metallic gold 'LINDT & SPRÜNGLI' ink lies along the projected wall direction (not red)")
     def test_05_rendered_main_sign_angle(self) -> None:
         img = load_plate_rgb("01_lindt_home_of_chocolate.webp").astype(int)
         h, w = img.shape[:2]
         r, g, b = img[..., 0], img[..., 1], img[..., 2]
-        mask = (r > 90) & (g < 0.30 * r) & (b < 0.30 * r)
-        # the plate is centred on the Lindt campus: restrict to the factory lake facade window (fractional of H, W)
-        y0, y1 = int(round(0.5449 * h)), int(round(0.6746 * h))
-        x0, x1 = int(round(0.3579 * w)), int(round(0.5011 * w))
-        win = np.zeros_like(mask)
+        # Restrict to the historic factory lake-facade roofline sign window (fractional of H, W; >=24 px margin around sign, excludes penthouse yellow wall)
+        y0, y1 = int(round(0.5850 * h)), int(round(0.6320 * h))
+        x0, x1 = int(round(0.4120 * w)), int(round(0.4580 * w))
+        win = np.zeros((h, w), dtype=bool)
         win[y0:y1, x0:x1] = True
-        mask &= win
-        ys, xs = np.nonzero(mask)
-        self.assertGreater(len(xs), 150, "no baked red rooftop lettering pixels found in rendered plate")
-        # keep the dominant cluster (largest dense blob) to ignore stray pixels
-        self.assertGreater(len(xs), 150)
+
+        # Photo-verified v11: red paint must NOT dominate the historic factory roofline sign
+        red_mask = win & (r > 90) & (g < 0.30 * r) & (b < 0.30 * r)
+        red_px = int(red_mask.sum())
+        self.assertLess(
+            red_px,
+            100,
+            f"historic factory 'LINDT & SPRÜNGLI' sign must be metallic gold, not red (found {red_px} red px)",
+        )
+
+        # Metallic gold fg=(212, 168, 56) under bin-4 day shading (~0.45..1.05x)
+        gold_mask = win & (r >= 82) & (g > 0.60 * r) & (g < 0.90 * r) & (b < 0.45 * r) & ((r - b) >= 42)
+        ys, xs = np.nonzero(gold_mask)
+        self.assertGreater(
+            len(xs),
+            150,
+            f"no baked metallic gold rooftop lettering pixels found in historic factory sign window (got {len(xs)})",
+        )
+        self.assertGreater(
+            len(xs),
+            red_px,
+            f"metallic gold pixels ({len(xs)}) must outnumber red pixels ({red_px}) in factory sign window",
+        )
         measured = _pca_angle_deg(xs, ys)
         # expected: project two points 10 m apart along the sign's wall tangent
         scene_run = (-0.6428, 0.7660)  # bin-4 wall tangent (normal at 40deg) used by the main factory facade
         cam = IsometricCamera()
         e0, n0 = 2684200.0, 1241370.0
-        x0, y0, _ = cam.project(np.array([e0]), np.array([n0]), np.array([420.0]))
-        x1, y1, _ = cam.project(np.array([e0 + 10 * scene_run[0]]), np.array([n0 + 10 * scene_run[1]]), np.array([420.0]))
-        expected = math.degrees(math.atan2(-(y1[0] - y0[0]), x1[0] - x0[0]))
+        px0, py0, _ = cam.project(np.array([e0]), np.array([n0]), np.array([420.0]))
+        px1, py1, _ = cam.project(np.array([e0 + 10 * scene_run[0]]), np.array([n0 + 10 * scene_run[1]]), np.array([420.0]))
+        expected = math.degrees(math.atan2(-(py1[0] - py0[0]), px1[0] - px0[0]))
         expected = (expected + 90.0) % 180.0 - 90.0
         self.assertLess(abs(measured - expected), 7.0,
                         f"lettering angle {measured:.1f}deg deviates from projected facade direction {expected:.1f}deg")
