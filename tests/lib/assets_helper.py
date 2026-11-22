@@ -90,8 +90,11 @@ REQUIRED_ROAD_IDS = (
     "alte_landstrasse_wb",
 )
 
-CANVAS_W = 12331
-CANVAS_H = 5444
+# Reference 0.25 m/px baseline dimensions (retained for backward-compatible imports)
+REF_CANVAS_W = 12331
+REF_CANVAS_H = 5444
+CANVAS_W = REF_CANVAS_W
+CANVAS_H = REF_CANVAS_H
 OVERVIEW_W = 6165
 OVERVIEW_H = 2722
 
@@ -151,6 +154,47 @@ def load_tile_rgb(preset: str, col: int, row: int) -> np.ndarray:
     with Image.open(path) as im:
         im.load()
         return np.asarray(im.convert("RGB"), dtype=np.uint8)
+
+
+def get_canvas_dims() -> Tuple[int, int]:
+    """Return master (width, height) dynamically from day tile manifest."""
+    m = load_manifest("day")
+    return int(m["width"]), int(m["height"])
+
+
+def get_overview_dims() -> Tuple[int, int]:
+    """Return overview (width, height) dynamically from diorama_day.webp."""
+    arr = load_overview_rgb("day")
+    return int(arr.shape[1]), int(arr.shape[0])
+
+
+def get_master_mpp() -> float:
+    """Return master meters-per-pixel dynamically from day tile manifest."""
+    m = load_manifest("day")
+    return float(m.get("mpp", 0.25))
+
+
+def plate_cartouche_margins(arr: np.ndarray) -> tuple[int, int, int]:
+    """Return (margin_top, margin_bot, margin_lr) scaled for v9 (cs=1) vs v10 >=3200px (cs=2) plates."""
+    cs = 2 if arr.shape[1] >= 3200 else 1
+    return (110 * cs, 90 * cs, 24 * cs)
+
+
+def clear_caches() -> None:
+    """Clear all lru_cache loaders (useful for synthetic test overrides)."""
+    for fn in (
+        load_interactive_json,
+        load_animations_json,
+        load_manifest,
+        load_overview_rgb,
+        load_depth_rgb,
+        load_plate_rgb,
+        load_tile_rgb,
+        ffprobe_audio,
+        get_day_island_and_exterior_masks,
+        get_lake_zurich_mask_2x,
+    ):
+        fn.cache_clear()
 
 
 def webp_encoding_type(path: Path) -> str:
@@ -673,7 +717,7 @@ def count_depth_roof_small_hits(
 
 
 def distance_to_exterior_sky_m(u: float, v: float) -> float:
-    """Euclidean distance in meters from normalized (u, v) to exterior sky (~1.0 m/px accuracy)."""
+    """Euclidean distance in meters from normalized (u, v) to exterior sky."""
     masks = get_day_island_and_exterior_masks()
     ext = masks["ext_sky_2x"]
     h2, w2 = ext.shape
@@ -684,7 +728,10 @@ def distance_to_exterior_sky_m(u: float, v: float) -> float:
     if ext[cy, cx]:
         return 0.0
 
-    # 1 pixel at 2x pooled overview = 4 full-canvas pixels = 4 * 0.25m = 1.0 m
+    canvas_w, _ = get_canvas_dims()
+    overview_w, _ = get_overview_dims()
+    m_per_2x_px = get_master_mpp() * (canvas_w / max(1, overview_w)) * 2.0
+
     for rad in (60, 180, 400, 1200):
         y0 = max(0, cy - rad)
         y1 = min(h2, cy + rad + 1)
@@ -695,14 +742,14 @@ def distance_to_exterior_sky_m(u: float, v: float) -> float:
         if ys.size > 0:
             dy = (ys + y0) - cy
             dx = (xs + x0) - cx
-            return float(np.sqrt(np.min(dx * dx + dy * dy)))
+            return float(np.sqrt(np.min(dx * dx + dy * dy))) * m_per_2x_px
     return float("inf")
 
 
 def pixel_turn_angles_deg(
     pts: List[List[float]],
-    width: int = CANVAS_W,
-    height: int = CANVAS_H,
+    width: int | None = None,
+    height: int | None = None,
 ) -> Tuple[float, int, int]:
     """Compute consecutive segment turn angles in full pixel space (du*W, dv*H).
 
@@ -710,6 +757,11 @@ def pixel_turn_angles_deg(
     """
     if len(pts) < 3:
         return 0.0, 0, 0
+
+    if width is None or height is None:
+        cw, ch = get_canvas_dims()
+        width = cw if width is None else width
+        height = ch if height is None else height
 
     coords = np.array([[p[0] * width, p[1] * height] for p in pts], dtype=np.float64)
     vecs = np.diff(coords, axis=0)
@@ -732,4 +784,7 @@ def pixel_turn_angles_deg(
 
 
 def uv_pixel_distance(uv1: Tuple[float, float], uv2: Tuple[float, float]) -> float:
-    return math.hypot((uv1[0] - uv2[0]) * CANVAS_W, (uv1[1] - uv2[1]) * CANVAS_H)
+    """Distance in 0.25 m/px reference pixels (meter-consistent across master resolutions)."""
+    cw, ch = get_canvas_dims()
+    scale = get_master_mpp() / 0.25
+    return math.hypot((uv1[0] - uv2[0]) * cw * scale, (uv1[1] - uv2[1]) * ch * scale)

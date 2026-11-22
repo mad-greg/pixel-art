@@ -121,11 +121,14 @@ class TestLetteringRendered(unittest.TestCase):
     @test_meta("T2.LET.05", "Rendered Lindt plate: red 'LINDT & SPRÜNGLI' ink lies along the projected wall direction")
     def test_05_rendered_main_sign_angle(self) -> None:
         img = load_plate_rgb("01_lindt_home_of_chocolate.webp").astype(int)
+        h, w = img.shape[:2]
         r, g, b = img[..., 0], img[..., 1], img[..., 2]
         mask = (r > 90) & (g < 0.30 * r) & (b < 0.30 * r)
-        # the plate is centred on the Lindt campus: restrict to the factory lake facade window
+        # the plate is centred on the Lindt campus: restrict to the factory lake facade window (fractional of H, W)
+        y0, y1 = int(round(0.5449 * h)), int(round(0.6746 * h))
+        x0, x1 = int(round(0.3579 * w)), int(round(0.5011 * w))
         win = np.zeros_like(mask)
-        win[1050:1300, 1000:1400] = True
+        win[y0:y1, x0:x1] = True
         mask &= win
         ys, xs = np.nonzero(mask)
         self.assertGreater(len(xs), 150, "no baked red rooftop lettering pixels found in rendered plate")
@@ -146,18 +149,19 @@ class TestLetteringRendered(unittest.TestCase):
     @test_meta("T2.LET.06", "Rendered Lindt plate: gold Home-of-Chocolate lettering exists on the white curved facade")
     def test_06_rendered_hoc_gold_on_white(self) -> None:
         img = load_plate_rgb("01_lindt_home_of_chocolate.webp").astype(int)
+        h, w = img.shape[:2]
         r, g, b = img[..., 0], img[..., 1], img[..., 2]
         gold = (r > 100) & (r < 215) & (g > 0.62 * r) & (g < 0.80 * r) & (b < 0.40 * r)
-        gold[:150, :] = False
+        gold[: int(round(0.0778 * h)), :] = False
         ys, xs = np.nonzero(gold)
         self.assertGreater(len(xs), 80, "no baked gold lettering found")
         # Most gold ink must have bright near-white wall pixels around it (it is painted ON the white facade)
-        h, w = gold.shape
+        rad = max(4, int(round(6 * w / 2100)))
         ok = 0
         pick = np.linspace(0, len(xs) - 1, min(400, len(xs))).astype(int)
         for i in pick:
             x, y = xs[i], ys[i]
-            patch = img[max(0, y - 6):y + 7, max(0, x - 6):x + 7]
+            patch = img[max(0, y - rad) : y + rad + 1, max(0, x - rad) : x + rad + 1]
             lum = patch.mean(2)
             if (lum > 150).mean() > 0.25:
                 ok += 1

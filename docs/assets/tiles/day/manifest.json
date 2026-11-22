@@ -1,1 +1,1 @@
-{"width":12331,"height":5444,"tileSize":1024,"cols":13,"rows":6,"mpp":0.25,"preset":"day","depthMin":-2400.0,"depthMax":2400.0}
+{"width":24661,"height":10888,"tileSize":1024,"cols":25,"rows":11,"mpp":0.125,"preset":"day","depthMin":-2400.0,"depthMax":2400.0,"macroCols":12,"macroRows":6,"z1":{"width":12330,"height":5444,"mpp":0.25,"tileSize":1024,"cols":13,"rows":6,"path":"z1"}}

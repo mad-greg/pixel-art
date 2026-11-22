@@ -1,5 +1,5 @@
 /**
- * Tier 2 (Node CDP): FA3 Layout, Retina DPR, Zoom, Search, Pin Decluttering & Malformed URL Bounds (10 tests)
+ * Tier 2 (Node CDP): FA3 Layout, Retina DPR, Zoom, Search, Pin Decluttering, Tile-Streaming & Malformed URL Bounds (11 tests)
  *                  + FA4 Spatial Audio Boundary & Attenuation Invariants (5 tests).
  */
 
@@ -30,6 +30,21 @@ function severePinOverlap(a, b) {
     return { ix, iy, frac };
   }
   return null;
+}
+
+function sampleRgbStd(sample) {
+  if (!sample || !Array.isArray(sample.pixels) || sample.pixels.length < 3) return 0;
+  const px = sample.pixels;
+  const n = px.length / 3;
+  let sumL = 0;
+  let sumL2 = 0;
+  for (let i = 0; i < px.length; i += 3) {
+    const l = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+    sumL += l;
+    sumL2 += l * l;
+  }
+  const mean = sumL / n;
+  return Math.sqrt(Math.max(0, sumL2 / n - mean * mean));
 }
 
 async function runTests(harness, test) {
@@ -462,6 +477,83 @@ async function runTests(harness, test) {
     });
   } finally {
     await harness.closeTab(malformed);
+  }
+
+  // ── Tab 3b: v10 Overview (Fit) & zoom tile-streaming performance guard (T2.FA3.11) ──
+  const tileGuard = await harness.openTab('/?mode=day&t=10', {
+    width: 1280,
+    height: 800,
+    dpr: 2,
+    blockFonts: true,
+    waitReady: true,
+  });
+
+  try {
+    await test('T2.FA3.11', 'Overview (Fit) fetches 0 L2 tiles & bounded tile streaming across Fit -> 1:1 -> 2x -> 4x', async () => {
+      const countL2Tiles = (responses) =>
+        responses.filter((r) => {
+          const p = new URL(r.url).pathname;
+          return p.includes('/assets/tiles/') && p.endsWith('.webp') && !p.includes('/z1/');
+        }).length;
+
+      // 1. At Fit on desktop (1280x800 DPR=2), verify 0 high-res L2 tiles are fetched
+      await sleep(220);
+      const l2AtFit = countL2Tiles(tileGuard.tileResponses);
+      assert(
+        l2AtFit === 0,
+        `Expected 0 high-res L2 tiles fetched at overview Fit (1280x800@2x), got ${l2AtFit}`,
+      );
+      const sFit = await tileGuard.captureCanvasSample('#diorama-canvas', 64, 36);
+      assert(
+        sFit && sFit.meanLuma > 5 && sampleRgbStd(sFit) > 5,
+        `Canvas blank/flat at Fit (meanLuma=${sFit?.meanLuma?.toFixed(1)}, std=${sampleRgbStd(sFit).toFixed(1)})`,
+      );
+
+      // 2. Zoom to 1:1 -> bounded L2 tile fetch count (1..48) & non-blank canvas
+      tileGuard.resetNetworkCounters();
+      await tileGuard.clickSelector('#btn-zoom-1x');
+      await tileGuard.waitForCameraSettled();
+      await sleep(380);
+      const l2At1x = countL2Tiles(tileGuard.tileResponses);
+      assert(
+        l2At1x >= 1 && l2At1x <= 48,
+        `Expected bounded L2 tile fetch count in [1, 48] on 1:1 zoom-in, got ${l2At1x}`,
+      );
+      const s1x = await tileGuard.captureCanvasSample('#diorama-canvas', 64, 36);
+      assert(
+        s1x && s1x.meanLuma > 5 && sampleRgbStd(s1x) > 5,
+        `Canvas blank/flat at 1:1 zoom (meanLuma=${s1x?.meanLuma?.toFixed(1)}, std=${sampleRgbStd(s1x).toFixed(1)})`,
+      );
+
+      // 3. Zoom to 2x -> non-blank canvas with meaningful RGB variance
+      await tileGuard.clickSelector('#btn-zoom-2x');
+      await tileGuard.waitForCameraSettled();
+      await sleep(260);
+      const s2x = await tileGuard.captureCanvasSample('#diorama-canvas', 64, 36);
+      assert(
+        s2x && s2x.meanLuma > 5 && sampleRgbStd(s2x) > 5,
+        `Canvas blank/flat at 2x zoom (meanLuma=${s2x?.meanLuma?.toFixed(1)}, std=${sampleRgbStd(s2x).toFixed(1)})`,
+      );
+
+      // 4. Zoom to 4x -> non-blank canvas with meaningful RGB variance
+      await tileGuard.clickSelector('#btn-zoom-4x');
+      await tileGuard.waitForCameraSettled();
+      await sleep(260);
+      const s4x = await tileGuard.captureCanvasSample('#diorama-canvas', 64, 36);
+      assert(
+        s4x && s4x.meanLuma > 5 && sampleRgbStd(s4x) > 5,
+        `Canvas blank/flat at 4x zoom (meanLuma=${s4x?.meanLuma?.toFixed(1)}, std=${sampleRgbStd(s4x).toFixed(1)})`,
+      );
+
+      assert(tileGuard.exceptions.length === 0, `JS exceptions during tile-streaming zoom: ${tileGuard.exceptions.join('; ')}`);
+      assert(tileGuard.consoleErrors.length === 0, `console.error during tile-streaming zoom: ${tileGuard.consoleErrors.join('; ')}`);
+      assert(
+        tileGuard.localHttpErrors.length === 0,
+        `Local HTTP errors during tile-streaming zoom: ${tileGuard.localHttpErrors.map((e) => `${e.status} ${e.url}`).join('; ')}`,
+      );
+    });
+  } finally {
+    await harness.closeTab(tileGuard);
   }
 
   // ── Tab 4: Spatial Audio boundary & attenuation invariants (FA4: 5 tests) ──

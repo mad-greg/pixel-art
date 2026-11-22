@@ -16,6 +16,7 @@
 """
 
 from __future__ import annotations
+import gc as _gc
 import json
 import math
 from dataclasses import dataclass
@@ -63,6 +64,9 @@ from .extract_scene import (
     GRID_W,
 )
 
+ORTHO10_RES = 0.10
+ORTHO10_W = int(round((E_MAX - E_MIN) / ORTHO10_RES))
+ORTHO10_H = int(round((N_MAX - N_MIN) / ORTHO10_RES))
 ORTHO25_RES = 0.25
 ORTHO25_W = int(round((E_MAX - E_MIN) / ORTHO25_RES))
 ORTHO25_H = int(round((N_MAX - N_MIN) / ORTHO25_RES))
@@ -118,8 +122,8 @@ PRESETS: dict[str, LightingPreset] = {
         name="90s SVGA Crisp Alpine Midday",
         sun_az_deg=124.0,
         sun_alt_deg=43.0,
-        sun_rgb=(1.04, 1.00, 0.94),
-        amb_rgb=(0.53, 0.56, 0.62),
+        sun_rgb=(1.08, 1.02, 0.92),
+        amb_rgb=(0.48, 0.54, 0.65),
         sky_top_rgb=(24, 34, 52),
         sky_bot_rgb=(38, 52, 74),
         is_night=False,
@@ -427,12 +431,18 @@ def quantize_to_90s_palette(
 ) -> np.ndarray:
     """Apply ordered 4x4 Bayer dithering and quantize strictly into the curated per-preset 256-color SVGA CLUT."""
     pal, lut = build_90s_palette_and_lut(preset_key)
-    dithered = np.clip(rgb_float + bayer_2d[:, :, None] * strength, 0.0, 255.0)
-    ri = np.round(dithered[:, :, 0] * (63.0 / 255.0)).astype(np.int32)
-    gi = np.round(dithered[:, :, 1] * (63.0 / 255.0)).astype(np.int32)
-    bi = np.round(dithered[:, :, 2] * (63.0 / 255.0)).astype(np.int32)
-    idx = lut[ri, gi, bi]
-    return pal[idx]
+    H_q, W_q, _ = rgb_float.shape
+    out = np.empty((H_q, W_q, 3), dtype=np.uint8)
+    s_fac = np.float32(63.0 / 255.0)
+    step = 512
+    for y0 in range(0, H_q, step):
+        y1 = min(H_q, y0 + step)
+        dithered = np.clip(rgb_float[y0:y1] + bayer_2d[y0:y1, :, None] * strength, 0.0, 255.0)
+        ri = np.round(dithered[:, :, 0] * s_fac).astype(np.int32)
+        gi = np.round(dithered[:, :, 1] * s_fac).astype(np.int32)
+        bi = np.round(dithered[:, :, 2] * s_fac).astype(np.int32)
+        out[y0:y1] = pal[lut[ri, gi, bi]]
+    return out
 
 
 class SceneData:
@@ -482,14 +492,26 @@ class SceneData:
         s.close()
         del s
 
-        # F14a: Per-tree distance to Lake Zurich for weeping lakeside willows (free temporary EDT immediately!)
+        # F14a + v10: Per-tree lake distance & true in-lake shoreline distance (stored as float16 ~50 MB)
         dist_lake_05m = ndimage.distance_transform_edt(~self.lake_mask).astype(np.float32) * GRID_RES
         tc_t = np.clip(((self.tree_e - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
         tr_t = np.clip(((N_MAX - self.tree_n) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
         self.tree_dist_lake = dist_lake_05m[tr_t, tc_t].astype(np.float32)
         del dist_lake_05m
+        self.dist_shore_05m = (ndimage.distance_transform_edt(self.lake_mask).astype(np.float32) * GRID_RES).astype(np.float16)
 
-        self.ortho_25cm = np.load(cache_dir / "ortho_25cm.npy", mmap_mode="r")
+        ortho10_p = cache_dir / "ortho_10cm.npy"
+        if ortho10_p.exists():
+            self.ortho_hr = np.load(ortho10_p, mmap_mode="r")
+            self.ortho_res = ORTHO10_RES
+            self.ortho_w = ORTHO10_W
+            self.ortho_h = ORTHO10_H
+        else:
+            self.ortho_hr = np.load(cache_dir / "ortho_25cm.npy", mmap_mode="r")
+            self.ortho_res = ORTHO25_RES
+            self.ortho_w = ORTHO25_W
+            self.ortho_h = ORTHO25_H
+        self.ortho_25cm = self.ortho_hr
         self.roof_edge_25cm = np.load(cache_dir / "roof_edge_step_25cm.npy", mmap_mode="r")
         raw_rmask = np.load(cache_dir / "bldg_roof_mask_05m.npy")
         self.bldg_roof_mask = ndimage.binary_dilation(raw_rmask, iterations=2)
@@ -537,7 +559,6 @@ class SceneData:
         o_r = ortho_05m[:, :, 0].astype(np.float32)
         o_g = ortho_05m[:, :, 1].astype(np.float32)
         o_b = ortho_05m[:, :, 2].astype(np.float32)
-        del ortho_05m
         lum05 = 0.299 * o_r + 0.587 * o_g + 0.114 * o_b
         chroma05 = np.maximum(np.maximum(o_r, o_g), o_b) - np.minimum(np.minimum(o_r, o_g), o_b)
         green_excess05 = o_g - 0.5 * (o_r + o_b)
@@ -658,9 +679,9 @@ class SceneData:
         self.bldg_sunlit_roof_rgb = np.array([b_item["roof_rgb"] for b_item in self.buildings], dtype=np.float32)
 
         rcent = r_verts.mean(axis=1)
-        rcols = np.clip(((rcent[:, 0] - E_MIN) * (1.0 / ORTHO25_RES)).astype(np.int32), 0, ORTHO25_W - 1)
-        rrows = np.clip(((N_MAX - rcent[:, 1]) * (1.0 / ORTHO25_RES)).astype(np.int32), 0, ORTHO25_H - 1)
-        rgb_tri = np.asarray(self.ortho_25cm[rrows, rcols], dtype=np.float32)
+        rcols = np.clip(((rcent[:, 0] - E_MIN) * (1.0 / GRID_RES)).astype(np.int32), 0, GRID_W - 1)
+        rrows = np.clip(((N_MAX - rcent[:, 1]) * (1.0 / GRID_RES)).astype(np.int32), 0, GRID_H - 1)
+        rgb_tri = np.asarray(ortho_05m[rrows, rcols], dtype=np.float32)
         dot_ortho = r_norms[:, 0] * 0.25 - r_norms[:, 1] * 0.76 + r_norms[:, 2] * 0.60
         lum_tri = 0.299 * rgb_tri[:, 0] + 0.587 * rgb_tri[:, 1] + 0.114 * rgb_tri[:, 2]
         r_zmin = r_verts[:, :, 2].min(axis=1)
@@ -740,9 +761,10 @@ class SceneData:
                 ],
                 axis=1,
             )  # (N_pit, 4, 2)
-            pc4 = np.clip(((pts4[:, :, 0] - E_MIN) * (1.0 / ORTHO25_RES)).astype(np.int32), 0, ORTHO25_W - 1)
-            pr4 = np.clip(((N_MAX - pts4[:, :, 1]) * (1.0 / ORTHO25_RES)).astype(np.int32), 0, ORTHO25_H - 1)
-            rgb4 = np.asarray(self.ortho_25cm[pr4, pc4], dtype=np.float32)  # (N_pit, 4, 3)
+            pc4 = np.clip(((pts4[:, :, 0] - E_MIN) * (1.0 / GRID_RES)).astype(np.int32), 0, GRID_W - 1)
+            pr4 = np.clip(((N_MAX - pts4[:, :, 1]) * (1.0 / GRID_RES)).astype(np.int32), 0, GRID_H - 1)
+            rgb4 = np.asarray(ortho_05m[pr4, pc4], dtype=np.float32)  # (N_pit, 4, 3)
+            del ortho_05m
             lum4 = 0.299 * rgb4[:, :, 0] + 0.587 * rgb4[:, :, 1] + 0.114 * rgb4[:, :, 2]
             not_leaf4 = ~(((rgb4[:, :, 1] - rgb4[:, :, 0]) > 9.0) & ((rgb4[:, :, 1] - rgb4[:, :, 2]) > 7.0))
             lum4_masked = np.where(not_leaf4, lum4, np.nan)
@@ -1013,10 +1035,10 @@ def condition_90s_albedo(
 
 
 def sample_ortho_25cm(scene: SceneData, e_arr: np.ndarray, n_arr: np.ndarray) -> np.ndarray:
-    """Sample exact 25 cm SWISSIMAGE DOP10 RGB at arbitrary world LV95 (E, N) coordinates."""
-    cols = np.clip(((e_arr - E_MIN) * (1.0 / ORTHO25_RES)).astype(np.int32), 0, ORTHO25_W - 1)
-    rows = np.clip(((N_MAX - n_arr) * (1.0 / ORTHO25_RES)).astype(np.int32), 0, ORTHO25_H - 1)
-    return np.asarray(scene.ortho_25cm[rows, cols])
+    """Sample native 10 cm (or 25 cm fallback) SWISSIMAGE DOP10 RGB at arbitrary world LV95 (E, N) coordinates."""
+    cols = np.clip(((e_arr - E_MIN) * (1.0 / scene.ortho_res)).astype(np.int32), 0, scene.ortho_w - 1)
+    rows = np.clip(((N_MAX - n_arr) * (1.0 / scene.ortho_res)).astype(np.int32), 0, scene.ortho_h - 1)
+    return np.asarray(scene.ortho_hr[rows, cols])
 
 
 def sample_roof_edge_25cm(scene: SceneData, e_arr: np.ndarray, n_arr: np.ndarray) -> np.ndarray:
@@ -1024,6 +1046,40 @@ def sample_roof_edge_25cm(scene: SceneData, e_arr: np.ndarray, n_arr: np.ndarray
     cols = np.clip(((e_arr - E_MIN) * (1.0 / ORTHO25_RES)).astype(np.int32), 0, ORTHO25_W - 1)
     rows = np.clip(((N_MAX - n_arr) * (1.0 / ORTHO25_RES)).astype(np.int32), 0, ORTHO25_H - 1)
     return np.asarray(scene.roof_edge_25cm[rows, cols])
+
+
+def _sample_bilinear_05m(
+    arr: np.ndarray,
+    ge: np.ndarray,
+    gn: np.ndarray,
+    r0: int = 0,
+    c0: int = 0,
+    max_jump: float | None = None,
+) -> np.ndarray:
+    """Fast vectorized bilinear interpolation of a 0.5m continuous grid (full or [r0:r1, c0:c1] slice)."""
+    h_a, w_a = arr.shape
+    fc = np.clip((ge - E_MIN) * (1.0 / GRID_RES) - 0.5 - c0, 0.0, float(w_a - 1))
+    fr = np.clip((N_MAX - gn) * (1.0 / GRID_RES) - 0.5 - r0, 0.0, float(h_a - 1))
+    c_lo = np.floor(fc).astype(np.int32)
+    r_lo = np.floor(fr).astype(np.int32)
+    c_hi = np.minimum(c_lo + 1, w_a - 1)
+    r_hi = np.minimum(r_lo + 1, h_a - 1)
+    wc = (fc - c_lo).astype(np.float32)
+    wr = (fr - r_lo).astype(np.float32)
+    v00 = arr[r_lo, c_lo].astype(np.float32)
+    v01 = arr[r_lo, c_hi].astype(np.float32)
+    v10 = arr[r_hi, c_lo].astype(np.float32)
+    v11 = arr[r_hi, c_hi].astype(np.float32)
+    out = (v00 * (1.0 - wc) + v01 * wc) * (1.0 - wr) + (v10 * (1.0 - wc) + v11 * wc) * wr
+    if max_jump is not None:
+        v_max = np.maximum(np.maximum(v00, v01), np.maximum(v10, v11))
+        v_min = np.minimum(np.minimum(v00, v01), np.minimum(v10, v11))
+        discont = (v_max - v_min) > max_jump
+        if discont.any():
+            rn = np.clip(np.round(fr[discont]).astype(np.int32), 0, h_a - 1)
+            cn = np.clip(np.round(fc[discont]).astype(np.int32), 0, w_a - 1)
+            out[discont] = arr[rn, cn].astype(np.float32)
+    return out
 
 
 def compute_shadow_grid(
@@ -1394,9 +1450,14 @@ def compute_full_canvas_geometry(
     px1, py1, _ = camera.project(ae[::8], an[::8], sub_dem_global[ar[::8], ac[::8]] + 48.0)
     px2, py2, _ = camera.project(ae[::8], an[::8], np.full(len(ae[::8]), plinth_z - 6.0))
 
-    pad_x = 96 if add_frame else 28
-    pad_top = 132 if add_frame else 28
-    pad_bot = 156 if add_frame else 32
+    if camera.mpp <= 0.18:
+        pad_x = 192 if add_frame else 56
+        pad_top = 264 if add_frame else 56
+        pad_bot = 312 if add_frame else 64
+    else:
+        pad_x = 96 if add_frame else 28
+        pad_top = 132 if add_frame else 28
+        pad_bot = 156 if add_frame else 32
 
     min_x, max_x = float(min(px1.min(), px2.min())), float(max(px1.max(), px2.max()))
     min_y, max_y = float(min(py1.min(), py2.min())), float(max(py1.max(), py2.max()))
@@ -1428,8 +1489,10 @@ def _shade_drawn_ground_90s(
     gnz: np.ndarray,
     sub_chm_val: np.ndarray,
     preset_key: str = "day",
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """V6.0 Museum-Grade 90s Pixel-Art Ground Shader:
+    mpp: float = 0.25,
+    dist_lake: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """V6.0/v10 Museum-Grade 90s Pixel-Art Ground Shader:
     - Organic wildflower Swiss alpine meadows & lush manicured residential garden lawns (ZERO fake mowing stripes,
       ZERO dirty grey concrete soup in shaded yards!)
     - Exact vector FIFA regulation football pitches (alternating mown turf + crisp white markings)
@@ -1439,21 +1502,26 @@ def _shade_drawn_ground_90s(
     n_pts = len(ge)
     gcol = np.empty((n_pts, 3), dtype=np.float32)
     gmat = np.full(n_pts, M_GROUND, dtype=np.uint8)
+    g_seebad_pool = np.zeros(n_pts, dtype=np.bool_)
     ro = raw_ortho.astype(np.float32)
     lum = 0.299 * ro[:, 0] + 0.587 * ro[:, 1] + 0.114 * ro[:, 2]
 
-    # Deterministic pixel-art micro-pattern coordinates (0.25m & 0.5m)
-    ix25 = np.floor((ge - E_MIN) * 4.0).astype(np.int32)
-    iy25 = np.floor((gn - N_MIN) * 4.0).astype(np.int32)
-    ix50 = ix25 >> 1
-    iy50 = iy25 >> 1
+    # Deterministic pixel-art micro-pattern coordinates scaled to 1px at camera.mpp!
+    tex_scale = 1.0 / max(0.08, float(mpp))
+    ix25 = np.floor((ge - E_MIN) * tex_scale).astype(np.int32)
+    iy25 = np.floor((gn - N_MIN) * tex_scale).astype(np.int32)
+    ix50 = np.floor((ge - E_MIN) * 2.0).astype(np.int32)
+    iy50 = np.floor((gn - N_MIN) * 2.0).astype(np.int32)
     p_hash = ((ix25 * 73856093) ^ (iy25 * 19349663)) & 0xFF
     h50 = ((ix50 * 83492791) ^ (iy50 * 40503)) & 0xFF
     wf_hash = ((ix25 * 19349663) ^ (iy25 * 83492791) ^ 0x5A3C) & 0x3FF
 
     c05 = np.clip(((ge - E_MIN) * 2.0).astype(np.int32), 0, GRID_W - 1)
     r05 = np.clip(((N_MAX - gn) * 2.0).astype(np.int32), 0, GRID_H - 1)
-    m_noise = scene.meadow_noise_05m[r05, c05].astype(np.float32)
+    if mpp <= 0.18:
+        m_noise = _sample_bilinear_05m(scene.meadow_noise_05m, ge, gn)
+    else:
+        m_noise = scene.meadow_noise_05m[r05, c05].astype(np.float32)
     is_pave = scene.yard_pave_mask_05m[r05, c05]
     is_pool_rim = scene.pool_rim_05m[r05, c05]
 
@@ -2050,14 +2118,20 @@ def _shade_drawn_ground_90s(
     # 12. Crisp Swimming Pools (G_POOL) with white Jura-stone coping rim & Seebad swimming lanes!
     if is_pool_rim.any():
         gcol[is_pool_rim] = [220.0, 218.0, 212.0]
-        gz[is_pool_rim] += 0.14
+        sb_rim = is_pool_rim & (ge >= 2684235.0) & (ge <= 2684310.0) & (gn >= 1241435.0) & (gn <= 1241525.0)
+        if sb_rim.any():
+            gz[sb_rim] = np.minimum(gz[sb_rim], 405.85)
+        gz[is_pool_rim] += 0.04
+        gnx[is_pool_rim], gny[is_pool_rim], gnz[is_pool_rim] = 0.0, 0.0, 1.0
     is_pool = gsem == G_POOL
     if is_pool.any():
         p_i = np.nonzero(is_pool)[0]
         shimmer = ((ix25[p_i] + iy25[p_i]) & 3) == 0
         in_seebad = (ge[p_i] >= 2684235.0) & (ge[p_i] <= 2684310.0) & (gn[p_i] >= 1241435.0) & (gn[p_i] <= 1241525.0)
+        if in_seebad.any():
+            g_seebad_pool[p_i[in_seebad]] = True
         if preset_key == "night":
-            # F7: Darken all 55 private pools to calm nocturnal slate-navy; tasteful turquoise underwater glow at Seebad ONLY!
+            # F7 + v10: Darken all 55 private pools to calm nocturnal slate-navy; exact tagged Seebad pool glow ONLY!
             pcol = np.where(shimmer[:, None], [24.0, 48.0, 68.0], [18.0, 36.0, 54.0]).astype(np.float32)
             if in_seebad.any():
                 sb_c = np.where(shimmer[in_seebad, None], [48.0, 126.0, 146.0], [32.0, 92.0, 114.0]).astype(np.float32)
@@ -2077,7 +2151,7 @@ def _shade_drawn_ground_90s(
         gcol[p_i] = pcol
         gnx[p_i], gny[p_i], gnz[p_i] = 0.0, 0.0, 1.0
 
-    # 13. F9: Master-Crafted Pixel-Art Lake Zurich (bathymetry + pebble caustics + isometric wavelets + shore/pier foam curls!)
+    # 13. F9 + v10: Master-Crafted 90s SVGA Lake Zurich (4-band bilinear bathymetry + Bayer 4x4 transitions + crisp isometric wavelets + smooth bilinear foam!)
     if glake.any():
         li = np.nonzero(glake)[0]
         is_real_harbor_obj = gharbor[li]
@@ -2085,12 +2159,34 @@ def _shade_drawn_ground_90s(
         wi = li[~is_real_harbor_obj]
         if len(wi) > 0:
             depth_m = np.clip(LAKE_SURFACE_Z - gbathy[wi], 0.0, 65.0)
-            t_sh = np.clip(depth_m / 6.0, 0.0, 1.0)[:, None]
-            t_dp = np.clip((depth_m - 6.0) / 30.0, 0.0, 1.0)[:, None]
-            mid_w = np.array([38.0, 96.0, 110.0], dtype=np.float32) if preset_key == "day" else np.array([34.0, 86.0, 100.0], dtype=np.float32)
-            deep_w = np.array([32.0, 84.0, 108.0], dtype=np.float32) if preset_key == "day" else np.array([18.0, 52.0, 80.0], dtype=np.float32)
-            w_col = (1.0 - t_sh) * np.array([64.0, 126.0, 112.0], dtype=np.float32) + t_sh * (
-                (1.0 - t_dp) * mid_w + t_dp * deep_w
+            bayer_w = BAYER_4X4[iy25[wi] & 3, ix25[wi] & 3]
+            d_dith = np.clip(depth_m + bayer_w * 0.85, 0.0, 65.0)
+            if preset_key == "day":
+                c_b0 = np.array([68.0, 136.0, 118.0], dtype=np.float32)  # Sunlit turquoise-emerald pebble shallows
+                c_b1 = np.array([46.0, 112.0, 116.0], dtype=np.float32)  # Jade mid-shelf
+                c_b2 = np.array([36.0, 92.0, 112.0], dtype=np.float32)   # Alpine teal
+                c_b3 = np.array([28.0, 76.0, 108.0], dtype=np.float32)   # Deep sapphire
+            elif preset_key == "sunset":
+                c_b0 = np.array([62.0, 118.0, 106.0], dtype=np.float32)
+                c_b1 = np.array([40.0, 96.0, 104.0], dtype=np.float32)
+                c_b2 = np.array([32.0, 88.0, 108.0], dtype=np.float32)
+                c_b3 = np.array([20.0, 72.0, 102.0], dtype=np.float32)
+            else:
+                c_b0 = np.array([46.0, 96.0, 94.0], dtype=np.float32)
+                c_b1 = np.array([30.0, 74.0, 90.0], dtype=np.float32)
+                c_b2 = np.array([20.0, 56.0, 80.0], dtype=np.float32)
+                c_b3 = np.array([14.0, 42.0, 68.0], dtype=np.float32)
+            t01 = np.clip(d_dith / 3.0, 0.0, 1.0)[:, None]
+            t12 = np.clip((d_dith - 3.0) / 7.5, 0.0, 1.0)[:, None]
+            t23 = np.clip((d_dith - 10.5) / 26.0, 0.0, 1.0)[:, None]
+            w_col = np.where(
+                d_dith[:, None] < 3.0,
+                (1.0 - t01) * c_b0 + t01 * c_b1,
+                np.where(
+                    d_dith[:, None] < 10.5,
+                    (1.0 - t12) * c_b1 + t12 * c_b2,
+                    (1.0 - t23) * c_b2 + t23 * c_b3,
+                ),
             )
             # Clamp shallow ortho redness so zero winter shoreline reed tint ever leaks into shallow water!
             shallow_tint = np.clip((4.5 - depth_m) / 4.5, 0.0, 1.0)[:, None] * 0.14
@@ -2122,25 +2218,30 @@ def _shade_drawn_ground_90s(
             w_hash = ((col_id * 73856093) ^ (row_id * 19349663)) & 0xFF
             v_frac = (v_iso * 0.75) % 1.0
             dash_u = u_stag % 1.0
-            in_dash = v_frac < 0.26
-            crest = in_dash & (w_hash < 28) & (dash_u >= 0.15) & (dash_u <= 0.72) & (depth_m >= 0.65)
-            trough = (v_frac >= 0.26) & (v_frac < 0.46) & (w_hash < 28) & (dash_u >= 0.20) & (dash_u <= 0.68) & (depth_m >= 0.65)
-            # Ripple crests mirror a hint of the overcast-blue sky (Fresnel) and troughs sit slightly deeper;
-            # both stay close to the lake body colour so open water reads as one calm surface with
-            # no detached bright/dark speckle islands.
+            in_dash = v_frac < 0.24
+            crest = in_dash & (w_hash < 34) & (dash_u >= 0.14) & (dash_u <= 0.74) & (depth_m >= 0.65)
+            trough = (v_frac >= 0.24) & (v_frac < 0.44) & (w_hash < 34) & (dash_u >= 0.18) & (dash_u <= 0.70) & (depth_m >= 0.65)
             crest_sky = (
-                np.array([22.0, 34.0, 56.0], dtype=np.float32)
+                np.array([26.0, 40.0, 64.0], dtype=np.float32)
                 if preset_key == "night"
-                else (np.array([52.0, 96.0, 122.0], dtype=np.float32) if preset_key == "day" else np.array([40.0, 60.0, 82.0], dtype=np.float32))
+                else (np.array([66.0, 118.0, 142.0], dtype=np.float32) if preset_key == "day" else np.array([56.0, 74.0, 96.0], dtype=np.float32))
             )
-            w_col[crest] = 0.72 * w_col[crest] + 0.28 * crest_sky
-            w_col[trough] *= 0.94
+            w_col[crest] = 0.64 * w_col[crest] + 0.36 * crest_sky
+            w_col[trough] *= 0.90
 
-            # Crisp 1-2px organic broken shore & pier foam curls
+            # Crisp 1-2px organic broken shore & pier foam curls (bilinear distance field at <=0.18 m/px!)
             r05_w = r05[wi]
             c05_w = c05[wi]
-            f1 = scene.foam_ring1_05m[r05_w, c05_w] & (np.sin(u_iso * 0.65 + v_iso * 0.45) > -0.35)
-            f2 = scene.foam_ring2_05m[r05_w, c05_w] & (p_hash[wi] < 48) & (np.sin(u_iso * 0.80) > 0.20)
+            if dist_lake is not None:
+                ds_w = dist_lake[wi]
+                # ds_w is true in-lake distance from shore (0 on land, smoothly >0 in water); combine with pier foam
+                f1 = (((ds_w > 0.0) & (ds_w <= 0.55)) | (scene.foam_ring1_05m[r05_w, c05_w] & (ds_w > 0.65))) & (
+                    np.sin(u_iso * 0.65 + v_iso * 0.45) > -0.35
+                )
+                f2 = (scene.foam_ring2_05m[r05_w, c05_w] & (p_hash[wi] < 54) & (np.sin(u_iso * 0.80) > 0.18))
+            else:
+                f1 = scene.foam_ring1_05m[r05_w, c05_w] & (np.sin(u_iso * 0.65 + v_iso * 0.45) > -0.35)
+                f2 = scene.foam_ring2_05m[r05_w, c05_w] & (p_hash[wi] < 48) & (np.sin(u_iso * 0.80) > 0.20)
             if f1.any():
                 w_col[f1] = 0.45 * w_col[f1] + 0.55 * np.array([218.0, 240.0, 236.0], dtype=np.float32)
             if f2.any():
@@ -2172,7 +2273,7 @@ def _shade_drawn_ground_90s(
             gmat[bi_h] = M_HARBOR_OBJ
             gnx[bi_h], gny[bi_h], gnz[bi_h] = 0.15, -0.15, 0.97
 
-    return gcol, gmat, gz
+    return gcol, gmat, gz, g_seebad_pool
 
 
 def _draw_3d_box_column(
@@ -2199,7 +2300,7 @@ def _draw_3d_box_column(
     """Rasterize a crisp vertical 3D rectangular pillar/mast (viaduct pier or SBB catenary mast)."""
     if z_top <= z_bot + 0.1:
         return
-    step_z = max(0.22, camera.mpp * 0.52)
+    step_z = max(0.06, camera.mpp * 0.52)
     zs = np.arange(z_bot, z_top + 0.05, step_z, dtype=np.float32)
     if len(zs) == 0:
         return
@@ -2299,27 +2400,42 @@ def _render_elevated_bridges_and_rail_portals(
         be05 = E_MIN + (bc05 + c0 + 0.5) * GRID_RES
         bn05 = N_MAX - (br05 + r0 + 0.5) * GRID_RES
 
-        # Sub-sample to 0.25m for silky-smooth curves along the Dorfstrasse horseshoe viaduct!
-        if camera.mpp <= 0.36:
+        # Sub-sample to 0.125m (4x4) at <=0.16 m/px or 0.25m (2x2) at <=0.36 m/px for silky-smooth viaduct curves!
+        if camera.mpp <= 0.16:
+            offs_b = (-0.1875, -0.0625, 0.0625, 0.1875)
+            br = np.tile(br05, 16)
+            bc = np.tile(bc05, 16)
+            be = np.concatenate([be05 + de for de in offs_b for _ in offs_b])
+            bn = np.concatenate([bn05 + dn for _ in offs_b for dn in offs_b])
+            bz = _sample_bilinear_05m(sub_bz, be, bn, r0=r0, c0=c0, max_jump=2.5)
+            bsdist = _sample_bilinear_05m(sub_bsdist, be, bn, r0=r0, c0=c0, max_jump=3.0)
+            balong = _sample_bilinear_05m(sub_balong, be, bn, r0=r0, c0=c0, max_jump=3.0)
+            bhw = _sample_bilinear_05m(sub_bhw, be, bn, r0=r0, c0=c0, max_jump=2.0)
+        elif camera.mpp <= 0.36:
             br = np.tile(br05, 4)
             bc = np.tile(bc05, 4)
             be = np.concatenate([be05 - 0.125, be05 + 0.125, be05 - 0.125, be05 + 0.125])
             bn = np.concatenate([bn05 + 0.125, bn05 + 0.125, bn05 - 0.125, bn05 - 0.125])
+            bz = sub_bz[br, bc].copy()
+            bsdist = sub_bsdist[br, bc]
+            balong = sub_balong[br, bc]
+            bhw = sub_bhw[br, bc]
         else:
             br, bc, be, bn = br05, bc05, be05, bn05
+            bz = sub_bz[br, bc].copy()
+            bsdist = sub_bsdist[br, bc]
+            balong = sub_balong[br, bc]
+            bhw = sub_bhw[br, bc]
 
-        bz = sub_bz[br, bc].copy()
         bcls = sub_bcls[br, bc]
-        bsdist = sub_bsdist[br, bc]
-        balong = sub_balong[br, bc]
-        bhw = sub_bhw[br, bc]
         bang = sub_bang[br, bc]
         bid = sub_bid[br, bc].astype(np.int32)
         bsh = sub_shadow[br, bc]
 
         abs_sd = np.abs(bsdist)
-        ix25 = np.floor((be - E_MIN) * 4.0).astype(np.int32)
-        iy25 = np.floor((bn - N_MIN) * 4.0).astype(np.int32)
+        b_tex_s = 1.0 / max(0.08, float(camera.mpp))
+        ix25 = np.floor((be - E_MIN) * b_tex_s).astype(np.int32)
+        iy25 = np.floor((bn - N_MIN) * b_tex_s).astype(np.int32)
         ph = ((ix25 * 73856093) ^ (iy25 * 19349663)) & 0xFF
 
         bcol = np.full((len(be), 3), [90.0, 94.0, 102.0], dtype=np.float32)
@@ -2982,8 +3098,8 @@ def _render_3d_sports_details(
     """STAGE 2.6: Strictly clipped 3D pixel-art sports architecture, enclosures, hoisted parked cars,
     3D sidewalk/viaduct/platform/promenade streetlamps, cemetery stone wall & Swiss micro-props!"""
     mpp = camera.mpp
-    step_l = max(0.18, mpp * 0.65)
-    step_z = max(0.18, mpp * 0.60)
+    step_l = max(0.06, mpp * 0.65)
+    step_z = max(0.06, mpp * 0.60)
     amask = active_mask if active_mask is not None else scene.diorama_mask
 
     def _in_active_world(es_arr: np.ndarray, ns_arr: np.ndarray) -> np.ndarray:
@@ -3798,7 +3914,7 @@ def _render_3d_harbor_and_boats(
     shadows, all 40 clean open-water moored boats (sailboats & Boesch wooden motorboats), and Seebad beach props!"""
     amask = active_mask if active_mask is not None else scene.diorama_mask
     mpp = camera.mpp
-    step_l = max(0.18, mpp * 0.65)
+    step_l = max(0.06, mpp * 0.65)
 
     def _draw_harbor_seg(e0, n0, z0, e1, n1, z1, col, mat_c=M_HARBOR_OBJ, oid=255100, thick=False):
         dist = math.sqrt((e1 - e0) ** 2 + (n1 - n0) ** 2 + (z1 - z0) ** 2)
@@ -4440,12 +4556,20 @@ def _render_sculpted_pixel_art_trees_and_hedges(
     # -------------------------------------------------------------------------
     sub_hedge = sub_mask & scene.hedge_mask[r0:r1, c0:c1]
     if sub_hedge.any():
-        hr, hc = np.nonzero(sub_hedge)
-        he = E_MIN + (hc + c0 + 0.5) * GRID_RES
-        hn = N_MAX - (hr + r0 + 0.5) * GRID_RES
+        hr0, hc0 = np.nonzero(sub_hedge)
+        he0 = E_MIN + (hc0 + c0 + 0.5) * GRID_RES
+        hn0 = N_MAX - (hr0 + r0 + 0.5) * GRID_RES
+        if camera.mpp <= 0.16:
+            hr = np.tile(hr0, 4)
+            hc = np.tile(hc0, 4)
+            he = np.concatenate([he0 - 0.125, he0 + 0.125, he0 - 0.125, he0 + 0.125])
+            hn = np.concatenate([hn0 + 0.125, hn0 + 0.125, hn0 - 0.125, hn0 - 0.125])
+            h_hash = ((np.floor((he - E_MIN) * 4.0).astype(np.int32) * 73856093) ^ (np.floor((hn - N_MIN) * 4.0).astype(np.int32) * 19349663)) & 0xFF
+        else:
+            hr, hc, he, hn = hr0, hc0, he0, hn0
+            h_hash = (((hc + c0) * 73856093) ^ ((hr + r0) * 19349663)) & 0xFF
         hz_base = sub_dem[hr, hc]
         hh = np.clip(sub_chm[hr, hc], 0.95, 2.05)
-        h_hash = (((hc + c0) * 73856093) ^ ((hr + r0) * 19349663)) & 0xFF
         h_top_col = np.where(
             (h_hash < 72)[:, None],
             [82.0, 134.0, 56.0],
@@ -4459,12 +4583,25 @@ def _render_sculpted_pixel_art_trees_and_hedges(
         h_base_col = h_top_col * 0.54
         h_oid = np.full(len(hr), 190000, dtype=np.int32)
 
-        for frac_z, col_arr, nz_v, rad_offs in (
-            (0.25, h_base_col, 0.55, ((0, 0), (1, 0), (0, 1), (1, 1))),
-            (0.55, h_side_col, 0.70, ((0, 0), (1, 0), (0, 1), (1, 1))),
-            (0.84, h_side_col * 1.12, 0.85, ((0, 0), (1, 0), (0, 1))),
-            (1.00, h_top_col, 0.98, ((0, 0), (1, 0))),
-        ):
+        if camera.mpp <= 0.16:
+            hedge_slices = (
+                (0.15, h_base_col, 0.52, ((0, 0), (1, 0), (0, 1), (1, 1))),
+                (0.30, h_base_col, 0.58, ((0, 0), (1, 0), (0, 1), (1, 1))),
+                (0.45, h_side_col, 0.66, ((0, 0), (1, 0), (0, 1), (1, 1))),
+                (0.60, h_side_col, 0.72, ((0, 0), (1, 0), (0, 1), (1, 1))),
+                (0.73, h_side_col * 1.08, 0.80, ((0, 0), (1, 0), (0, 1), (1, 1))),
+                (0.85, h_side_col * 1.14, 0.86, ((0, 0), (1, 0), (0, 1), (1, 1))),
+                (0.93, h_top_col * 0.94, 0.92, ((0, 0), (1, 0), (0, 1))),
+                (1.00, h_top_col, 0.98, ((0, 0), (1, 0))),
+            )
+        else:
+            hedge_slices = (
+                (0.25, h_base_col, 0.55, ((0, 0), (1, 0), (0, 1), (1, 1))),
+                (0.55, h_side_col, 0.70, ((0, 0), (1, 0), (0, 1), (1, 1))),
+                (0.84, h_side_col * 1.12, 0.85, ((0, 0), (1, 0), (0, 1))),
+                (1.00, h_top_col, 0.98, ((0, 0), (1, 0))),
+            )
+        for frac_z, col_arr, nz_v, rad_offs in hedge_slices:
             zc = hz_base + hh * frac_z
             px, py, pd = camera.project(he, hn, zc)
             ix = np.round(px + shift_x).astype(np.int32)
@@ -4613,10 +4750,11 @@ def _render_sculpted_pixel_art_trees_and_hedges(
             trunk_h_px = max(1.6, h_px * 0.16)
         elif sp_k in (0, 1, 4, 5):
             if is_oak:
-                r_px = max(3.8, (r_m * 1.30 * w_var) / mpp)
-                h_px = max(7.0, min(h_m * z_px_per_m * h_var, r_px * 2.45))
-                crown_ry = max(3.2, min(h_px * 0.42, r_px * 0.80))
-                trunk_h_px = max(2.4, h_px - crown_ry * 1.88)
+                r_px = max(3.8, (r_m * 1.28 * w_var) / mpp)
+                h_px = max(7.0, min(h_m * z_px_per_m * h_var, r_px * 2.65))
+                oak_ry_fac = 0.46 + 0.16 * (((s1 >> 8) & 15) / 15.0)
+                crown_ry = max(3.4, min(h_px * oak_ry_fac, r_px * 0.96))
+                trunk_h_px = max(2.4, h_px - crown_ry * 1.82)
             else:
                 r_px = max(3.4, (r_m * 1.15 * w_var) / mpp)
                 h_px = max(7.5, min(h_m * z_px_per_m * h_var, r_px * 2.75))
@@ -4647,15 +4785,16 @@ def _render_sculpted_pixel_art_trees_and_hedges(
             if apply_sh.any():
                 rgb_buf[sy0 : sy1 + 1, sx0 : sx1 + 1][apply_sh] *= 0.80
 
-        # 1. Crisp timber trunk extending cleanly into the crown interior (ZERO trunk-to-canopy gap!)
+        # 1. Crisp 2-tone timber trunk with root flare extending cleanly into the crown interior!
         crown_bot_y = cy0 - trunk_h_px
         crown_top_y = crown_bot_y - crown_ry * 2.0
         crown_cy = 0.5 * (crown_bot_y + crown_top_y)
 
+        px_s_tr = 0.25 / max(0.08, mpp)
         tx_i = int(round(cx0))
         ty_bot = int(round(cy0)) + 1
         ty_top = int(round(crown_cy))
-        tw_half = 1 if r_px >= 6.8 else 0
+        tw_half = max(1, int(round(1.0 * px_s_tr))) if r_px >= (6.8 * px_s_tr) else (1 if px_s_tr >= 1.5 else 0)
         y_lo_t = max(0, ty_top)
         y_hi_t = min(H - 1, ty_bot)
         x_lo_t = max(0, tx_i - tw_half)
@@ -4666,12 +4805,31 @@ def _render_sculpted_pixel_art_trees_and_hedges(
             w_tr = d_tr < sl_z
             if w_tr.any():
                 sl_z[w_tr] = d_tr
-                bark_c = [176.0, 170.0, 158.0] if (sp_k == 1 and (not is_willow) and (s2 & 3) < 2) else [86.0, 60.0, 40.0]
-                rgb_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = bark_c
+                bark_base = np.array([176.0, 170.0, 158.0] if (sp_k == 1 and (not is_willow) and (s2 & 3) < 2) else [86.0, 60.0, 40.0], dtype=np.float32)
+                if tw_half >= 1:
+                    tw_w = x_hi_t - x_lo_t + 1
+                    th_h = y_hi_t - y_lo_t + 1
+                    bx_rel = np.arange(x_lo_t, x_hi_t + 1, dtype=np.float32) - tx_i
+                    b_shade = np.where(bx_rel < 0, 1.12, np.where(bx_rel > 0, 0.78, 0.96)).astype(np.float32)
+                    b_patch = np.broadcast_to(bark_base[None, None, :] * b_shade[None, :, None], (th_h, tw_w, 3))
+                    rgb_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = b_patch[w_tr]
+                else:
+                    rgb_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = bark_base
                 mat_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = M_TRUNK
                 obj_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = oid
                 norm_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = [0.5, -0.5, 0.35]
                 shadow_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = False
+        # Subtle 1px root flare at tree base when high-res
+        if px_s_tr >= 1.5 and 0 <= ty_bot < H:
+            for fx_off in (-(tw_half + 1), tw_half + 1):
+                fx_p = tx_i + fx_off
+                if 0 <= fx_p < W and (d0 + 0.16) < zbuf[ty_bot, fx_p]:
+                    zbuf[ty_bot, fx_p] = d0 + 0.16
+                    rgb_buf[ty_bot, fx_p] = [74.0, 52.0, 34.0]
+                    mat_buf[ty_bot, fx_p] = M_TRUNK
+                    obj_buf[ty_bot, fx_p] = oid
+                    norm_buf[ty_bot, fx_p] = [0.4, -0.4, 0.5]
+                    shadow_buf[ty_bot, fx_p] = False
 
         # 2. Compute tight screen bounding box for sculpted 3D crown
         pad_x = int(math.ceil(r_px * 1.38)) + 2
@@ -4699,8 +4857,13 @@ def _render_sculpted_pixel_art_trees_and_hedges(
 
         ix = gx.astype(np.uint32)
         iy = gy.astype(np.uint32)
-        cx2 = ix >> np.uint32(1)
-        cy2 = iy >> np.uint32(1)
+        if mpp <= 0.16:
+            # Multi-scale 3x3 macro leaf-cluster lobes + 1x1 sunlit leaf-tip dither at 2x resolution
+            cx2 = ix // np.uint32(3)
+            cy2 = iy // np.uint32(3)
+        else:
+            cx2 = ix >> np.uint32(1)
+            cy2 = iy >> np.uint32(1)
         h2 = cx2 * np.uint32(374761393) + cy2 * np.uint32(668265263) + np.uint32((tid * 1442695041) & 0xFFFFFFFF)
         h2 = (h2 ^ (h2 >> np.uint32(13))) * np.uint32(1274126177)
         h2 = h2 ^ (h2 >> np.uint32(16))
@@ -4806,22 +4969,24 @@ def _render_sculpted_pixel_art_trees_and_hedges(
             asym = ((((s2 >> 6) & 15) / 15.0) - 0.5) * 0.26 * r_px
 
             if is_oak:
-                # 2. WIDE-SPREADING SWISS OAK / BEECH: 11 asymmetric bough clusters, broad sunlit cap!
+                # 2. ORGANIC SWISS OAK / BEECH: 13 asymmetric bough clusters + upper crown tuft (zero umbrella dome!)
                 lobes = (
-                    (asym * 0.6 + jx1 * 0.3, -0.38 * crown_ry + jy1 * 0.4, 0.54 * r_px, 0.44 * crown_ry),
-                    (-0.46 * r_px + jx2 * 0.4, -0.32 * crown_ry + jy2 * 0.4, 0.46 * r_px, 0.40 * crown_ry),
-                    (0.46 * r_px + jx1 * 0.4, -0.28 * crown_ry - jy1 * 0.4, 0.46 * r_px, 0.40 * crown_ry),
-                    (-0.72 * r_px + jx1 * 0.3, 0.04 * crown_ry + jy2 * 0.4, 0.44 * r_px, 0.40 * crown_ry),
-                    (0.70 * r_px - jx2 * 0.3, 0.08 * crown_ry + jy1 * 0.4, 0.44 * r_px, 0.40 * crown_ry),
-                    (-0.28 * r_px + asym * 0.3, -0.06 * crown_ry, 0.52 * r_px, 0.46 * crown_ry),
-                    (0.28 * r_px + asym * 0.3, -0.04 * crown_ry, 0.52 * r_px, 0.46 * crown_ry),
-                    (-0.48 * r_px + jx2 * 0.3, 0.34 * crown_ry, 0.44 * r_px, 0.38 * crown_ry),
-                    (0.48 * r_px + jx1 * 0.3, 0.32 * crown_ry, 0.44 * r_px, 0.38 * crown_ry),
-                    (-0.14 * r_px, 0.46 * crown_ry + jy2 * 0.25, 0.46 * r_px, 0.38 * crown_ry),
-                    (0.18 * r_px, 0.44 * crown_ry + jy1 * 0.25, 0.44 * r_px, 0.38 * crown_ry),
+                    (asym * 0.7 + jx1 * 0.4, -0.58 * crown_ry + jy1 * 0.3, 0.42 * r_px, 0.36 * crown_ry),
+                    (asym * 0.5 + jx1 * 0.3, -0.36 * crown_ry + jy1 * 0.4, 0.50 * r_px, 0.42 * crown_ry),
+                    (-0.48 * r_px + jx2 * 0.45, -0.32 * crown_ry + jy2 * 0.4, 0.44 * r_px, 0.38 * crown_ry),
+                    (0.46 * r_px + jx1 * 0.45, -0.26 * crown_ry - jy1 * 0.4, 0.44 * r_px, 0.38 * crown_ry),
+                    (-0.74 * r_px + jx1 * 0.35, 0.02 * crown_ry + jy2 * 0.4, 0.42 * r_px, 0.38 * crown_ry),
+                    (0.72 * r_px - jx2 * 0.35, 0.10 * crown_ry + jy1 * 0.4, 0.42 * r_px, 0.38 * crown_ry),
+                    (-0.28 * r_px + asym * 0.3, -0.06 * crown_ry, 0.50 * r_px, 0.44 * crown_ry),
+                    (0.28 * r_px + asym * 0.3, -0.02 * crown_ry, 0.50 * r_px, 0.44 * crown_ry),
+                    (-0.56 * r_px + jx2 * 0.3, 0.28 * crown_ry + jy1 * 0.25, 0.42 * r_px, 0.36 * crown_ry),
+                    (0.54 * r_px + jx1 * 0.3, 0.30 * crown_ry - jy2 * 0.25, 0.42 * r_px, 0.36 * crown_ry),
+                    (-0.14 * r_px, 0.44 * crown_ry + jy2 * 0.25, 0.44 * r_px, 0.36 * crown_ry),
+                    (0.18 * r_px, 0.42 * crown_ry + jy1 * 0.25, 0.44 * r_px, 0.36 * crown_ry),
+                    (asym * 0.85, -0.44 * crown_ry - jy2 * 0.3, 0.38 * r_px, 0.34 * crown_ry),
                 )
-                n_upper, n_lower_start = 3, 7
-                bias_hi, bias_lo = 0.16, -0.20
+                n_upper, n_lower_start = 4, 8
+                bias_hi, bias_lo = 0.18, -0.22
                 rim_thresh = 0.14 + clump_2x2 * 0.24 + micro_1x1 * 0.14
             else:
                 # 3. AIRY MULTI-CLUSTER BIRCH / LINDEN / ORCHARD / BLOSSOM: 9 dappled leaf puffs seated naturally atop trunk!
@@ -5008,9 +5173,10 @@ def render_diorama(
     sx_p, sy_p, _ = camera.project(se, sn, np.full_like(se, plinth_z - 11.0))
     ix_s = np.round(sx_p + shift_x).astype(np.int32)
     iy_s = np.round(sy_p + shift_y).astype(np.int32)
-    vs = (ix_s >= 1) & (ix_s < W - 3) & (iy_s >= 1) & (iy_s < H - 3)
+    sh_r_max = max(1, int(round(2.0 * (0.25 / max(0.08, camera.mpp))))) if camera.mpp <= 0.36 else 1
+    vs = (ix_s >= 1) & (ix_s < W - sh_r_max - 1) & (iy_s >= 1) & (iy_s < H - sh_r_max - 1)
     ix_s, iy_s = ix_s[vs], iy_s[vs]
-    sh_rad = (0, 1, 2) if camera.mpp <= 0.36 else (0, 1)
+    sh_rad = tuple(range(sh_r_max + 1))
     for ox in sh_rad:
         for oy in sh_rad:
             rgb_buf[iy_s + oy, ix_s + ox] = bg_grad[iy_s + oy, :] * 0.58
@@ -5041,19 +5207,21 @@ def render_diorama(
         p_lake, p_bathy = p_lake[keep_p], p_bathy[keep_p]
         pnx, pny = pnx[keep_p], pny[keep_p]
 
-    # 2x horizontal tangent sub-sampling at <=0.36 m/px eliminates vertical column moire!
+    # Scaled horizontal tangent sub-sampling at <=0.36 m/px eliminates vertical column moire!
     if camera.mpp <= 0.36 and len(pe) > 0:
-        tx_p = -pny * 0.125
-        ty_p = pnx * 0.125
-        pe = np.concatenate([pe - tx_p, pe + tx_p])
-        pn = np.concatenate([pn - ty_p, pn + ty_p])
-        pz_top = np.tile(pz_top, 2)
-        p_lake = np.tile(p_lake, 2)
-        p_bathy = np.tile(p_bathy, 2)
-        pnx = np.tile(pnx, 2)
-        pny = np.tile(pny, 2)
+        n_tan = max(2, int(round(0.50 / max(0.08, camera.mpp))))
+        tan_offs = np.linspace(-0.25 * (1.0 - 1.0 / n_tan), 0.25 * (1.0 - 1.0 / n_tan), n_tan)
+        tx_u = -pny
+        ty_u = pnx
+        pe = np.concatenate([pe + tx_u * off for off in tan_offs])
+        pn = np.concatenate([pn + ty_u * off for off in tan_offs])
+        pz_top = np.tile(pz_top, n_tan)
+        p_lake = np.tile(p_lake, n_tan)
+        p_bathy = np.tile(p_bathy, n_tan)
+        pnx = np.tile(pnx, n_tan)
+        pny = np.tile(pny, n_tan)
 
-    dz_step = max(0.20, camera.mpp * 0.45)
+    dz_step = max(0.08, camera.mpp * 0.45)
     max_col_h = float((pz_top - plinth_z).max()) if len(pz_top) else 0.0
     n_zsteps = max(2, int(math.ceil(max_col_h / dz_step)) + 1)
     cut_ox_list = (0, 1)
@@ -5186,156 +5354,194 @@ def render_diorama(
                 norm_buf[ty[win], tx[win], 1] = cny_v[win]
                 norm_buf[ty[win], tx[win], 2] = 0.12
 
+    # Free all Stage 1 full-municipality intermediates (~700-850 MiB Anon) before Stage 2
+    del glob_m, ar_g, ac_g, sr_idx, sc_idx, se, sn, sx_p, sy_p, ix_s, iy_s, vs
+    del eroded_m, perim, sm_f, dm_drow, dm_dcol, out_nx, out_ny
+    del pr, pc, pe, pn, pz_top, p_lake, p_bathy, pnx, pny
+    _gc.collect()
+
     # -------------------------------------------------------------------------
     # STAGE 2: 100% Drawn 90s Pixel-Art Ground, Fields, Streets, Crosswalks & SBB Rail!
     # -------------------------------------------------------------------------
-    ground_sub_res = 0.25 if camera.mpp <= 0.36 else 0.50
+    ground_sub_res = 0.125 if camera.mpp <= 0.16 else (0.25 if camera.mpp <= 0.36 else 0.50)
     if sub_mask.any():
         gr05, gc05 = np.nonzero(sub_mask)
         ge05 = E_MIN + (gc05 + c0 + 0.5) * GRID_RES
         gn05 = N_MAX - (gr05 + r0 + 0.5) * GRID_RES
         px05, py05, _ = camera.project(ge05, gn05, sub_dem[gr05, gc05])
         in_w05 = (
-            ((px05 + shift_x) >= -8.0)
-            & ((px05 + shift_x) <= (W + 8.0))
-            & ((py05 + shift_y) >= -24.0)
-            & ((py05 + shift_y) <= (H + 12.0))
+            ((px05 + shift_x) >= -12.0)
+            & ((px05 + shift_x) <= (W + 12.0))
+            & ((py05 + shift_y) >= -36.0)
+            & ((py05 + shift_y) <= (H + 18.0))
         )
         gr05, gc05 = gr05[in_w05], gc05[in_w05]
         ge05, gn05 = ge05[in_w05], gn05[in_w05]
 
         if len(gr05) > 0:
-            if ground_sub_res == 0.25:
-                gr = np.tile(gr05, 4)
-                gc = np.tile(gc05, 4)
-                ge = np.concatenate([ge05 - 0.125, ge05 + 0.125, ge05 - 0.125, ge05 + 0.125])
-                gn = np.concatenate([gn05 + 0.125, gn05 + 0.125, gn05 - 0.125, gn05 - 0.125])
-            else:
-                gr, gc, ge, gn = gr05, gc05, ge05, gn05
-        else:
-            gr = gc = np.empty(0, dtype=np.int32)
-            ge = gn = np.empty(0, dtype=np.float64)
+            chunk_05 = 32768 if ground_sub_res == 0.125 else 131072
+            for chunk_idx, g_off in enumerate(range(0, len(gr05), chunk_05)):
+                gr05_c = gr05[g_off : g_off + chunk_05]
+                gc05_c = gc05[g_off : g_off + chunk_05]
+                ge05_c = ge05[g_off : g_off + chunk_05]
+                gn05_c = gn05[g_off : g_off + chunk_05]
+                if ground_sub_res == 0.125:
+                    offs_g = (-0.1875, -0.0625, 0.0625, 0.1875)
+                    gr = np.tile(gr05_c, 16)
+                    gc = np.tile(gc05_c, 16)
+                    ge = np.concatenate([ge05_c + de for de in offs_g for _ in offs_g])
+                    gn = np.concatenate([gn05_c + dn for _ in offs_g for dn in offs_g])
+                elif ground_sub_res == 0.25:
+                    gr = np.tile(gr05_c, 4)
+                    gc = np.tile(gc05_c, 4)
+                    ge = np.concatenate([ge05_c - 0.125, ge05_c + 0.125, ge05_c - 0.125, ge05_c + 0.125])
+                    gn = np.concatenate([gn05_c + 0.125, gn05_c + 0.125, gn05_c - 0.125, gn05_c - 0.125])
+                else:
+                    gr, gc, ge, gn = gr05_c, gc05_c, ge05_c, gn05_c
 
-    if sub_mask.any() and len(gr) > 0:
-        gz = sub_dem[gr, gc].copy()
-        gsem = sub_sem[gr, gc]
-        glake = sub_lake[gr, gc]
-        gbathy = sub_bathy[gr, gc]
-        gkpoly = sub_kpoly[gr, gc]
-        gharbor = sub_harbor[gr, gc]
-        gsh = sub_shadow[gr, gc]
-        gnx = scene.terr_nx[r0:r1, c0:c1][gr, gc].astype(np.float32)
-        gny = scene.terr_ny[r0:r1, c0:c1][gr, gc].astype(np.float32)
-        gnz = scene.terr_nz[r0:r1, c0:c1][gr, gc].astype(np.float32)
+                gsem = sub_sem[gr, gc]
+                glake = sub_lake[gr, gc]
+                gkpoly = sub_kpoly[gr, gc]
+                gharbor = sub_harbor[gr, gc]
+                gsh = sub_shadow[gr, gc]
+                xwalk = scene.crosswalk_mask[r0:r1, c0:c1][gr, gc]
 
-        rd_dist = scene.road_dist[r0:r1, c0:c1][gr, gc].astype(np.float32)
-        rd_along = scene.road_along[r0:r1, c0:c1][gr, gc]
-        rd_hw = scene.road_hw[r0:r1, c0:c1][gr, gc].astype(np.float32)
-        rl_dist = scene.rail_dist[r0:r1, c0:c1][gr, gc].astype(np.float32)
-        rl_along = scene.rail_along[r0:r1, c0:c1][gr, gc]
-        xwalk = scene.crosswalk_mask[r0:r1, c0:c1][gr, gc]
+                if ground_sub_res == 0.125:
+                    gz = _sample_bilinear_05m(sub_dem, ge, gn, r0=r0, c0=c0)
+                    gbathy = _sample_bilinear_05m(sub_bathy, ge, gn, r0=r0, c0=c0)
+                    gnx = _sample_bilinear_05m(scene.terr_nx[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0)
+                    gny = _sample_bilinear_05m(scene.terr_ny[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0)
+                    gnz = _sample_bilinear_05m(scene.terr_nz[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0)
+                    rd_dist = _sample_bilinear_05m(scene.road_dist[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0, max_jump=4.0)
+                    rd_along = _sample_bilinear_05m(scene.road_along[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0, max_jump=3.0)
+                    rd_hw = _sample_bilinear_05m(scene.road_hw[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0, max_jump=2.0)
+                    rl_dist = _sample_bilinear_05m(scene.rail_dist[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0, max_jump=4.0)
+                    rl_along = _sample_bilinear_05m(scene.rail_along[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0, max_jump=3.0)
+                    dist_lake_v = _sample_bilinear_05m(scene.dist_shore_05m[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0)
+                else:
+                    gz = sub_dem[gr, gc].copy()
+                    gbathy = sub_bathy[gr, gc]
+                    gnx = scene.terr_nx[r0:r1, c0:c1][gr, gc].astype(np.float32)
+                    gny = scene.terr_ny[r0:r1, c0:c1][gr, gc].astype(np.float32)
+                    gnz = scene.terr_nz[r0:r1, c0:c1][gr, gc].astype(np.float32)
+                    rd_dist = scene.road_dist[r0:r1, c0:c1][gr, gc].astype(np.float32)
+                    rd_along = scene.road_along[r0:r1, c0:c1][gr, gc]
+                    rd_hw = scene.road_hw[r0:r1, c0:c1][gr, gc].astype(np.float32)
+                    rl_dist = scene.rail_dist[r0:r1, c0:c1][gr, gc].astype(np.float32)
+                    rl_along = scene.rail_along[r0:r1, c0:c1][gr, gc]
+                    dist_lake_v = None
 
-        raw_ortho = sample_ortho_25cm(scene, ge, gn)
-        gcol, gmat, gz = _shade_drawn_ground_90s(
-            scene, ge, gn, gz, gsem, glake, gbathy, gharbor, raw_ortho,
-            rd_dist, rd_along, rd_hw, rl_dist, rl_along, xwalk,
-            gnx, gny, gnz, sub_chm[gr, gc],
-            preset_key=preset_key,
-        )
+                raw_ortho = sample_ortho_25cm(scene, ge, gn)
+                gcol, gmat, gz, g_seebad_pool = _shade_drawn_ground_90s(
+                    scene, ge, gn, gz, gsem, glake, gbathy, gharbor, raw_ortho,
+                    rd_dist, rd_along, rd_hw, rl_dist, rl_along, xwalk,
+                    gnx, gny, gnz, sub_chm[gr, gc],
+                    preset_key=preset_key,
+                    mpp=camera.mpp,
+                    dist_lake=dist_lake_v,
+                )
 
-        out_k = (~gkpoly) & (~glake)
-        if out_k.any():
-            gr_m = gcol[out_k].mean(axis=1, keepdims=True)
-            gcol[out_k] = 0.78 * gcol[out_k] + 0.22 * gr_m
+                out_k = (~gkpoly) & (~glake)
+                if out_k.any():
+                    gr_m = gcol[out_k].mean(axis=1, keepdims=True)
+                    gcol[out_k] = 0.78 * gcol[out_k] + 0.22 * gr_m
 
-        gx_p, gy_p, gdepth = camera.project(ge, gn, gz)
-        gix = np.round(gx_p + shift_x).astype(np.int32)
-        giy = np.round(gy_p + shift_y).astype(np.int32)
-        gv = (gix >= 0) & (gix < W - 1) & (giy >= 0) & (giy < H - 1)
+                gx_p, gy_p, gdepth = camera.project(ge, gn, gz)
+                gix = np.round(gx_p + shift_x).astype(np.int32)
+                giy = np.round(gy_p + shift_y).astype(np.int32)
+                gv = (gix >= 0) & (gix < W - 1) & (giy >= 0) & (giy < H - 1)
 
-        if gv.any():
-            gix, giy, gdepth = gix[gv], giy[gv], gdepth[gv]
-            gcol, gmat, gsh, glake_v = gcol[gv], gmat[gv], gsh[gv], glake[gv]
-            gnx, gny, gnz = gnx[gv], gny[gv], gnz[gv]
+                if gv.any():
+                    gix, giy, gdepth = gix[gv], giy[gv], gdepth[gv]
+                    gcol, gmat, gsh, glake_v = gcol[gv], gmat[gv], gsh[gv], glake[gv]
+                    g_sb_v = g_seebad_pool[gv]
+                    gnx, gny, gnz = gnx[gv], gny[gv], gnz[gv]
 
-            order = np.argsort(gdepth)[::-1]
-            gix, giy, gdepth = gix[order], giy[order], gdepth[order]
-            gcol, gmat, gsh, glake_v = gcol[order], gmat[order], gsh[order], glake_v[order]
-            gnx, gny, gnz = gnx[order], gny[order], gnz[order]
+                    order = np.argsort(gdepth)[::-1]
+                    gix, giy, gdepth = gix[order], giy[order], gdepth[order]
+                    gcol, gmat, gsh, glake_v = gcol[order], gmat[order], gsh[order], glake_v[order]
+                    g_sb_v = g_sb_v[order]
+                    gnx, gny, gnz = gnx[order], gny[order], gnz[order]
 
-            for ox, oy in ((0, 0), (1, 0), (0, 1), (1, 1)):
-                tx = np.clip(gix + ox, 0, W - 1)
-                ty = np.clip(giy + oy, 0, H - 1)
-                d_b = gdepth + (0.08 if (ox or oy) else 0.0)
-                win = d_b <= zbuf[ty, tx]
-                zbuf[ty[win], tx[win]] = d_b[win]
-                rgb_buf[ty[win], tx[win]] = gcol[win]
-                mat_buf[ty[win], tx[win]] = gmat[win]
-                obj_buf[ty[win], tx[win]] = np.where(gmat[win] == M_HARBOR_OBJ, 250000, 0)
-                shadow_buf[ty[win], tx[win]] = gsh[win]
-                norm_buf[ty[win], tx[win], 0] = gnx[win]
-                norm_buf[ty[win], tx[win], 1] = gny[win]
-                norm_buf[ty[win], tx[win], 2] = gnz[win]
-
-            # F14c: Staggered Ashlar Jura-Stone Retaining Walls with Coping Cap & Trailing Ivy (exclude lake!)
-            steep = (gnz < 0.88) & (~glake_v)
-            if steep.any():
-                si = np.nonzero(steep)[0]
-                s_ix = gix[si]
-                s_iy = giy[si]
-                s_d = gdepth[si]
-                s_sh = gsh[si]
-                s_nx, s_ny, s_nz = gnx[si], gny[si], gnz[si]
-                is_rwall = s_nz < 0.72
-                s_col = np.where(is_rwall[:, None], [158.0, 152.0, 140.0], gcol[si] * 0.88).astype(np.float32)
-                max_drop = np.clip(np.round((1.0 - s_nz) * 24.0).astype(np.int32), 2, 10)
-                for oy in range(2, 11):
-                    act = max_drop >= oy
-                    if not act.any():
-                        continue
-                    ai = np.nonzero(act)[0]
-                    course_id = (oy - 2) // 3
-                    is_h_mortar = ((oy - 2) % 3) == 2
-                    for ox in (0, 1):
-                        tx = np.clip(s_ix[ai] + ox, 0, W - 1)
-                        ty = np.clip(s_iy[ai] + oy, 0, H - 1)
-                        d_b = s_d[ai] + 0.16 + oy * 0.03
+                    for ox, oy in ((0, 0), (1, 0), (0, 1), (1, 1)):
+                        tx = np.clip(gix + ox, 0, W - 1)
+                        ty = np.clip(giy + oy, 0, H - 1)
+                        d_b = gdepth + (0.08 if (ox or oy) else 0.0)
                         win = d_b <= zbuf[ty, tx]
-                        if win.any():
-                            wy, wx = ty[win], tx[win]
-                            w_ai = ai[win]
-                            zbuf[wy, wx] = d_b[win]
-                            c_out = s_col[w_ai].copy()
-                            rw_w = is_rwall[w_ai]
-                            if rw_w.any():
-                                # Global x/y coordinates for seamless staggered ashlar blocks across macro-tiles!
-                                gwx = wx[rw_w] + vx0
-                                gwy = wy[rw_w] + vy0
-                                if oy == 2:
-                                    c_out[rw_w] = [188.0, 182.0, 170.0]  # Sunlit dressed Jura-limestone coping slab
-                                else:
-                                    blk_x = gwx + (course_id & 1) * 3
-                                    is_v_mortar = (blk_x % 6) == 0
-                                    bhash = (((blk_x // 6) * 73856093) ^ (course_id * 19349663) ^ (gwy // 12)) & 31
-                                    c_rw = c_out[rw_w] + ((bhash.astype(np.float32) - 16.0) * 0.65)[:, None]
-                                    if is_h_mortar:
-                                        c_rw *= 0.78
-                                    else:
-                                        c_rw[is_v_mortar] *= 0.78
-                                    c_out[rw_w] = np.clip(c_rw, 24.0, 235.0)
-                                # Sparse trailing green ivy clusters draping from top coping cap (oy in 2..5)
-                                if oy <= 5:
-                                    ivy_h = (((wx + vx0) >> 1) * 83492791 ^ ((s_iy[w_ai] + vy0) >> 2) * 19349663) & 255
-                                    is_ivy = rw_w & (ivy_h < 16) & (oy <= (2 + (ivy_h & 3)))
-                                    if is_ivy.any():
-                                        c_out[is_ivy] = [68.0, 122.0, 52.0] if oy == 2 else ([44.0, 86.0, 38.0] if oy >= 4 else [52.0, 98.0, 44.0])
-                            rgb_buf[wy, wx] = c_out
-                            mat_buf[wy, wx] = M_GROUND
-                            obj_buf[wy, wx] = 0
-                            shadow_buf[wy, wx] = np.where(rw_w, False, s_sh[w_ai])
-                            norm_buf[wy, wx, 0] = s_nx[w_ai]
-                            norm_buf[wy, wx, 1] = s_ny[w_ai]
-                            norm_buf[wy, wx, 2] = np.maximum(0.58, s_nz[w_ai])
+                        zbuf[ty[win], tx[win]] = d_b[win]
+                        rgb_buf[ty[win], tx[win]] = gcol[win]
+                        mat_buf[ty[win], tx[win]] = gmat[win]
+                        obj_buf[ty[win], tx[win]] = np.where(g_sb_v[win], 259999, np.where(gmat[win] == M_HARBOR_OBJ, 250000, 0))
+                        shadow_buf[ty[win], tx[win]] = gsh[win]
+                        norm_buf[ty[win], tx[win], 0] = gnx[win]
+                        norm_buf[ty[win], tx[win], 1] = gny[win]
+                        norm_buf[ty[win], tx[win], 2] = gnz[win]
+
+                    # F14c: Staggered Ashlar Jura-Stone Retaining Walls with Coping Cap & Trailing Ivy (exclude lake!)
+                    steep = (gnz < 0.88) & (~glake_v)
+                    if steep.any():
+                        si = np.nonzero(steep)[0]
+                        s_ix = gix[si]
+                        s_iy = giy[si]
+                        s_d = gdepth[si]
+                        s_sh = gsh[si]
+                        s_nx, s_ny, s_nz = gnx[si], gny[si], gnz[si]
+                        is_rwall = s_nz < 0.72
+                        s_col = np.where(is_rwall[:, None], [158.0, 152.0, 140.0], gcol[si] * 0.88).astype(np.float32)
+                        rw_scale = 0.25 / max(0.08, camera.mpp)
+                        rw_max_oy = max(10, int(round(10 * rw_scale)))
+                        max_drop = np.clip(np.round((1.0 - s_nz) * 24.0 * rw_scale).astype(np.int32), 2, rw_max_oy)
+                        c_step = max(3, int(round(3 * rw_scale)))
+                        for oy in range(2, rw_max_oy + 1):
+                            act = max_drop >= oy
+                            if not act.any():
+                                continue
+                            ai = np.nonzero(act)[0]
+                            course_id = (oy - 2) // c_step
+                            is_h_mortar = ((oy - 2) % c_step) == (c_step - 1)
+                            for ox in (0, 1):
+                                tx = np.clip(s_ix[ai] + ox, 0, W - 1)
+                                ty = np.clip(s_iy[ai] + oy, 0, H - 1)
+                                d_b = s_d[ai] + 0.16 + oy * 0.03
+                                win = d_b <= zbuf[ty, tx]
+                                if win.any():
+                                    wy, wx = ty[win], tx[win]
+                                    w_ai = ai[win]
+                                    zbuf[wy, wx] = d_b[win]
+                                    c_out = s_col[w_ai].copy()
+                                    rw_w = is_rwall[w_ai]
+                                    if rw_w.any():
+                                        # Global x/y coordinates for seamless staggered ashlar blocks across macro-tiles!
+                                        gwx = wx[rw_w] + vx0
+                                        gwy = wy[rw_w] + vy0
+                                        if oy == 2:
+                                            c_out[rw_w] = [188.0, 182.0, 170.0]  # Sunlit dressed Jura-limestone coping slab
+                                        else:
+                                            blk_x = gwx + (course_id & 1) * 3
+                                            is_v_mortar = (blk_x % 6) == 0
+                                            bhash = (((blk_x // 6) * 73856093) ^ (course_id * 19349663) ^ (gwy // 12)) & 31
+                                            c_rw = c_out[rw_w] + ((bhash.astype(np.float32) - 16.0) * 0.65)[:, None]
+                                            if is_h_mortar:
+                                                c_rw *= 0.78
+                                            else:
+                                                c_rw[is_v_mortar] *= 0.78
+                                            c_out[rw_w] = np.clip(c_rw, 24.0, 235.0)
+                                        # Sparse trailing green ivy clusters draping from top coping cap (oy in 2..5)
+                                        if oy <= 5:
+                                            ivy_h = (((wx + vx0) >> 1) * 83492791 ^ ((s_iy[w_ai] + vy0) >> 2) * 19349663) & 255
+                                            is_ivy = rw_w & (ivy_h < 16) & (oy <= (2 + (ivy_h & 3)))
+                                            if is_ivy.any():
+                                                c_out[is_ivy] = [68.0, 122.0, 52.0] if oy == 2 else ([44.0, 86.0, 38.0] if oy >= 4 else [52.0, 98.0, 44.0])
+                                    rgb_buf[wy, wx] = c_out
+                                    mat_buf[wy, wx] = M_GROUND
+                                    obj_buf[wy, wx] = 0
+                                    shadow_buf[wy, wx] = np.where(rw_w, False, s_sh[w_ai])
+                                    norm_buf[wy, wx, 0] = s_nx[w_ai]
+                                    norm_buf[wy, wx, 1] = s_ny[w_ai]
+                                    norm_buf[wy, wx, 2] = np.maximum(0.58, s_nz[w_ai])
+                if (chunk_idx & 7) == 7:
+                    _evict_mmap_rss(scene.ortho_hr)
+            _evict_mmap_rss(scene.ortho_hr)
 
     # -------------------------------------------------------------------------
     # STAGE 2.5: True 3D Elevated Viaducts, Piers, SBB Catenary Wires & Bahnhof Canopies!
@@ -5601,6 +5807,7 @@ def render_diorama(
             fn = np.concatenate(frag_n)
             fz = np.concatenate(frag_z)
             fu = np.concatenate(frag_u)
+            del frag_x, frag_y, frag_d, frag_t, frag_e, frag_n, frag_z, frag_u
 
             order = np.argsort(fd)[::-1]
             fx, fy, fd, ft = fx[order], fy[order], fd[order], ft[order]
@@ -5671,11 +5878,11 @@ def render_diorama(
                 is_deep_aerial_sh = (sat_lum < (0.40 * ref_lum)) & (~is_pv) & (r_bi != id_lindt_hoc)
 
                 # Blend authentic satellite texture (Lindt HoC strictly preserved at base_w = 0.95!)
-                base_w = np.where(r_bi == id_lindt_hoc, 0.95, np.where(pitched, 0.72, 0.88)).astype(np.float32)
+                base_w = np.where(r_bi == id_lindt_hoc, 0.95, np.where(pitched, 0.40, 0.88)).astype(np.float32)
                 sat_w = np.where(is_overhang_leaf, 0.0, np.where(is_deep_aerial_sh, 0.25, base_w))[:, None]
                 r_alb = sat_w * sat_r + (1.0 - sat_w) * r_clean
 
-                # 1. Pitched Roofs: Subtle crisp 90s pixel-art clay/slate tile course overlap relief & dark eave line!
+                # 1. Pitched Roofs: Crisp 90s pixel-art clay/slate staggered tile course relief & dark eave line!
                 if pitched.any():
                     pi_r = np.nonzero(pitched)[0]
                     rz_p = rz_r[pi_r]
@@ -5687,25 +5894,33 @@ def render_diorama(
                     u_f = ru_p * 2.05 + (course_idx & 1) * 0.5
                     u_tile = u_f - np.floor(u_f)
 
-                    r_alb[pi_r[in_course < 0.24]] *= 0.87
+                    hi_res_rf = camera.mpp <= 0.16
+                    r_alb[pi_r[in_course < (0.22 if hi_res_rf else 0.24)]] *= (0.82 if hi_res_rf else 0.87)
                     r_alb[pi_r[(in_course >= 0.76) & (in_course < 0.94)]] = np.minimum(
-                        244.0, r_alb[pi_r[(in_course >= 0.76) & (in_course < 0.94)]] * 1.045
+                        246.0, r_alb[pi_r[(in_course >= 0.76) & (in_course < 0.94)]] * (1.07 if hi_res_rf else 1.045)
                     )
-                    r_alb[pi_r[u_tile < 0.12]] *= 0.95
+                    r_alb[pi_r[u_tile < (0.11 if hi_res_rf else 0.12)]] *= (0.91 if hi_res_rf else 0.95)
                     eave_d = rz_p - scene.bldg_eave_z[rb_p]
-                    r_alb[pi_r[(eave_d >= -0.25) & (eave_d < 0.36)]] *= 0.82
+                    r_alb[pi_r[(eave_d >= -0.25) & (eave_d < (0.44 if hi_res_rf else 0.36))]] *= (0.76 if hi_res_rf else 0.82)
 
                 # 2. Flat Roofs (including Lindt Home of Chocolate's EXACT real satellite roof!)
                 flat = ~pitched
                 if flat.any():
                     fi_r = np.nonzero(flat)[0]
                     est = sample_roof_edge_25cm(scene, re_r[fi_r], rn_r[fi_r])
-                    is_coping = est == 1
-                    is_p_sh = est == 2
+                    not_lhoc_f = r_bi[fi_r] != id_lindt_hoc
+                    is_coping = (est == 1) & not_lhoc_f
+                    is_p_sh = (est == 2) & not_lhoc_f
                     r_alb[fi_r[is_coping]] = np.clip(
-                        r_alb[fi_r[is_coping]] * 0.45 + np.array([124.0, 122.0, 118.0]), 140.0, 232.0
+                        r_alb[fi_r[is_coping]] * 0.40 + np.array([138.0, 136.0, 132.0]), 148.0, 238.0
                     )
-                    r_alb[fi_r[is_p_sh]] *= 0.80
+                    r_alb[fi_r[is_p_sh]] *= 0.74
+                    # Keep Lindt HoC parapet coping subtle as before
+                    lhoc_c = (est == 1) & (~not_lhoc_f)
+                    if lhoc_c.any():
+                        r_alb[fi_r[lhoc_c]] = np.clip(
+                            r_alb[fi_r[lhoc_c]] * 0.45 + np.array([124.0, 122.0, 118.0]), 140.0, 232.0
+                        )
 
                 # 3. Crisp Rooftop Solar PV Grid Overlay strictly on morphologically verified PV arrays (SACRED!)
                 if is_pv.any():
@@ -5795,10 +6010,21 @@ def render_diorama(
                 w_base[wh_tex < 6] *= 0.97
                 w_base[wh_tex > 26] = np.minimum(246.0, w_base[wh_tex > 26] * 1.025)
 
-                # Crisp stone foundation plinth, deep roof eave shadow, and subtle vertical corner shade!
-                w_base[h_rel < 0.65] *= 0.82
-                w_base[(top_dist > 0.0) & (top_dist < 0.50)] *= 0.78
+                # Crisp ashlar stone foundation plinth + water-table bevel, deep roof eave shadow, heritage corner quoins!
+                w_base[h_rel < 0.75] *= 0.78
+                w_base[(h_rel >= 0.72) & (h_rel < 0.85)] = np.minimum(246.0, w_base[(h_rel >= 0.72) & (h_rel < 0.85)] * 1.07)
+                w_base[(top_dist > 0.0) & (top_dist < 0.62)] *= 0.74
                 w_base[(edge_dist < 0.28) & (wall_len > 3.2)] *= 0.92
+                if camera.mpp <= 0.16:
+                    # Dressed stone corner quoins on traditional heritage buildings (w_sty == 0)
+                    q_course = np.floor(h_rel * 1.65).astype(np.int32)
+                    q_w = np.where((q_course & 1) == 0, 0.44, 0.26)
+                    is_quoin = (w_sty == 0) & (wall_len > 4.8) & (h_rel >= 0.75) & (top_dist >= 0.62) & (edge_dist < q_w)
+                    if is_quoin.any():
+                        q_joint = ((h_rel[is_quoin] * 1.65) % 1.0) < 0.14
+                        q_c = np.clip(w_base[is_quoin] * 0.72 + np.array([62.0, 58.0, 52.0], dtype=np.float32), 90.0, 236.0)
+                        q_c[q_joint] *= 0.82
+                        w_base[is_quoin] = q_c
 
                 # Buff-brick Lindt smokestack (43.6m Hochkamin) + v9.0 iron tension rings & climbing ladder
                 is_chimney = w_bi == id_lindt_chim
@@ -6880,6 +7106,15 @@ def render_diorama(
                     if is_gewaende.any():
                         w_base[ri_l[is_gewaende]] = [226.0, 222.0, 212.0]
 
+                    # Horizontal floor stringcourses / belt-courses on multi-story Swiss villas & apartments
+                    if camera.mpp <= 0.16:
+                        is_string = (r_sty <= 1) & (fl_idx >= 1) & (r_wlen >= 5.0) & (~is_barn) & (~is_balc_bay) & (r_z <= z_ceil) & (in_z < 0.055)
+                        if is_string.any():
+                            str_top = is_string & (in_z >= 0.025)
+                            str_sh = is_string & (in_z < 0.025)
+                            w_base[ri_l[str_top]] = np.minimum(244.0, w_base[ri_l[str_top]] * 1.07)
+                            w_base[ri_l[str_sh]] *= 0.86
+
                     is_shutter = (
                         (r_sty == 0)
                         & active_bay
@@ -6913,13 +7148,20 @@ def render_diorama(
                             [188.0, 58.0, 58.0, 58.0, 162.0, 110.0, 46.0, 46.0],
                             default=68.0,
                         )
-                        w_base[sh_g] = np.stack([sh_col, sh_col_g, sh_col_b], axis=1)
+                        sh_rgb = np.stack([sh_col, sh_col_g, sh_col_b], axis=1)
+                        if camera.mpp <= 0.16:
+                            louver = ((r_z[is_shutter] * 4.6) % 1.0) < 0.34
+                            sh_rgb[louver] *= 0.80
+                        w_base[sh_g] = sh_rgb
 
-                    # Window sill & subtle top head drop shadow
+                    # Projecting sunlit windowsill + 1px cast shadow beneath sill + top head lintel shadow
                     is_sill = active_bay & (~is_balc_bay) & (in_z >= (z_lo - 0.08)) & (in_z < z_lo) & (np.abs(bay_center_offset) <= (half_w + 0.14))
-                    w_base[ri_l[is_sill]] = np.minimum(242.0, w_base[ri_l[is_sill]] * 1.10)
-                    is_head_drop = active_bay & (~is_balc_bay) & (in_z > z_hi) & (in_z <= (z_hi + 0.05)) & (np.abs(bay_center_offset) <= (half_w + 0.05))
-                    w_base[ri_l[is_head_drop]] *= 0.80
+                    w_base[ri_l[is_sill]] = np.minimum(246.0, w_base[ri_l[is_sill]] * 1.14)
+                    if camera.mpp <= 0.16:
+                        is_sill_sh = active_bay & (~is_balc_bay) & (in_z >= (z_lo - 0.13)) & (in_z < (z_lo - 0.08)) & (np.abs(bay_center_offset) <= (half_w + 0.12))
+                        w_base[ri_l[is_sill_sh]] *= 0.74
+                    is_head_drop = active_bay & (~is_balc_bay) & (in_z > z_hi) & (in_z <= (z_hi + 0.06)) & (np.abs(bay_center_offset) <= (half_w + 0.06))
+                    w_base[ri_l[is_head_drop]] *= 0.76
 
                     # F12: ~25% Swiss Red & Pink Geranium Window Boxes on Traditional Village Windowsills!
                     has_flowerbox = (r_sty == 0) & active_bay & (~is_barn) & ((bay_hash & 3) == 0) & (fl_idx >= 0)
@@ -6942,7 +7184,9 @@ def render_diorama(
                         p_bay = bay_idx[p_sub]
                         p_inz = in_z[p_sub]
                         p_bco = bay_center_offset[p_sub]
+                        p_zlo = z_lo[p_sub]
                         p_zhi = z_hi[p_sub]
+                        p_hw = half_w[p_sub]
                         p_sty = r_sty[p_sub]
                         hval = ((p_bi.astype(np.int64) * 73856093) ^ (p_fl.astype(np.int64) * 40503) ^ (p_bay.astype(np.int64) * 12289)) & 0xFF
                         is_brick_munt = (p_sty == 3) & ((p_bi == id_lindt_brick_n) | (p_bi == id_lindt_brick_s) | ((p_bi == id_lindt_main) & (r_n[p_sub] >= 1241403.0)))
@@ -6951,33 +7195,44 @@ def render_diorama(
                             | (np.abs(p_bco) < 0.07) | (np.abs(np.abs(p_bco) - 0.36) < 0.05)
                         )
                         is_tavern_lit = np.isin(p_bi, hafenbeiz_ids_arr) | ((p_bi == id_chez_fritz) & (p_fl == 0))
+                        hi_res_w = camera.mpp <= 0.16
+                        win_reveal = hi_res_w & ((np.abs(p_bco) >= (p_hw - 0.065)) | (p_inz <= (p_zlo + 0.045)))
+                        mullion = (np.abs(p_bco) < (0.06 if hi_res_w else 0.08)) | (hi_res_w & (np.abs(p_inz - (0.5 * (p_zlo + p_zhi))) < 0.032))
 
                         if preset.is_night:
                             lit = (hval < 138) | is_tavern_lit
                             warm_alt = (hval & 3) == 0
-                            lit_c = np.where(warm_alt[:, None], [255.0, 228.0, 148.0], [255.0, 192.0, 92.0])
-                            pane_c = np.where(lit[:, None], lit_c, [30.0, 42.0, 64.0]).astype(np.float32)
+                            # Warm-interior vertical gradient (brighter lower-center lamp glow, softer upper ceiling)
+                            v_norm = np.clip((p_inz - p_zlo) / np.maximum(0.15, p_zhi - p_zlo), 0.0, 1.0)
+                            int_grad = (1.06 - 0.24 * v_norm)[:, None]
+                            lit_c = np.where(warm_alt[:, None], [255.0, 228.0, 148.0], [255.0, 192.0, 92.0]) * int_grad
+                            pane_c = np.where(lit[:, None], np.clip(lit_c, 0.0, 255.0), [30.0, 42.0, 64.0]).astype(np.float32)
+                            if hi_res_w:
+                                pane_c[mullion & lit] *= 0.62
+                                pane_c[win_reveal] *= 0.58
                             pane_c[bm_grid] = [98.0, 82.0, 62.0]
                             w_base[p_local] = pane_c
-                            f_mat[p_global] = np.where(lit & (~bm_grid), M_WINDOW_LIT, M_WINDOW_DAY)
+                            f_mat[p_global] = np.where(lit & (~bm_grid) & (~win_reveal), M_WINDOW_LIT, M_WINDOW_DAY)
                         elif preset_key == "sunset":
                             # F7: ~20% warm cozy dusk windows at Sunset (hval < 52) + Hafenbeiz/Chez Fritz!
                             lit_dusk = (hval < 52) | is_tavern_lit
-                            mullion = np.abs(p_bco) < 0.08
-                            upper_glint = p_inz > 0.56
-                            pane_c = np.where(upper_glint[:, None], [118.0, 102.0, 118.0], [44.0, 46.0, 68.0]).astype(np.float32)
-                            pane_c[p_inz > (p_zhi - 0.07)] *= 0.62  # Recessed upper window lintel shadow
-                            pane_c[mullion] = [184.0, 174.0, 162.0]
-                            pane_c[lit_dusk] = [255.0, 206.0, 114.0]
+                            upper_glint = (p_inz - p_bco * 0.28) > 0.56 if hi_res_w else (p_inz > 0.56)
+                            pane_c = np.where(upper_glint[:, None], [122.0, 106.0, 122.0], [42.0, 44.0, 66.0]).astype(np.float32)
+                            pane_c[p_inz > (p_zhi - 0.07)] *= 0.58  # Recessed upper window lintel shadow
+                            pane_c[mullion] = [186.0, 176.0, 164.0]
+                            if hi_res_w:
+                                pane_c[win_reveal] = [48.0, 44.0, 50.0]
+                            pane_c[lit_dusk & (~win_reveal)] = [255.0, 206.0, 114.0]
                             pane_c[bm_grid] = [152.0, 142.0, 132.0]
                             w_base[p_local] = pane_c
-                            f_mat[p_global] = np.where(lit_dusk & (~bm_grid), M_WINDOW_LIT, M_WINDOW_DAY)
+                            f_mat[p_global] = np.where(lit_dusk & (~bm_grid) & (~win_reveal), M_WINDOW_LIT, M_WINDOW_DAY)
                         else:
-                            mullion = np.abs(p_bco) < 0.08
-                            upper_glint = p_inz > 0.56
-                            pane_c = np.where(upper_glint[:, None], [78.0, 108.0, 138.0], [38.0, 52.0, 72.0]).astype(np.float32)
-                            pane_c[p_inz > (p_zhi - 0.07)] *= 0.62  # Recessed upper window lintel shadow
-                            pane_c[mullion] = [188.0, 184.0, 176.0]
+                            upper_glint = (p_inz - p_bco * 0.30) > 0.56 if hi_res_w else (p_inz > 0.56)
+                            pane_c = np.where(upper_glint[:, None], [84.0, 118.0, 148.0], [36.0, 50.0, 70.0]).astype(np.float32)
+                            pane_c[p_inz > (p_zhi - 0.07)] *= 0.58  # Recessed upper window lintel shadow
+                            pane_c[mullion] = [194.0, 190.0, 182.0]
+                            if hi_res_w:
+                                pane_c[win_reveal] = [44.0, 48.0, 56.0]
                             pane_c[bm_grid] = [172.0, 168.0, 160.0]
                             w_base[p_local] = pane_c
                             f_mat[p_global] = M_WINDOW_DAY
@@ -7277,10 +7532,10 @@ def render_diorama(
             if crop_box_lv95 is not None:
                 if not (crop_box_lv95[0] + 2.0 <= ep <= crop_box_lv95[2] - 2.0 and crop_box_lv95[1] + 2.0 <= np_c <= crop_box_lv95[3] - 2.0):
                     continue
-            # Suppress over bright white or blue-tinted 25cm skylights/atriums!
-            c25 = int(np.clip((ep - E_MIN) / ORTHO25_RES, 1, ORTHO25_W - 2))
-            r25 = int(np.clip((N_MAX - np_c) / ORTHO25_RES, 1, ORTHO25_H - 2))
-            patch25 = np.asarray(scene.ortho_25cm[r25 - 1 : r25 + 2, c25 - 1 : c25 + 2], dtype=np.float32)
+            # Suppress over bright white or blue-tinted DOP10 skylights/atriums!
+            c_hr = int(np.clip((ep - E_MIN) / scene.ortho_res, 1, scene.ortho_w - 2))
+            r_hr = int(np.clip((N_MAX - np_c) / scene.ortho_res, 1, scene.ortho_h - 2))
+            patch25 = np.asarray(scene.ortho_hr[r_hr - 1 : r_hr + 2, c_hr - 1 : c_hr + 2], dtype=np.float32)
             mean_rgb = patch25.mean(axis=(0, 1))
             mean_lum = float(0.299 * mean_rgb[0] + 0.587 * mean_rgb[1] + 0.114 * mean_rgb[2])
             if mean_lum > 186.0 or (float(mean_rgb[2]) - float(mean_rgb[0])) > 10.0:
@@ -7409,6 +7664,9 @@ def render_diorama(
         _draw_finial_seg(bt_e, bt_n, bt_z0 - 0.15, bt_e, bt_n, bt_z0 + 1.15, [236.0, 194.0, 72.0], fmat=bt_mat, foid=244960)
         _draw_finial_seg(bt_e, bt_n, bt_z0 + 0.35, bt_e, bt_n, bt_z0 + 0.60, [248.0, 212.0, 88.0], fmat=bt_mat, foid=244960, thick=True)
 
+    _evict_mmap_rss(scene.ortho_hr)
+    _evict_mmap_rss(scene.roof_edge_25cm)
+
     # -------------------------------------------------------------------------
     # STAGE 4: Sculpted 90s Pixel-Art 3D Trees & Trimmed Garden Hedges!
     # -------------------------------------------------------------------------
@@ -7480,21 +7738,15 @@ def render_diorama(
 
         rgb_buf[ay, ax] = np.clip(shaded, 0.0, 255.0)
 
-    # F7: Subtle underwater turquoise-teal glow on Seebad Kilchberg pool ONLY at Night!
+    # F7 + v10: Exact tagged underwater turquoise-teal glow on Seebad Kilchberg pool ONLY at Night (ZERO lawn/shore bleed!)
     if preset.is_night:
-        sb_c_e = np.array([2684235.0, 2684310.0, 2684235.0, 2684310.0])
-        sb_c_n = np.array([1241435.0, 1241435.0, 1241525.0, 1241525.0])
-        spx, spy, _ = camera.project(sb_c_e, sb_c_n, np.full(4, 407.5))
-        sb_x0 = max(0, int(math.floor(float(spx.min() + shift_x))) - 2)
-        sb_x1 = min(W, int(math.ceil(float(spx.max() + shift_x))) + 2)
-        sb_y0 = max(0, int(math.floor(float(spy.min() + shift_y))) - 2)
-        sb_y1 = min(H, int(math.ceil(float(spy.max() + shift_y))) + 2)
-        if sb_x1 > sb_x0 and sb_y1 > sb_y0:
-            sub_rgb_sb = rgb_buf[sb_y0:sb_y1, sb_x0:sb_x1]
-            sub_m_sb = mat_buf[sb_y0:sb_y1, sb_x0:sb_x1]
-            is_sb_pool = (sub_m_sb == M_GROUND) & (sub_rgb_sb[:, :, 2] > (sub_rgb_sb[:, :, 0] + 10.0)) & (sub_rgb_sb[:, :, 1] > (sub_rgb_sb[:, :, 0] + 8.0))
-            if is_sb_pool.any():
-                sub_rgb_sb[is_sb_pool] = np.clip(sub_rgb_sb[is_sb_pool] * np.array([1.25, 1.85, 1.75], dtype=np.float32), 0.0, 255.0)
+        is_sb_pool = obj_buf == 259999
+        if is_sb_pool.any():
+            rgb_buf[is_sb_pool] = np.clip(
+                rgb_buf[is_sb_pool] * np.array([1.25, 1.85, 1.75], dtype=np.float32),
+                0.0,
+                255.0,
+            )
 
     # F7: Architectural Landmark Uplighting (Night full, Sunset 0.25x) via exact obj_buf!
     if preset_key in ("night", "sunset"):
@@ -7533,13 +7785,21 @@ def render_diorama(
             fac_u = t_up * (strength_u * up_scale)
             rgb_buf[uy, ux] = np.clip(rgb_buf[uy, ux] + fac_u[:, None] * tint_u[None, :], 0.0, 255.0)
 
-    # F8: Fast Vectorized zbuf Screen-Space Contact Ambient Occlusion (0.35m < dz < 5.5m, ZERO sky halos!)
+    # F8 + v10: Fast Vectorized zbuf Screen-Space Contact Ambient Occlusion scaled by px_scale!
+    px_scale = 0.25 / max(0.08, float(camera.mpp))
+    s_ao = max(1, int(round(px_scale)))
     occ_sum = np.zeros((H, W), dtype=np.float32)
     z_valid = zbuf < 1e8
-    for dy_ao, dx_ao, w_ao in (
-        (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
-        (-2, -1, 0.5), (-2, 1, 0.5), (2, -1, 0.5), (2, 1, 0.5),
-    ):
+    ao_taps = [
+        (-1 * s_ao, 0, 1.0), (1 * s_ao, 0, 1.0), (0, -1 * s_ao, 1.0), (0, 1 * s_ao, 1.0),
+        (-2 * s_ao, -1 * s_ao, 0.5), (-2 * s_ao, 1 * s_ao, 0.5), (2 * s_ao, -1 * s_ao, 0.5), (2 * s_ao, 1 * s_ao, 0.5),
+    ]
+    if px_scale >= 1.5:
+        ao_taps.extend([
+            (-3 * s_ao, 0, 0.35), (3 * s_ao, 0, 0.35), (0, -3 * s_ao, 0.35), (0, 3 * s_ao, 0.35),
+        ])
+    ao_norm_div = 6.9 if px_scale >= 1.5 else 5.5
+    for dy_ao, dx_ao, w_ao in ao_taps:
         sy0_a, sy1_a = max(0, dy_ao), min(H, H + dy_ao)
         sx0_a, sx1_a = max(0, dx_ao), min(W, W + dx_ao)
         dy0_a, dy1_a = sy0_a - dy_ao, sy1_a - dy_ao
@@ -7553,18 +7813,19 @@ def render_diorama(
         )
         occ_sum[dy0_a:dy1_a, dx0_a:dx1_a] += np.where(hit_ao, w_ao * (1.0 - dz_ao / 5.5), 0.0)
     ao_recv = (mat_buf == M_GROUND) | (mat_buf == M_WALL) | (mat_buf == M_ROOF) | (mat_buf == M_BRIDGE)
-    ao_str = 0.11 if preset.is_night else 0.14
-    ao_fac = 1.0 - np.clip(occ_sum / 5.5, 0.0, 1.0) * ao_str
+    ao_str = 0.14 if preset.is_night else 0.18
+    ao_fac = 1.0 - np.clip(occ_sum / ao_norm_div, 0.0, 1.0) * ao_str
     rgb_buf[ao_recv] *= ao_fac[ao_recv, None]
     del occ_sum, ao_fac, z_valid
 
-    # F7: World-Projected Warm Sodium-Amber Streetlamp Ground Pools + Lantern-Head Air Bloom (Night & Sunset!)
+    # F7 + v10: World-Projected Warm Sodium-Amber Streetlamp Ground Pools + Lantern-Head Air Bloom (scaled by px_scale!)
     if preset_key in ("night", "sunset") and len(scene.lamp_e) > 0:
         pool_scale = 1.0 if preset.is_night else 0.32
         px_lb, py_lb, pd_lb = camera.project(scene.lamp_e, scene.lamp_n, scene.lamp_z)
         sx_lb = px_lb + shift_x
         sy_lb = py_lb + shift_y
-        in_lvp = (sx_lb >= -28.0) & (sx_lb <= W + 28.0) & (sy_lb >= -28.0) & (sy_lb <= H + 28.0)
+        vp_m_l = 28.0 * px_scale
+        in_lvp = (sx_lb >= -vp_m_l) & (sx_lb <= W + vp_m_l) & (sy_lb >= -vp_m_l) & (sy_lb <= H + vp_m_l)
         if in_lvp.any():
             li_vp = np.nonzero(in_lvp)[0]
             pool_tint = np.array([174.0, 108.0, 36.0], dtype=np.float32) * pool_scale * (1.15 if preset.is_night else 1.0)
@@ -7586,7 +7847,7 @@ def render_diorama(
                 cx_l = float(sx_lb[idx_l])
                 cy_l = float(sy_lb[idx_l])
                 d_l = float(pd_lb[idx_l])
-                rx_p = (26.0 if lk_i in (0, 1) else 21.0) if preset.is_night else (20.0 if lk_i in (0, 1) else 16.0)
+                rx_p = ((26.0 if lk_i in (0, 1) else 21.0) if preset.is_night else (20.0 if lk_i in (0, 1) else 16.0)) * px_scale
                 ry_p = rx_p * 0.52
                 x0_p = max(0, int(math.floor(cx_l - rx_p)))
                 x1_p = min(W, int(math.ceil(cx_l + rx_p)) + 1)
@@ -7609,13 +7870,13 @@ def render_diorama(
                         w_p = (1.0 - r2_p[ok_p]) ** 1.65
                         sub_rgb_p = rgb_buf[y0_p:y1_p, x0_p:x1_p]
                         sub_rgb_p[ok_p] = np.clip(sub_rgb_p[ok_p] + w_p[:, None] * pool_tint[None, :], 0.0, 255.0)
-                # Soft 6px warm air bloom around lantern head itself (only when lantern bulb is unoccluded!)
+                # Soft warm air bloom around lantern head itself (scaled by px_scale!)
                 h_pole = 4.8 if lk_i in (0, 1) else (4.2 if lk_i == 2 else 3.6)
                 px_h, py_h, pd_h = camera.project(np.array([le_i]), np.array([ln_i]), np.array([lz_i + h_pole]))
                 hx_f, hy_f, hd_f = float(px_h[0] + shift_x), float(py_h[0] + shift_y), float(pd_h[0])
                 hi_x, hi_y = int(round(hx_f)), int(round(hy_f))
                 if 0 <= hi_x < W and 0 <= hi_y < H and zbuf[hi_y, hi_x] >= (hd_f - 1.5):
-                    rb_h = 6
+                    rb_h = max(4, int(round(6.0 * px_scale)))
                     bx0, bx1 = max(0, hi_x - rb_h), min(W, hi_x + rb_h + 1)
                     by0, by1 = max(0, hi_y - rb_h), min(H, hi_y + rb_h + 1)
                     gx_b, gy_b = np.meshgrid(
@@ -7630,11 +7891,11 @@ def render_diorama(
                         sub_rb = rgb_buf[by0:by1, bx0:bx1]
                         sub_rb[ok_b] = np.clip(sub_rb[ok_b] + w_b[:, None] * bloom_tint[None, :], 0.0, 255.0)
 
-    # F7: Subtle Warm Window-Spill Glow Halos on Surrounding Facades & Ground (Night full, Sunset 0.38x!)
+    # F7: Subtle Warm Window-Spill Glow Halos on Surrounding Facades & Ground (scaled by px_scale!)
     if preset_key in ("night", "sunset"):
         lit_mask = mat_buf == M_WINDOW_LIT
         if lit_mask.any():
-            halo = ndimage.gaussian_filter(lit_mask.astype(np.float32), sigma=1.75, truncate=3.0)
+            halo = ndimage.gaussian_filter(lit_mask.astype(np.float32), sigma=1.75 * px_scale, truncate=3.0)
             halo_scale = 1.0 if preset.is_night else 0.38
             spill_ok = (mat_buf > M_DROP_SHADOW) & (~lit_mask) & (mat_buf != M_WATER_LAKE) & (halo > 0.018)
             if spill_ok.any():
@@ -7663,7 +7924,7 @@ def render_diorama(
         shore_seed = np.where(can_refl, row_idx, -1000)
         y_shore = np.maximum.accumulate(shore_seed, axis=0)
         d_below = row_idx - y_shore
-        D_MAX_REFL = 28
+        D_MAX_REFL = max(14, int(round(28.0 * px_scale)))
         in_refl = is_water_s5 & (d_below >= 1) & (d_below <= D_MAX_REFL)
         if in_refl.any():
             ry, rx = np.nonzero(in_refl)
@@ -7728,11 +7989,11 @@ def render_diorama(
         # Day: no static specular speckle on the lake; the live app.js lake-glint layer animates sun glitter,
         # and baked bright pixels read as floating islands in open water.
 
-    _apply_pixel_art_outlines_float(rgb_buf, zbuf, obj_buf, mat_buf, norm_buf, preset.is_night)
+    _apply_pixel_art_outlines_float(rgb_buf, zbuf, obj_buf, mat_buf, norm_buf, preset.is_night, preset_key=preset_key)
 
     dither_map = bayer_tiled.copy()
     clean_m = np.isin(mat_buf, [M_WALL, M_WINDOW_LIT, M_WINDOW_DAY, M_BG, M_TREE, M_BRIDGE])
-    dither_map[clean_m] *= 0.28
+    dither_map[clean_m] *= 0.42
 
     final_u8 = quantize_to_90s_palette(rgb_buf, dither_map, preset.dither_strength, preset_key=preset_key)
 
@@ -7762,9 +8023,10 @@ def _apply_pixel_art_outlines_float(
     mat_buf: np.ndarray,
     norm_buf: np.ndarray,
     is_night: bool,
+    preset_key: str = "day",
 ) -> None:
     """Apply refined 1px 90s selective pixel-art outlines (sel-out) on buildings, viaducts, trees & roof ridges.
-    F14a: Splits tree outlines into crisp tree-against-world edges vs softer interior overlapping forest edges!"""
+    v10: Tinted cool-indigo building sel-out + 1px sunlit warm bevel highlight + directional forest sel-out!"""
     dz_r = zbuf[:, 1:] - zbuf[:, :-1]
     dz_d = zbuf[1:, :] - zbuf[:-1, :]
     diff_r = obj_buf[:, 1:] != obj_buf[:, :-1]
@@ -7786,11 +8048,14 @@ def _apply_pixel_art_outlines_float(
     both_trees_r = (obj_buf[:, :-1] >= 100000) & (obj_buf[:, 1:] >= 100000) & (obj_buf[:, :-1] < 200000) & (obj_buf[:, 1:] < 200000)
     both_trees_d = (obj_buf[:-1, :] >= 100000) & (obj_buf[1:, :] >= 100000) & (obj_buf[:-1, :] < 200000) & (obj_buf[1:, :] < 200000)
 
-    tree_world_edge = np.zeros(zbuf.shape, dtype=np.bool_)
-    tree_world_edge[:, :-1] |= diff_r & (~both_trees_r) & (dz_r > 0.95) & is_tree_m[:, :-1]
-    tree_world_edge[:, 1:] |= diff_r & (~both_trees_r) & (dz_r < -0.95) & is_tree_m[:, 1:]
-    tree_world_edge[:-1, :] |= diff_d & (~both_trees_d) & (dz_d > 0.95) & is_tree_m[:-1, :]
-    tree_world_edge[1:, :] |= diff_d & (~both_trees_d) & (dz_d < -0.95) & is_tree_m[1:, :]
+    tree_world_sun = np.zeros(zbuf.shape, dtype=np.bool_)
+    tree_world_sh = np.zeros(zbuf.shape, dtype=np.bool_)
+    tree_world_sh[:, :-1] |= diff_r & (~both_trees_r) & (dz_r > 0.95) & is_tree_m[:, :-1]
+    tree_world_sun[:, 1:] |= diff_r & (~both_trees_r) & (dz_r < -0.95) & is_tree_m[:, 1:]
+    tree_world_sh[:-1, :] |= diff_d & (~both_trees_d) & (dz_d > 0.95) & is_tree_m[:-1, :]
+    tree_world_sun[1:, :] |= diff_d & (~both_trees_d) & (dz_d < -0.95) & is_tree_m[1:, :]
+    tree_world_sun &= ~tree_world_sh
+    tree_world_edge = tree_world_sh | tree_world_sun
 
     tree_inner_edge = np.zeros(zbuf.shape, dtype=np.bool_)
     tree_inner_edge[:, :-1] |= diff_r & both_trees_r & (dz_r > 1.35) & is_tree_m[:, :-1]
@@ -7801,10 +8066,16 @@ def _apply_pixel_art_outlines_float(
 
     if bldg_edge.any():
         ey, ex = np.nonzero(bldg_edge)
-        rgb_buf[ey, ex] *= 0.58 if not is_night else 0.62
-    if tree_world_edge.any():
-        ty, tx = np.nonzero(tree_world_edge)
-        rgb_buf[ty, tx] *= np.array([0.64, 0.72, 0.70], dtype=np.float32) if not is_night else 0.72
+        if is_night:
+            rgb_buf[ey, ex] *= 0.62
+        else:
+            rgb_buf[ey, ex] *= np.array([0.54, 0.56, 0.64], dtype=np.float32)
+    if tree_world_sh.any():
+        ty, tx = np.nonzero(tree_world_sh)
+        rgb_buf[ty, tx] *= np.array([0.58, 0.68, 0.66], dtype=np.float32) if not is_night else 0.70
+    if tree_world_sun.any():
+        ty_s, tx_s = np.nonzero(tree_world_sun)
+        rgb_buf[ty_s, tx_s] *= np.array([0.82, 0.88, 0.82], dtype=np.float32) if not is_night else 0.78
     if tree_inner_edge.any():
         iy_t, ix_t = np.nonzero(tree_inner_edge)
         rgb_buf[iy_t, ix_t] *= np.array([0.82, 0.87, 0.85], dtype=np.float32) if not is_night else 0.86
@@ -7821,6 +8092,16 @@ def _apply_pixel_art_outlines_float(
         rgb_buf[by, bx] *= 0.44
 
     if not is_night:
+        # 1px sunlit warm bevel highlight along sun-facing building roof-eave & top-left edges
+        bldg_sun_bevel = np.zeros(zbuf.shape, dtype=np.bool_)
+        bldg_sun_bevel[1:, :] |= diff_d & (dz_d < -0.65) & (mat_buf[1:, :] == M_ROOF)
+        bldg_sun_bevel[:, 1:] |= diff_r & (dz_r < -0.65) & (mat_buf[:, 1:] == M_ROOF)
+        bldg_sun_bevel &= ~bldg_edge
+        if bldg_sun_bevel.any():
+            by_b, bx_b = np.nonzero(bldg_sun_bevel)
+            rim_add = np.array([26.0, 20.0, 10.0], dtype=np.float32) if preset_key == "sunset" else np.array([18.0, 16.0, 12.0], dtype=np.float32)
+            rgb_buf[by_b, bx_b] = np.minimum(255.0, rgb_buf[by_b, bx_b] + rim_add)
+
         roof_m = mat_buf == M_ROOF
         ndot = (
             norm_buf[:-1, :, 0] * norm_buf[1:, :, 0]
@@ -7892,7 +8173,7 @@ def _extract_interactive_metadata(
             "triangles_3d": int(len(scene.verts)),
             "trees_3d": int(len(scene.tree_e)),
             "palette_colors": 256,
-            "ortho_res_cm": 25,
+            "ortho_res_cm": int(round(scene.ortho_res * 100)),
             "lidar_res_cm": 50,
             "elevation_min_m": 405.95,
             "elevation_max_m": round(float(scene.dem[scene.kpoly_mask].max()), 1),
@@ -7914,10 +8195,11 @@ def _draw_museum_cartouche(
 ) -> Image.Image:
     draw = ImageDraw.Draw(img)
     W, H = img.size
+    cs = 2.0 if (W >= 18000 or (crop_box_lv95 is not None and camera.mpp <= 0.16)) else 1.0
 
-    lg_px = min(38, max(18, W // 180))
-    sm_px = min(24, max(13, W // 290))
-    xs_px = max(11, sm_px - 2)
+    lg_px = int(round(min(38, max(18, (W / cs) // 180)) * cs))
+    sm_px = int(round(min(24, max(13, (W / cs) // 290)) * cs))
+    xs_px = max(int(round(11 * cs)), sm_px - int(round(2 * cs)))
     try:
         font_lg = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", lg_px)
         font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", sm_px)
@@ -7927,24 +8209,30 @@ def _draw_museum_cartouche(
         font_sm = ImageFont.load_default()
         font_xs = font_sm
 
+    b_out = int(round(10 * cs))
+    b_in = int(round(16 * cs))
+    bw_out = max(2, int(round(2 * cs)))
+    bw_in = max(1, int(round(1 * cs)))
     border_outer = (88, 98, 118) if not preset.is_night else (58, 72, 102)
     border_inner = (182, 166, 134) if not preset.is_night else (148, 126, 88)
-    draw.rectangle([10, 10, W - 11, H - 11], outline=border_outer, width=2)
-    draw.rectangle([16, 16, W - 17, H - 17], outline=border_inner, width=1)
+    draw.rectangle([b_out, b_out, W - b_out - 1, H - b_out - 1], outline=border_outer, width=bw_out)
+    draw.rectangle([b_in, b_in, W - b_in - 1, H - b_in - 1], outline=border_inner, width=bw_in)
 
     # F13: Brass Corner Registration L-Brackets & Diamond Center Dots
-    tick = 18 if W >= 4000 else 12
+    tick = int(round((18 if (W / cs) >= 4000 else 12) * cs))
+    d_off = int(round(6 * cs))
+    d_rad = max(2, int(round(2 * cs)))
     for (cx_c, cy_c, sx_c, sy_c) in (
-        (16, 16, 1, 1), (W - 17, 16, -1, 1), (16, H - 17, 1, -1), (W - 17, H - 17, -1, -1)
+        (b_in, b_in, 1, 1), (W - b_in - 1, b_in, -1, 1), (b_in, H - b_in - 1, 1, -1), (W - b_in - 1, H - b_in - 1, -1, -1)
     ):
-        draw.line([(cx_c, cy_c), (cx_c + sx_c * tick, cy_c)], fill=border_inner, width=2)
-        draw.line([(cx_c, cy_c), (cx_c, cy_c + sy_c * tick)], fill=border_inner, width=2)
-        dx_d, dy_d = cx_c + sx_c * 6, cy_c + sy_c * 6
-        draw.polygon([(dx_d, dy_d - 2), (dx_d + 2, dy_d), (dx_d, dy_d + 2), (dx_d - 2, dy_d)], fill=border_inner)
+        draw.line([(cx_c, cy_c), (cx_c + sx_c * tick, cy_c)], fill=border_inner, width=bw_out)
+        draw.line([(cx_c, cy_c), (cx_c, cy_c + sy_c * tick)], fill=border_inner, width=bw_out)
+        dx_d, dy_d = cx_c + sx_c * d_off, cy_c + sy_c * d_off
+        draw.polygon([(dx_d, dy_d - d_rad), (dx_d + d_rad, dy_d), (dx_d, dy_d + d_rad), (dx_d - d_rad, dy_d)], fill=border_inner)
 
-    sw = lg_px + sm_px + 10
-    sx0, sy0 = 36, 30
-    draw.rectangle([sx0, sy0, sx0 + sw, sy0 + sw], fill=(208, 38, 38), outline=(246, 243, 236), width=2)
+    sw = lg_px + sm_px + int(round(10 * cs))
+    sx0, sy0 = int(round(36 * cs)), int(round(30 * cs))
+    draw.rectangle([sx0, sy0, sx0 + sw, sy0 + sw], fill=(208, 38, 38), outline=(246, 243, 236), width=bw_out)
     arm_w = max(4, sw // 4)
     arm_l = int(sw * 0.62)
     cx_s, cy_s = sx0 + sw // 2, sy0 + sw // 2
@@ -7952,22 +8240,22 @@ def _draw_museum_cartouche(
     draw.rectangle([cx_s - arm_l // 2, cy_s - arm_w // 2, cx_s + arm_l // 2, cy_s + arm_w // 2], fill=(250, 250, 248))
 
     title = plate_title if plate_title else "KILCHBERG ZH  —  90s 3D ISOMETRIC PIXEL ART DIORAMA"
+    mpp_lbl = f"{camera.mpp:.3f}".rstrip("0").rstrip(".")
     if plate_subtitle:
-        sub = f"{plate_subtitle}  |  {preset.name.upper()}  |  {camera.mpp:.2f} m/px  |  256-COLOR SVGA"
+        sub = f"{plate_subtitle}  |  {preset.name.upper()}  |  {mpp_lbl} m/px  |  256-COLOR SVGA"
     else:
         sub = (
-            f"256-COLOR SVGA PALETTE  |  {preset.name.upper()}  |  {camera.mpp:.2f} m/px  |  "
+            f"256-COLOR SVGA PALETTE  |  {preset.name.upper()}  |  {mpp_lbl} m/px  |  "
             f"{n_bldgs:,} LOD2 3D BUILDINGS  ·  {n_trees:,} 3D TREES  ·  SWISSTOPO GIS"
         )
-    tx = sx0 + sw + 18
+    tx = sx0 + sw + int(round(18 * cs))
     draw.text((tx, sy0), title, fill=(246, 241, 228), font=font_lg)
-    draw.text((tx, sy0 + lg_px + 8), sub, fill=(176, 188, 206), font=font_sm)
+    draw.text((tx, sy0 + lg_px + int(round(8 * cs))), sub, fill=(176, 188, 206), font=font_sm)
 
     # F13: Exact Projected Isometric Compass Rose (upper-right margin) showing true North & ESE -> WNW sightline!
-    r_cr = 34 if W >= 5000 else 24
-    cr_x = W - 46 - r_cr
-    cr_y = 32 + r_cr
-    # Project unit North (0, +1) and unit East (+1, 0) through camera.project() for exact geometric bearing!
+    r_cr = int(round((34 if (W / cs) >= 5000 else 24) * cs))
+    cr_x = W - int(round(46 * cs)) - r_cr
+    cr_y = int(round(32 * cs)) + r_cr
     p0x, p0y, _ = camera.project(np.array([0.0]), np.array([0.0]), np.array([0.0]))
     pnx_c, pny_c, _ = camera.project(np.array([0.0]), np.array([10.0]), np.array([0.0]))
     pex_c, pey_c, _ = camera.project(np.array([10.0]), np.array([0.0]), np.array([0.0]))
@@ -7977,36 +8265,35 @@ def _draw_museum_cartouche(
     vex, vey = float(pex_c[0] - p0x[0]), float(pey_c[0] - p0y[0])
     ve_len = max(1e-5, math.hypot(vex, vey))
     vex, vey = vex / ve_len, vey / ve_len
-    draw.ellipse([cr_x - r_cr, cr_y - r_cr, cr_x + r_cr, cr_y + r_cr], outline=border_inner, width=1)
-    # Subtle East-West cross axis
+    draw.ellipse([cr_x - r_cr, cr_y - r_cr, cr_x + r_cr, cr_y + r_cr], outline=border_inner, width=bw_in)
     draw.line(
         [(cr_x - vex * r_cr * 0.72, cr_y - vey * r_cr * 0.72), (cr_x + vex * r_cr * 0.72, cr_y + vey * r_cr * 0.72)],
-        fill=(146, 156, 174), width=1,
+        fill=(146, 156, 174), width=bw_in,
     )
-    # South tail (ivory) & bold North arrowhead (Swiss crimson!)
-    draw.line([(cr_x, cr_y), (cr_x - vnx * r_cr * 0.72, cr_y - vny * r_cr * 0.72)], fill=(196, 192, 182), width=2)
+    draw.line([(cr_x, cr_y), (cr_x - vnx * r_cr * 0.72, cr_y - vny * r_cr * 0.72)], fill=(196, 192, 182), width=bw_out)
     tip_x, tip_y = cr_x + vnx * r_cr * 0.92, cr_y + vny * r_cr * 0.92
-    perp_x, perp_y = -vny * 4.5, vnx * 4.5
+    perp_x, perp_y = -vny * 4.5 * cs, vnx * 4.5 * cs
     draw.polygon(
         [(tip_x, tip_y), (cr_x + perp_x, cr_y + perp_y), (cr_x - perp_x, cr_y - perp_y)],
         fill=(216, 48, 44), outline=(246, 241, 228),
     )
-    draw.text((int(tip_x + vnx * 7 - 4), int(tip_y + vny * 7 - 7)), "N", fill=(246, 241, 228), font=font_xs)
-    draw.text((cr_x - r_cr - 14, cr_y + r_cr + 5), "ESE → WNW", fill=(168, 178, 196), font=font_xs)
+    draw.text((int(tip_x + vnx * 7 * cs - 4 * cs), int(tip_y + vny * 7 * cs - 7 * cs)), "N", fill=(246, 241, 228), font=font_xs)
+    draw.text((cr_x - r_cr - int(round(14 * cs)), cr_y + r_cr + int(round(5 * cs))), "ESE → WNW", fill=(168, 178, 196), font=font_xs)
 
     # 4-segment alternating Swiss Scale Bar with 0 / mid / max ticks
     bar_m = 100 if crop_box_lv95 is not None else 250
     bar_px = int(round(bar_m / camera.mpp))
-    bx1 = W - 42
+    bx1 = W - int(round(42 * cs))
     bx0 = bx1 - bar_px
-    by = H - 40
+    by = H - int(round(40 * cs))
+    bar_h = int(round(7 * cs))
     seg_w = bar_px / 4.0
     for si_b in range(4):
         sx_a = int(round(bx0 + si_b * seg_w))
         sx_b = int(round(bx0 + (si_b + 1) * seg_w))
         c_seg = (208, 48, 44) if (si_b % 2 == 0) else (238, 232, 218)
-        draw.rectangle([sx_a, by - 7, sx_b, by], fill=c_seg, outline=(32, 38, 48), width=1)
-    lbl_y = by - 26
+        draw.rectangle([sx_a, by - bar_h, sx_b, by], fill=c_seg, outline=(32, 38, 48), width=bw_in)
+    lbl_y = by - int(round(26 * cs))
     draw.text((bx0, lbl_y), "0", fill=(214, 220, 230), font=font_sm)
     mid_txt = f"{bar_m // 2}"
     draw.text((bx0 + bar_px // 2 - len(mid_txt) * (sm_px // 4), lbl_y), mid_txt, fill=(214, 220, 230), font=font_sm)
@@ -8014,8 +8301,146 @@ def _draw_museum_cartouche(
     draw.text((bx1 - len(end_txt) * (sm_px * 6 // 10), lbl_y), end_txt, fill=(214, 220, 230), font=font_sm)
 
     credit = "DATA: © SWISSTOPO (SWISSALTI3D 2026 · SWISSBUILDINGS3D 3.0 2025 · SWISSSURFACE3D 0.5m · SWISSIMAGE DOP10 2025 · SWISSBATHY3D)"
-    draw.text((36, H - 44), credit, fill=(148, 160, 180), font=font_sm)
+    draw.text((int(round(36 * cs)), H - int(round(44 * cs))), credit, fill=(148, 160, 180), font=font_sm)
     return img
+
+
+def _draw_museum_cartouche_memmap(
+    full_rgb: np.ndarray,
+    preset: LightingPreset,
+    camera: IsometricCamera,
+    n_bldgs: int,
+    n_trees: int,
+) -> None:
+    """Draw the museum cartouche directly onto the 4 border strips of a large np.memmap canvas
+    without ever copying the full 268 MP canvas into RAM / PIL!"""
+    H, W, _ = full_rgb.shape
+    cs = 2.0 if W >= 18000 else 1.0
+    b_out = int(round(10 * cs))
+    b_in = int(round(16 * cs))
+    bw_out = max(2, int(round(2 * cs)))
+    bw_in = max(1, int(round(1 * cs)))
+    border_outer = np.array((88, 98, 118) if not preset.is_night else (58, 72, 102), dtype=np.uint8)
+    border_inner = np.array((182, 166, 134) if not preset.is_night else (148, 126, 88), dtype=np.uint8)
+
+    # 1. Outer & inner frame lines directly on memmap slices (zero RAM copy!)
+    full_rgb[b_out : b_out + bw_out, b_out : W - b_out] = border_outer
+    full_rgb[H - b_out - bw_out : H - b_out, b_out : W - b_out] = border_outer
+    full_rgb[b_out : H - b_out, b_out : b_out + bw_out] = border_outer
+    full_rgb[b_out : H - b_out, W - b_out - bw_out : W - b_out] = border_outer
+
+    full_rgb[b_in : b_in + bw_in, b_in : W - b_in] = border_inner
+    full_rgb[H - b_in - bw_in : H - b_in, b_in : W - b_in] = border_inner
+    full_rgb[b_in : H - b_in, b_in : b_in + bw_in] = border_inner
+    full_rgb[b_in : H - b_in, W - b_in - bw_in : W - b_in] = border_inner
+
+    # 2. Top strip (header, Swiss flag badge, compass rose, top L-brackets)
+    top_h = min(H, int(round(260 * cs)))
+    top_im = Image.fromarray(np.array(full_rgb[:top_h, :]), mode="RGB")
+    td = ImageDraw.Draw(top_im)
+    lg_px = int(round(min(38, max(18, (W / cs) // 180)) * cs))
+    sm_px = int(round(min(24, max(13, (W / cs) // 290)) * cs))
+    xs_px = max(int(round(11 * cs)), sm_px - int(round(2 * cs)))
+    try:
+        font_lg = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", lg_px)
+        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", sm_px)
+        font_xs = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", xs_px)
+    except Exception:
+        font_lg = ImageFont.load_default()
+        font_sm = ImageFont.load_default()
+        font_xs = font_sm
+
+    b_in_t = tuple(int(v) for v in border_inner)
+    tick = int(round((18 if (W / cs) >= 4000 else 12) * cs))
+    d_off = int(round(6 * cs))
+    d_rad = max(2, int(round(2 * cs)))
+    for (cx_c, cy_c, sx_c, sy_c) in ((b_in, b_in, 1, 1), (W - b_in - 1, b_in, -1, 1)):
+        td.line([(cx_c, cy_c), (cx_c + sx_c * tick, cy_c)], fill=b_in_t, width=bw_out)
+        td.line([(cx_c, cy_c), (cx_c, cy_c + sy_c * tick)], fill=b_in_t, width=bw_out)
+        dx_d, dy_d = cx_c + sx_c * d_off, cy_c + sy_c * d_off
+        td.polygon([(dx_d, dy_d - d_rad), (dx_d + d_rad, dy_d), (dx_d, dy_d + d_rad), (dx_d - d_rad, dy_d)], fill=b_in_t)
+
+    sw = lg_px + sm_px + int(round(10 * cs))
+    sx0, sy0 = int(round(36 * cs)), int(round(30 * cs))
+    td.rectangle([sx0, sy0, sx0 + sw, sy0 + sw], fill=(208, 38, 38), outline=(246, 243, 236), width=bw_out)
+    arm_w = max(4, sw // 4)
+    arm_l = int(sw * 0.62)
+    cx_s, cy_s = sx0 + sw // 2, sy0 + sw // 2
+    td.rectangle([cx_s - arm_w // 2, cy_s - arm_l // 2, cx_s + arm_w // 2, cy_s + arm_l // 2], fill=(250, 250, 248))
+    td.rectangle([cx_s - arm_l // 2, cy_s - arm_w // 2, cx_s + arm_l // 2, cy_s + arm_w // 2], fill=(250, 250, 248))
+
+    mpp_lbl = f"{camera.mpp:.3f}".rstrip("0").rstrip(".")
+    title = "KILCHBERG ZH  —  90s 3D ISOMETRIC PIXEL ART DIORAMA"
+    sub = (
+        f"256-COLOR SVGA PALETTE  |  {preset.name.upper()}  |  {mpp_lbl} m/px  |  "
+        f"{n_bldgs:,} LOD2 3D BUILDINGS  ·  {n_trees:,} 3D TREES  ·  SWISSTOPO GIS"
+    )
+    tx = sx0 + sw + int(round(18 * cs))
+    td.text((tx, sy0), title, fill=(246, 241, 228), font=font_lg)
+    td.text((tx, sy0 + lg_px + int(round(8 * cs))), sub, fill=(176, 188, 206), font=font_sm)
+
+    r_cr = int(round((34 if (W / cs) >= 5000 else 24) * cs))
+    cr_x = W - int(round(46 * cs)) - r_cr
+    cr_y = int(round(32 * cs)) + r_cr
+    p0x, p0y, _ = camera.project(np.array([0.0]), np.array([0.0]), np.array([0.0]))
+    pnx_c, pny_c, _ = camera.project(np.array([0.0]), np.array([10.0]), np.array([0.0]))
+    pex_c, pey_c, _ = camera.project(np.array([10.0]), np.array([0.0]), np.array([0.0]))
+    vnx, vny = float(pnx_c[0] - p0x[0]), float(pny_c[0] - p0y[0])
+    vn_len = max(1e-5, math.hypot(vnx, vny))
+    vnx, vny = vnx / vn_len, vny / vn_len
+    vex, vey = float(pex_c[0] - p0x[0]), float(pey_c[0] - p0y[0])
+    ve_len = max(1e-5, math.hypot(vex, vey))
+    vex, vey = vex / ve_len, vey / ve_len
+    td.ellipse([cr_x - r_cr, cr_y - r_cr, cr_x + r_cr, cr_y + r_cr], outline=b_in_t, width=bw_in)
+    td.line(
+        [(cr_x - vex * r_cr * 0.72, cr_y - vey * r_cr * 0.72), (cr_x + vex * r_cr * 0.72, cr_y + vey * r_cr * 0.72)],
+        fill=(146, 156, 174), width=bw_in,
+    )
+    td.line([(cr_x, cr_y), (cr_x - vnx * r_cr * 0.72, cr_y - vny * r_cr * 0.72)], fill=(196, 192, 182), width=bw_out)
+    tip_x, tip_y = cr_x + vnx * r_cr * 0.92, cr_y + vny * r_cr * 0.92
+    perp_x, perp_y = -vny * 4.5 * cs, vnx * 4.5 * cs
+    td.polygon(
+        [(tip_x, tip_y), (cr_x + perp_x, cr_y + perp_y), (cr_x - perp_x, cr_y - perp_y)],
+        fill=(216, 48, 44), outline=(246, 241, 228),
+    )
+    td.text((int(tip_x + vnx * 7 * cs - 4 * cs), int(tip_y + vny * 7 * cs - 7 * cs)), "N", fill=(246, 241, 228), font=font_xs)
+    td.text((cr_x - r_cr - int(round(14 * cs)), cr_y + r_cr + int(round(5 * cs))), "ESE → WNW", fill=(168, 178, 196), font=font_xs)
+    full_rgb[:top_h, :] = np.asarray(top_im)
+    del top_im
+
+    # 3. Bottom strip (scale bar, credit, bottom L-brackets)
+    bot_h = min(H, int(round(160 * cs)))
+    bot_y0 = H - bot_h
+    bot_im = Image.fromarray(np.array(full_rgb[bot_y0:, :]), mode="RGB")
+    bd = ImageDraw.Draw(bot_im)
+    for (cx_c, cy_c, sx_c, sy_c) in ((b_in, bot_h - b_in - 1, 1, -1), (W - b_in - 1, bot_h - b_in - 1, -1, -1)):
+        bd.line([(cx_c, cy_c), (cx_c + sx_c * tick, cy_c)], fill=b_in_t, width=bw_out)
+        bd.line([(cx_c, cy_c), (cx_c, cy_c + sy_c * tick)], fill=b_in_t, width=bw_out)
+        dx_d, dy_d = cx_c + sx_c * d_off, cy_c + sy_c * d_off
+        bd.polygon([(dx_d, dy_d - d_rad), (dx_d + d_rad, dy_d), (dx_d, dy_d + d_rad), (dx_d - d_rad, dy_d)], fill=b_in_t)
+
+    bar_m = 250
+    bar_px = int(round(bar_m / camera.mpp))
+    bx1 = W - int(round(42 * cs))
+    bx0 = bx1 - bar_px
+    by = bot_h - int(round(40 * cs))
+    bar_h = int(round(7 * cs))
+    seg_w = bar_px / 4.0
+    for si_b in range(4):
+        sx_a = int(round(bx0 + si_b * seg_w))
+        sx_b = int(round(bx0 + (si_b + 1) * seg_w))
+        c_seg = (208, 48, 44) if (si_b % 2 == 0) else (238, 232, 218)
+        bd.rectangle([sx_a, by - bar_h, sx_b, by], fill=c_seg, outline=(32, 38, 48), width=bw_in)
+    lbl_y = by - int(round(26 * cs))
+    bd.text((bx0, lbl_y), "0", fill=(214, 220, 230), font=font_sm)
+    mid_txt = f"{bar_m // 2}"
+    bd.text((bx0 + bar_px // 2 - len(mid_txt) * (sm_px // 4), lbl_y), mid_txt, fill=(214, 220, 230), font=font_sm)
+    end_txt = f"{bar_m} m"
+    bd.text((bx1 - len(end_txt) * (sm_px * 6 // 10), lbl_y), end_txt, fill=(214, 220, 230), font=font_sm)
+    credit = "DATA: © SWISSTOPO (SWISSALTI3D 2026 · SWISSBUILDINGS3D 3.0 2025 · SWISSSURFACE3D 0.5m · SWISSIMAGE DOP10 2025 · SWISSBATHY3D)"
+    bd.text((int(round(36 * cs)), bot_h - int(round(44 * cs))), credit, fill=(148, 160, 180), font=font_sm)
+    full_rgb[bot_y0:, :] = np.asarray(bot_im)
+    del bot_im
 
 
 def render_diorama_tiled_hires(
@@ -8028,18 +8453,22 @@ def render_diorama_tiled_hires(
     tile_size: int = 1024,
     collect_hit_boxes: bool = False,
     depth_only: bool = False,
+    macro_rows: tuple[int, int] | None = None,
+    finalize_tiles: bool = True,
+    finalize_only: bool = False,
 ) -> dict:
-    """Render ultra-high-resolution (~70 MP at 0.25 m/px) full municipality in memory-safe
-    seamless screen windows, slice lossless 1024x1024 WebP tiles for deep-zoom web streaming,
-    and save overview WebP + GitHub-friendly full PNG."""
+    """Render ultra-high-resolution (268.5 MP at 0.125 m/px) full municipality via /tmp np.memmap
+    in memory-safe seamless macro-tiles, supporting split --macro-rows bands + --finalize-tiles,
+    streaming 2-level WebP tile pyramid (L1 0.25 m/px + L2 0.125 m/px), streaming 0.50 m/px overview,
+    and DEPTH_DS=4 (0.50 m/px) 16-bit depth map."""
     import gc
 
     preset = PRESETS[preset_key]
     cam = IsometricCamera(mpp=mpp)
     (
         cam,
-        _,
-        _,
+        active_mask,
+        plinth_z,
         W_full,
         H_full,
         shift_x_full,
@@ -8047,123 +8476,209 @@ def render_diorama_tiled_hires(
         *_,
     ) = compute_full_canvas_geometry(scene, cam, None, True)
 
-    sun_sh = compute_shadow_grid(scene, preset.sun_az_deg, preset.sun_alt_deg)
-    full_rgb = None if depth_only else np.empty((H_full, W_full, 3), dtype=np.uint8)
-
-    # Export 1/2-res (0.5 m/px -> 6165x2722!) 16-bit 3D Depth & Occluder Map during 'day' pass
-    # (geometry is identical across day/sunset/night!) for pixel-exact partial vehicle occlusion!
-    DEPTH_DS = 2
+    # Export 0.50 m/px (~6165x2722) 16-bit 3D Depth & Occluder Map during 'day' pass
+    DEPTH_DS = max(2, int(round(0.50 / mpp)))
     DEPTH_MIN = -2400.0
     DEPTH_MAX = 2400.0
+    dw_f = W_full // DEPTH_DS
+    dh_f = H_full // DEPTH_DS
     save_depth = (preset_key == "day") or depth_only
-    if save_depth:
-        dw_f = W_full // DEPTH_DS
-        dh_f = H_full // DEPTH_DS
-        depth_rgb = np.zeros((dh_f, dw_f, 3), dtype=np.uint8)
-        depth_rgb[:, :, 0] = 255
-        depth_rgb[:, :, 1] = 255
 
-    # F7/F8/F9: Asymmetric guard padding (guard_x=24, guard_y=56) guarantees ZERO macro-tile seams
-    # across 20px streetlamp pools, 10px Gaussian halos, 2px contact AO, and 28+24=52px shoreline reflections!
-    nx_macro, ny_macro = 6, 3
-    guard_x, guard_y = 24, 56
-    for my in range(ny_macro):
-        y0 = (my * H_full) // ny_macro
-        y1 = ((my + 1) * H_full) // ny_macro
-        for mx in range(nx_macro):
-            x0 = (mx * W_full) // nx_macro
-            x1 = ((mx + 1) * W_full) // nx_macro
+    RAW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    full_mmap_p = RAW_CACHE_DIR / f"_tmp_full_{preset_key}.mmap"
+    depth_mmap_p = RAW_CACHE_DIR / "_tmp_depth.mmap"
 
-            wx0 = max(0, x0 - guard_x)
-            wy0 = max(0, y0 - guard_y)
-            wx1 = min(W_full, x1 + guard_x)
-            wy1 = min(H_full, y1 + guard_y)
+    exp_full_bytes = int(H_full) * int(W_full) * 3
+    exp_depth_bytes = int(dh_f) * int(dw_f) * 3
 
-            dbuf = {} if save_depth else None
-            sub_img, _ = render_diorama(
-                scene,
-                cam,
-                preset_key=preset_key,
-                crop_box_lv95=None,
-                add_frame=True,
-                collect_hit_boxes=False,
-                viewport_win=(wx0, wy0, wx1, wy1),
-                sun_shadow_override=sun_sh,
-                out_depth_buf=dbuf,
+    is_first_band = (macro_rows is None and not finalize_only) or (macro_rows is not None and macro_rows[0] == 0)
+
+    full_rgb = None
+    if not depth_only:
+        need_create_full = (not full_mmap_p.exists()) or (full_mmap_p.stat().st_size != exp_full_bytes) or is_first_band
+        if finalize_only:
+            assert full_mmap_p.exists() and full_mmap_p.stat().st_size == exp_full_bytes, (
+                f"Cannot --finalize-tiles: missing or wrong-size memmap {full_mmap_p} (expected {exp_full_bytes} bytes)"
             )
-            if not depth_only:
-                sub_arr = np.asarray(sub_img)
-                full_rgb[y0:y1, x0:x1] = sub_arr[(y0 - wy0) : (y1 - wy0), (x0 - wx0) : (x1 - wx0)]
-                del sub_arr
+            full_rgb = np.memmap(full_mmap_p, dtype=np.uint8, mode="r+", shape=(H_full, W_full, 3))
+        else:
+            mode_f = "w+" if need_create_full else "r+"
+            full_rgb = np.memmap(full_mmap_p, dtype=np.uint8, mode=mode_f, shape=(H_full, W_full, 3))
 
-            if save_depth and dbuf:
-                # Sample exact 3D occluder depth at 1/2 resolution for this macro window
-                sz = dbuf["zbuf"]
-                sm = dbuf["mat_buf"]
-                so = dbuf["obj_buf"]
-                dy0 = y0 // DEPTH_DS
-                dy1 = min(dh_f, (y1 + DEPTH_DS - 1) // DEPTH_DS)
-                dx0 = x0 // DEPTH_DS
-                dx1 = min(dw_f, (x1 + DEPTH_DS - 1) // DEPTH_DS)
-                if dy1 > dy0 and dx1 > dx0:
-                    ly0 = dy0 * DEPTH_DS - wy0
-                    ly1 = dy1 * DEPTH_DS - wy0
-                    lx0 = dx0 * DEPTH_DS - wx0
-                    lx1 = dx1 * DEPTH_DS - wx0
-                    z_blk = sz[ly0:ly1, lx0:lx1].reshape(dy1 - dy0, DEPTH_DS, dx1 - dx0, DEPTH_DS)
-                    m_blk = sm[ly0:ly1, lx0:lx1].reshape(dy1 - dy0, DEPTH_DS, dx1 - dx0, DEPTH_DS)
-                    o_blk = so[ly0:ly1, lx0:lx1].reshape(dy1 - dy0, DEPTH_DS, dx1 - dx0, DEPTH_DS)
-                    is_thin_overhead = (
-                        ((o_blk >= 310000) & (o_blk < 310200))  # SBB catenary portals, wires & droppers
-                        | ((o_blk >= 238000) & (o_blk < 245000))  # 1px streetlamp poles & heads (1,582 lamps)
-                    )
-                    occ_m = (
-                        (
-                            (m_blk == M_WALL)
-                            | (m_blk == M_ROOF)
-                            | (m_blk == M_WINDOW_DAY)
-                            | (m_blk == M_WINDOW_LIT)
-                            | (m_blk == M_TREE)
-                            | (m_blk == M_TRUNK)
-                            | (m_blk == M_BRIDGE)
-                            | (m_blk == M_HARBOR_OBJ)
-                        )
-                        & (~is_thin_overhead)
-                    )
-                    occ_cnt = occ_m.sum(axis=(1, 3))
-                    has_occ = occ_cnt >= 2
-                    if has_occ.any():
-                        z_masked = np.where(occ_m, z_blk, 1e9)
-                        d_min_blk = z_masked.min(axis=(1, 3))
-                        v16 = np.clip(
-                            np.round((d_min_blk - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 65535.0),
-                            0,
-                            65535,
-                        ).astype(np.uint16)
-                        sub_dr = depth_rgb[dy0:dy1, dx0:dx1]
-                        sub_dr[has_occ, 0] = (v16[has_occ] >> 8).astype(np.uint8)
-                        sub_dr[has_occ, 1] = (v16[has_occ] & 0xFF).astype(np.uint8)
-                        sub_dr[has_occ, 2] = 255
-                del dbuf
-
-            del sub_img
-            gc.collect()
-
+    depth_rgb = None
     if save_depth:
+        need_create_d = (not depth_mmap_p.exists()) or (depth_mmap_p.stat().st_size != exp_depth_bytes) or is_first_band
+        if finalize_only:
+            if depth_mmap_p.exists() and depth_mmap_p.stat().st_size == exp_depth_bytes:
+                depth_rgb = np.memmap(depth_mmap_p, dtype=np.uint8, mode="r+", shape=(dh_f, dw_f, 3))
+        else:
+            mode_d = "w+" if need_create_d else "r+"
+            depth_rgb = np.memmap(depth_mmap_p, dtype=np.uint8, mode=mode_d, shape=(dh_f, dw_f, 3))
+            if mode_d == "w+":
+                depth_rgb[:, :, 0] = 255
+                depth_rgb[:, :, 1] = 255
+                depth_rgb[:, :, 2] = 0
+
+    if mpp <= 0.18:
+        nx_macro, ny_macro = 12, 6
+        guard_x, guard_y = 48, 112
+    else:
+        nx_macro, ny_macro = 6, 3
+        guard_x, guard_y = 24, 56
+
+    if not finalize_only:
+        sun_sh = compute_shadow_grid(scene, preset.sun_az_deg, preset.sun_alt_deg)
+
+        # Coarse projected diorama occupancy mask (256-px cells) for lossless empty-sky macro-tile fast-path!
+        ar_occ, ac_occ = np.nonzero(active_mask)
+        ae_occ = E_MIN + (ac_occ[::8] + 0.5) * GRID_RES
+        an_occ = N_MAX - (ar_occ[::8] + 0.5) * GRID_RES
+        z_occ = scene.dem[ar_occ[::8], ac_occ[::8]]
+        px_hi, py_hi, _ = cam.project(ae_occ, an_occ, z_occ + 52.0)
+        px_lo, py_lo, _ = cam.project(ae_occ + 14.0, an_occ - 12.0, np.full_like(ae_occ, plinth_z - 12.0))
+        all_px = np.concatenate([px_hi, px_lo]) + shift_x_full
+        all_py = np.concatenate([py_hi, py_lo]) + shift_y_full
+        del ar_occ, ac_occ, ae_occ, an_occ, z_occ, px_hi, py_hi, px_lo, py_lo
+
+        r_start = 0 if macro_rows is None else max(0, int(macro_rows[0]))
+        r_end = ny_macro if macro_rows is None else min(ny_macro, int(macro_rows[1]))
+        occ_thresh = (DEPTH_DS * DEPTH_DS) // 2
+
+        for my in range(r_start, r_end):
+            y0 = (my * H_full) // ny_macro
+            y1 = ((my + 1) * H_full) // ny_macro
+            for mx in range(nx_macro):
+                x0 = (mx * W_full) // nx_macro
+                x1 = ((mx + 1) * W_full) // nx_macro
+
+                wx0 = max(0, x0 - guard_x)
+                wy0 = max(0, y0 - guard_y)
+                wx1 = min(W_full, x1 + guard_x)
+                wy1 = min(H_full, y1 + guard_y)
+
+                # Empty-sky fast-path: strictly outside projected diorama + generous 220px margin -> fill sky directly!
+                sky_pad = 220.0
+                has_geo = bool(
+                    ((all_px >= (wx0 - sky_pad)) & (all_px <= (wx1 + sky_pad))
+                     & (all_py >= (wy0 - sky_pad)) & (all_py <= (wy1 + sky_pad))).any()
+                )
+                if not has_geo:
+                    if not depth_only:
+                        th_s, tw_s = y1 - y0, x1 - x0
+                        gy_s = (np.arange(y0, y1, dtype=np.float32) / max(1, H_full - 1))[:, None]
+                        bg_s = (1.0 - gy_s) * np.array(preset.sky_top_rgb, dtype=np.float32) + gy_s * np.array(preset.sky_bot_rgb, dtype=np.float32)
+                        sky_rgb = np.broadcast_to(bg_s[:, None, :], (th_s, tw_s, 3)).copy()
+                        bayer_s = BAYER_4X4[(np.arange(y0, y1)[:, None]) % 4, (np.arange(x0, x1)[None, :]) % 4] * 0.42
+                        full_rgb[y0:y1, x0:x1] = quantize_to_90s_palette(sky_rgb, bayer_s, preset.dither_strength, preset_key=preset_key)
+                        del sky_rgb, bayer_s
+                    continue
+
+                dbuf = {} if save_depth else None
+                sub_img, _ = render_diorama(
+                    scene,
+                    cam,
+                    preset_key=preset_key,
+                    crop_box_lv95=None,
+                    add_frame=True,
+                    collect_hit_boxes=False,
+                    viewport_win=(wx0, wy0, wx1, wy1),
+                    sun_shadow_override=sun_sh,
+                    out_depth_buf=dbuf,
+                )
+                if not depth_only:
+                    sub_arr = np.asarray(sub_img)
+                    full_rgb[y0:y1, x0:x1] = sub_arr[(y0 - wy0) : (y1 - wy0), (x0 - wx0) : (x1 - wx0)]
+                    del sub_arr
+
+                if save_depth and depth_rgb is not None and dbuf:
+                    sz = dbuf["zbuf"]
+                    sm = dbuf["mat_buf"]
+                    so = dbuf["obj_buf"]
+                    dy0 = y0 // DEPTH_DS
+                    dy1 = min(dh_f, (y1 + DEPTH_DS - 1) // DEPTH_DS)
+                    dx0 = x0 // DEPTH_DS
+                    dx1 = min(dw_f, (x1 + DEPTH_DS - 1) // DEPTH_DS)
+                    if dy1 > dy0 and dx1 > dx0:
+                        ly0 = dy0 * DEPTH_DS - wy0
+                        ly1 = dy1 * DEPTH_DS - wy0
+                        lx0 = dx0 * DEPTH_DS - wx0
+                        lx1 = dx1 * DEPTH_DS - wx0
+                        if ly0 >= 0 and lx0 >= 0 and ly1 <= sz.shape[0] and lx1 <= sz.shape[1]:
+                            z_blk = sz[ly0:ly1, lx0:lx1].reshape(dy1 - dy0, DEPTH_DS, dx1 - dx0, DEPTH_DS)
+                            m_blk = sm[ly0:ly1, lx0:lx1].reshape(dy1 - dy0, DEPTH_DS, dx1 - dx0, DEPTH_DS)
+                            o_blk = so[ly0:ly1, lx0:lx1].reshape(dy1 - dy0, DEPTH_DS, dx1 - dx0, DEPTH_DS)
+                            is_thin_overhead = (
+                                ((o_blk >= 310000) & (o_blk < 310200))  # SBB catenary portals, wires & droppers
+                                | ((o_blk >= 238000) & (o_blk < 245000))  # 1px streetlamp poles & heads (1,582 lamps)
+                            )
+                            occ_m = (
+                                (
+                                    (m_blk == M_WALL)
+                                    | (m_blk == M_ROOF)
+                                    | (m_blk == M_WINDOW_DAY)
+                                    | (m_blk == M_WINDOW_LIT)
+                                    | (m_blk == M_TREE)
+                                    | (m_blk == M_TRUNK)
+                                    | (m_blk == M_BRIDGE)
+                                    | (m_blk == M_HARBOR_OBJ)
+                                )
+                                & (~is_thin_overhead)
+                            )
+                            occ_cnt = occ_m.sum(axis=(1, 3))
+                            has_occ = occ_cnt >= occ_thresh
+                            if has_occ.any():
+                                z_masked = np.where(occ_m, z_blk, 1e9)
+                                d_min_blk = z_masked.min(axis=(1, 3))
+                                v16 = np.clip(
+                                    np.round((d_min_blk - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 65535.0),
+                                    0,
+                                    65535,
+                                ).astype(np.uint16)
+                                sub_dr = depth_rgb[dy0:dy1, dx0:dx1]
+                                sub_dr[has_occ, 0] = (v16[has_occ] >> 8).astype(np.uint8)
+                                sub_dr[has_occ, 1] = (v16[has_occ] & 0xFF).astype(np.uint8)
+                                sub_dr[has_occ, 2] = 255
+                    del dbuf
+
+                del sub_img
+                gc.collect()
+                _evict_mmap_rss(scene.ortho_hr)
+                _evict_mmap_rss(scene.roof_edge_25cm)
+                if full_rgb is not None:
+                    full_rgb.flush()
+                    _evict_mmap_rss(full_rgb)
+                if depth_rgb is not None:
+                    depth_rgb.flush()
+                    _evict_mmap_rss(depth_rgb)
+        del sun_sh, all_px, all_py
+        gc.collect()
+
+    if not finalize_tiles and not depth_only:
+        if full_rgb is not None:
+            full_rgb.flush()
+            del full_rgb
+        if depth_rgb is not None:
+            depth_rgb.flush()
+            del depth_rgb
+        gc.collect()
+        return {}
+
+    if save_depth and depth_rgb is not None:
         depth_path = overview_webp_path.parent / "kilchberg_depth.png"
-        Image.fromarray(depth_rgb, mode="RGB").save(depth_path, optimize=True)
-        print(f"[render] Saved 16-bit 3D Depth & Occluder Map -> {depth_path} ({dw_f}x{dh_f})")
+        depth_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(np.array(depth_rgb), mode="RGB").save(depth_path, optimize=True)
+        print(f"[render] Saved 16-bit 3D Depth & Occluder Map -> {depth_path} ({dw_f}x{dh_f}, DEPTH_DS={DEPTH_DS})")
         del depth_rgb
     if depth_only:
         gc.collect()
         return {}
 
-    master_img = Image.fromarray(full_rgb, mode="RGB")
-    del full_rgb
-    gc.collect()
+    assert full_rgb is not None
+    # Draw museum cartouche directly onto the memmap border strips (zero 268 MP RAM copy!)
+    _draw_museum_cartouche_memmap(full_rgb, preset, cam, len(scene.buildings), len(scene.tree_e))
+    full_rgb.flush()
 
-    master_img = _draw_museum_cartouche(master_img, preset, cam, len(scene.buildings), len(scene.tree_e), None)
-
+    # Export L2 full-res tiles (e.g. 0.125 m/px, 25x11) directly from memmap slices
     tiles_dir.mkdir(parents=True, exist_ok=True)
     cols = int(math.ceil(W_full / tile_size))
     rows = int(math.ceil(H_full / tile_size))
@@ -8173,8 +8688,42 @@ def render_diorama_tiled_hires(
         for c in range(cols):
             tx0 = c * tile_size
             tx1 = min(W_full, tx0 + tile_size)
-            tile_im = master_img.crop((tx0, ty0, tx1, ty1))
+            tile_im = Image.fromarray(np.array(full_rgb[ty0:ty1, tx0:tx1]), mode="RGB")
             tile_im.save(tiles_dir / f"{c}_{r}.webp", format="WEBP", lossless=True, method=4)
+
+    # Export L1 mid-res pyramid tiles (0.25 m/px, 13x6) by streaming 2*tile_size row bands!
+    z1_meta = None
+    if mpp <= 0.18:
+        z1_dir = tiles_dir / "z1"
+        z1_dir.mkdir(parents=True, exist_ok=True)
+        z1_w = W_full // 2
+        z1_h = H_full // 2
+        z1_cols = int(math.ceil(z1_w / tile_size))
+        z1_rows = int(math.ceil(z1_h / tile_size))
+        for zr in range(z1_rows):
+            zy0 = zr * tile_size
+            zy1 = min(z1_h, zy0 + tile_size)
+            sy0 = zy0 * 2
+            sy1 = min(H_full, zy1 * 2)
+            band_ds = _downsample_z1_band_svga(
+                np.array(full_rgb[sy0:sy1, : z1_w * 2]), z1_w, zy1 - zy0, preset_key
+            )
+            for zc in range(z1_cols):
+                zx0 = zc * tile_size
+                zx1 = min(z1_w, zx0 + tile_size)
+                band_ds.crop((zx0, 0, zx1, zy1 - zy0)).save(
+                    z1_dir / f"{zc}_{zr}.webp", format="WEBP", lossless=True, method=4
+                )
+            del band_ds
+        z1_meta = {
+            "width": z1_w,
+            "height": z1_h,
+            "mpp": round(mpp * 2.0, 4),
+            "tileSize": tile_size,
+            "cols": z1_cols,
+            "rows": z1_rows,
+            "path": "z1",
+        }
 
     manifest = {
         "width": W_full,
@@ -8186,20 +8735,169 @@ def render_diorama_tiled_hires(
         "preset": preset_key,
         "depthMin": DEPTH_MIN,
         "depthMax": DEPTH_MAX,
+        "macroCols": nx_macro,
+        "macroRows": ny_macro,
     }
+    if z1_meta is not None:
+        manifest["z1"] = z1_meta
     (tiles_dir / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":")))
 
-    ov_w = W_full // 2
-    ov_h = H_full // 2
-    ov_img = master_img.resize((ov_w, ov_h), resample=Image.Resampling.LANCZOS)
-    ov_img.save(overview_webp_path, format="WEBP", quality=94, method=4)
+    # Stream 0.50 m/px overview (~6165x2722) by row-band downsampling (zero full-canvas RAM copy!)
+    ov_ds = max(2, int(round(0.50 / mpp)))
+    ov_w = W_full // ov_ds
+    ov_h = H_full // ov_ds
+    ov_arr = np.empty((ov_h, ov_w, 3), dtype=np.uint8)
+    band_ov_rows = 256
+    for oy0 in range(0, ov_h, band_ov_rows):
+        oy1 = min(ov_h, oy0 + band_ov_rows)
+        sy0 = oy0 * ov_ds
+        sy1 = min(H_full, oy1 * ov_ds)
+        b_im = Image.fromarray(np.array(full_rgb[sy0:sy1, : ov_w * ov_ds]), mode="RGB")
+        b_ds = b_im.resize((ov_w, oy1 - oy0), resample=Image.Resampling.LANCZOS)
+        ov_arr[oy0:oy1, :, :] = np.asarray(b_ds)
+        del b_im, b_ds
 
+    ov_img = Image.fromarray(ov_arr, mode="RGB")
+    del ov_arr
+    overview_webp_path.parent.mkdir(parents=True, exist_ok=True)
+    ov_img.save(overview_webp_path, format="WEBP", quality=94, method=4)
+    full_png_path.parent.mkdir(parents=True, exist_ok=True)
     ov_img.save(full_png_path, optimize=True)
+    del ov_img
 
     hit_data = {}
     if collect_hit_boxes:
         hit_data = _extract_interactive_metadata(scene, cam, shift_x_full, shift_y_full, W_full, H_full)
 
-    del master_img, ov_img
+    del full_rgb
     gc.collect()
     return hit_data
+
+
+def render_diorama_crop_tiled(
+    scene: SceneData,
+    camera: IsometricCamera,
+    preset_key: str = "day",
+    crop_box_lv95: tuple[float, float, float, float] | None = None,
+    add_frame: bool = True,
+    sun_shadow_override: tuple[np.ndarray, np.ndarray] | None = None,
+    plate_title: str | None = None,
+    plate_subtitle: str | None = None,
+) -> Image.Image:
+    """Memory-safe seamless 2x2 windowed renderer for ultra-high-res 0.11 m/px detail plates (~20+ MP)
+    so peak RAM stays well below 4.0 GiB on 7 GiB / 0-swap VMs."""
+    import gc
+
+    preset = PRESETS[preset_key]
+    cam, _, _, W_full, H_full, *_ = compute_full_canvas_geometry(scene, camera, crop_box_lv95, add_frame)
+    if W_full * H_full <= 6_500_000:
+        img_c, _ = render_diorama(
+            scene,
+            cam,
+            preset_key=preset_key,
+            crop_box_lv95=crop_box_lv95,
+            add_frame=add_frame,
+            sun_shadow_override=sun_shadow_override,
+            plate_title=plate_title,
+            plate_subtitle=plate_subtitle,
+        )
+        return img_c
+
+    nx, ny = 2, 2
+    guard_x = 48 if cam.mpp <= 0.18 else 24
+    guard_y = 112 if cam.mpp <= 0.18 else 56
+    canvas = np.empty((H_full, W_full, 3), dtype=np.uint8)
+    for my in range(ny):
+        y0 = (my * H_full) // ny
+        y1 = ((my + 1) * H_full) // ny
+        for mx in range(nx):
+            x0 = (mx * W_full) // nx
+            x1 = ((mx + 1) * W_full) // nx
+            wx0 = max(0, x0 - guard_x)
+            wy0 = max(0, y0 - guard_y)
+            wx1 = min(W_full, x1 + guard_x)
+            wy1 = min(H_full, y1 + guard_y)
+            sub_img, _ = render_diorama(
+                scene,
+                cam,
+                preset_key=preset_key,
+                crop_box_lv95=crop_box_lv95,
+                add_frame=add_frame,
+                collect_hit_boxes=False,
+                viewport_win=(wx0, wy0, wx1, wy1),
+                sun_shadow_override=sun_shadow_override,
+            )
+            sub_arr = np.asarray(sub_img)
+            canvas[y0:y1, x0:x1] = sub_arr[(y0 - wy0) : (y1 - wy0), (x0 - wx0) : (x1 - wx0)]
+            del sub_arr, sub_img
+            gc.collect()
+            _evict_mmap_rss(scene.ortho_hr)
+            _evict_mmap_rss(scene.roof_edge_25cm)
+
+    img = Image.fromarray(canvas, mode="RGB")
+    del canvas
+    gc.collect()
+    if add_frame:
+        img = _draw_museum_cartouche(
+            img, preset, cam, len(scene.buildings), len(scene.tree_e), crop_box_lv95,
+            plate_title=plate_title, plate_subtitle=plate_subtitle,
+        )
+    return img
+
+
+def _downsample_z1_band_svga(
+    band_rgb: np.ndarray, out_w: int, out_h: int, preset_key: str
+) -> Image.Image:
+    """Downsample a 2x L2 band to L1 (z1) using BOX filtering + stateless global 160-color SVGA LUT snapping.
+    The 160-color subset is selected deterministically from the preset's 256-color SVGA palette alone
+    (zero image/band-histogram dependence), guaranteeing identical RGB -> SVGA mapping across all row bands
+    (zero horizontal band seams), strictly <= 160 <= 256 preset SVGA colors, and compact < 500 KB VP8L tiles."""
+    cache = getattr(_downsample_z1_band_svga, "_lut_cache", None)
+    if cache is None:
+        cache = {}
+        _downsample_z1_band_svga._lut_cache = cache
+    if preset_key not in cache:
+        pal, _ = build_90s_palette_and_lut(preset_key)
+        p = pal.astype(np.int32)
+        n = len(p)
+        k = min(160, n)
+        selected = [0]
+        d = p - p[0]
+        min_d = 2 * d[:, 0] ** 2 + 4 * d[:, 1] ** 2 + 3 * d[:, 2] ** 2
+        for _ in range(1, k):
+            nxt = int(np.argmax(min_d))
+            selected.append(nxt)
+            d = p - p[nxt]
+            dist = 2 * d[:, 0] ** 2 + 4 * d[:, 1] ** 2 + 3 * d[:, 2] ** 2
+            min_d = np.minimum(min_d, dist)
+        sub_pal = np.ascontiguousarray(pal[selected], dtype=np.uint8)
+        sp = sub_pal.astype(np.int32)
+        g = np.arange(64, dtype=np.int32) * 4 + 2
+        R, G, B = np.meshgrid(g, g, g, indexing="ij")
+        pts = np.stack([R, G, B], axis=-1).reshape(-1, 3)
+        idx = np.empty(pts.shape[0], dtype=np.uint8)
+        for i in range(0, pts.shape[0], 8192):
+            diff = pts[i : i + 8192, None, :] - sp[None, :, :]
+            dist = 2 * diff[..., 0] ** 2 + 4 * diff[..., 1] ** 2 + 3 * diff[..., 2] ** 2
+            idx[i : i + 8192] = np.argmin(dist, axis=1)
+        cache[preset_key] = (sub_pal, idx.reshape(64, 64, 64))
+    sub_pal, sub_lut = cache[preset_key]
+    box_im = Image.fromarray(band_rgb, mode="RGB").resize((out_w, out_h), resample=Image.Resampling.BOX)
+    arr = np.asarray(box_im, dtype=np.uint8)
+    svga_rgb = sub_pal[sub_lut[arr[..., 0] >> 2, arr[..., 1] >> 2, arr[..., 2] >> 2]]
+    return Image.fromarray(svga_rgb, mode="RGB")
+
+
+def _evict_mmap_rss(arr: np.ndarray | None) -> None:
+    """Release clean file-backed mmap pages from process page tables (Linux MADV_DONTNEED) to keep Peak RSS low."""
+    if arr is None:
+        return
+    mm = getattr(arr, "_mmap", None)
+    if mm is None and getattr(arr, "base", None) is not None:
+        mm = getattr(arr.base, "_mmap", None)
+    if mm is not None and hasattr(mm, "madvise"):
+        try:
+            import mmap as _mmap
+            mm.madvise(_mmap.MADV_DONTNEED)
+        except Exception:
+            pass

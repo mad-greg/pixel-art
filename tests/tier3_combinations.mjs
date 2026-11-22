@@ -1,5 +1,5 @@
 /**
- * Tier 3 (Node CDP): 11 Pairwise Cross-Feature Combination Suites (T3.01 - T3.11).
+ * Tier 3 (Node CDP): 13 Pairwise Cross-Feature Combination Suites (T3.01 - T3.13).
  */
 
 import {
@@ -744,6 +744,151 @@ async function runTests(harness, test) {
       assert(tab.exceptions.length === 0, `T3.11 JS exceptions: ${tab.exceptions.join('; ')}`);
       assert(tab.consoleErrors.length === 0, `T3.11 console errors: ${tab.consoleErrors.join('; ')}`);
       assert(tab.localHttpErrors.length === 0, `T3.11 local HTTP errors: ${tab.localHttpErrors.map((e) => `${e.status} ${e.url}`).join('; ')}`);
+    } finally {
+      await harness.closeTab(tab);
+    }
+  });
+
+  // ── T3.12: v10 2x resolution live sprite physical-scale & depth-alignment (zoom=1 & zoom=2) ──
+  await test('T3.12', 'v10 2x live sprite physical-scale & zero roof perforation on Train & Bus at zoom=1 and zoom=2', async () => {
+    const tab = await harness.openTab('/?mode=day&t=10', { width: 1280, height: 800, dpr: 1, waitReady: true });
+    try {
+      const mf = await tab.evaluate(
+        `(async () => { const r = await fetch('assets/tiles/day/manifest.json'); return r.ok ? r.json() : null; })()`,
+      );
+      assert(
+        mf && typeof mf.mpp === 'number' && mf.mpp <= 0.125,
+        `Expected v10 manifest.mpp <= 0.125 for 2x sprite scale check, got ${mf?.mpp}`,
+      );
+
+      const checks = [
+        { kind: 'train', zoom: 1, times: [14, 26], minVehPx: 120 },
+        { kind: 'bus', zoom: 1, times: [14, 26], minVehPx: 40 },
+        { kind: 'train', zoom: 2, times: [14, 26], minVehPx: 300 },
+        { kind: 'bus', zoom: 2, times: [14, 26], minVehPx: 100 },
+      ];
+
+      for (const { kind, zoom, times, minVehPx } of checks) {
+        let best = null;
+        for (const t of times) {
+          await tab.navigate(`/?mode=day&zoom=2&follow=${kind}&t=${t}`, { waitReady: true });
+          await tab.waitForCameraSettled();
+          if (zoom === 1) {
+            await tab.clickSelector('#btn-zoom-1x');
+            await tab.waitForCameraSettled();
+          }
+          await sleep(220);
+          const dbg = await tab.getDebug();
+          assert(dbg && dbg.followTarget === kind, `Expected followTarget='${kind}' at zoom=${zoom}, got '${dbg?.followTarget}'`);
+          assert(
+            typeof dbg.scale === 'number' && dbg.scale >= zoom * 0.9 && dbg.scale <= zoom * 1.15,
+            `Expected scale in [${(zoom * 0.9).toFixed(2)}, ${(zoom * 1.15).toFixed(2)}] for zoom=${zoom} follow=${kind}, got ${dbg?.scale}`,
+          );
+
+          const roiOn = await tab.captureCanvasRegion('#diorama-canvas', { cxFrac: 0.5, cyFrac: 0.5, boxW: 160, boxH: 100 });
+          await tab.clickSelector('#btn-toggle-anim');
+          await sleep(140);
+          const roiOff = await tab.captureCanvasRegion('#diorama-canvas', { cxFrac: 0.5, cyFrac: 0.5, boxW: 160, boxH: 100 });
+          await tab.clickSelector('#btn-toggle-anim');
+          await sleep(100);
+
+          const m = analyzeVehicleRoofOpacity(roiOn, roiOff, 14);
+          const mOk = m.vehPixels >= minVehPx;
+          const bestOk = best && best.vehPixels >= minVehPx;
+          if (
+            !best ||
+            (mOk && (!bestOk || m.holeFrac < best.holeFrac || (m.holeFrac === best.holeFrac && m.vehPixels > best.vehPixels))) ||
+            (!bestOk && !mOk && m.vehPixels > best.vehPixels)
+          ) {
+            best = { ...m, t };
+          }
+        }
+
+        assert(
+          best && best.vehPixels >= minVehPx,
+          `v10 ${kind} at zoom=${zoom} appears physically shrunk: vehPixels=${best?.vehPixels} < ${minVehPx} (check wScale)`,
+        );
+        assert(
+          best.holeFrac < 0.06,
+          `v10 ${kind} at zoom=${zoom} (t=${best.t}) has roof perforation: holeFrac=${(best.holeFrac * 100).toFixed(2)}% (interiorHoles=${best.interiorHoles}, vehPixels=${best.vehPixels})`,
+        );
+      }
+
+      assert(tab.exceptions.length === 0, `T3.12 JS exceptions: ${tab.exceptions.join('; ')}`);
+      assert(tab.consoleErrors.length === 0, `T3.12 console errors: ${tab.consoleErrors.join('; ')}`);
+      assert(
+        tab.localHttpErrors.length === 0,
+        `T3.12 local HTTP errors: ${tab.localHttpErrors.map((e) => `${e.status} ${e.url}`).join('; ')}`,
+      );
+    } finally {
+      await harness.closeTab(tab);
+    }
+  });
+
+  // ── T3.13: v10 Inspector fidelity readout (12.5 cm/px) & metric scale bar accuracy ──
+  await test('T3.13', 'v10 Inspector #spec-fidelity reports 12.5 cm/px & metric scale bar halves cleanly 1:1 -> 2x', async () => {
+    const parseScaleMeters = (txt) => {
+      const m = String(txt || '').trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*(km|m)\b/i);
+      if (!m) return NaN;
+      const val = parseFloat(m[1]);
+      return m[2].toLowerCase() === 'km' ? val * 1000 : val;
+    };
+
+    const tab = await harness.openTab('/?mode=day&t=10', { width: 1280, height: 800, dpr: 2, waitReady: true });
+    try {
+      await sleep(220);
+      const fidText = await tab.evaluate(`(document.getElementById('spec-fidelity')?.textContent || '').trim()`);
+      assert(
+        /\b12\.5\s*cm\/px\b/i.test(fidText),
+        `Expected #spec-fidelity to report '12.5 cm/px' (not 25 or 13 cm/px), got '${fidText}'`,
+      );
+
+      const readScaleBarExpr = `(() => {
+        const lbl = document.getElementById('scale-bar-label');
+        const line = document.getElementById('scale-bar-line');
+        return {
+          label: lbl ? lbl.textContent.trim() : '',
+          widthPx: line ? line.getBoundingClientRect().width : 0,
+        };
+      })()`;
+
+      await tab.clickSelector('#btn-zoom-1x');
+      await tab.waitForCameraSettled();
+      await sleep(140);
+      const sb1x = await tab.evaluate(readScaleBarExpr);
+      const m1x = parseScaleMeters(sb1x.label);
+      assert(
+        Number.isFinite(m1x) && m1x > 0 && sb1x.widthPx >= 40 && sb1x.widthPx <= 220,
+        `Invalid scale bar at 1:1: label='${sb1x.label}', widthPx=${sb1x.widthPx}`,
+      );
+      const mpp1x = m1x / sb1x.widthPx;
+      assert(
+        mpp1x >= 0.08 && mpp1x <= 0.16,
+        `Expected 1:1 scale bar ~0.125 m/CSS-px (in [0.08, 0.16]), got ${mpp1x.toFixed(4)} (${sb1x.label} / ${sb1x.widthPx.toFixed(1)}px)`,
+      );
+
+      await tab.clickSelector('#btn-zoom-2x');
+      await tab.waitForCameraSettled();
+      await sleep(140);
+      const sb2x = await tab.evaluate(readScaleBarExpr);
+      const m2x = parseScaleMeters(sb2x.label);
+      assert(
+        Number.isFinite(m2x) && m2x > 0 && sb2x.widthPx >= 40 && sb2x.widthPx <= 220,
+        `Invalid scale bar at 2x: label='${sb2x.label}', widthPx=${sb2x.widthPx}`,
+      );
+      const mpp2x = m2x / sb2x.widthPx;
+      const ratio = mpp1x / mpp2x;
+      assert(
+        ratio >= 1.80 && ratio <= 2.20,
+        `Scale bar meters/px did not halve cleanly from 1:1 (${mpp1x.toFixed(4)}) to 2x (${mpp2x.toFixed(4)}): ratio=${ratio.toFixed(3)}`,
+      );
+
+      assert(tab.exceptions.length === 0, `T3.13 JS exceptions: ${tab.exceptions.join('; ')}`);
+      assert(tab.consoleErrors.length === 0, `T3.13 console errors: ${tab.consoleErrors.join('; ')}`);
+      assert(
+        tab.localHttpErrors.length === 0,
+        `T3.13 local HTTP errors: ${tab.localHttpErrors.map((e) => `${e.status} ${e.url}`).join('; ')}`,
+      );
     } finally {
       await harness.closeTab(tab);
     }

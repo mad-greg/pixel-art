@@ -165,136 +165,204 @@ export function getVehicleSprite(type, variant, angleIdx, mode, angleSteps = 32)
   const isNight = mode === 'night';
   const winCol = isNight ? [255, 220, 126] : [42, 58, 82];
   const winAlpha = isNight ? 254 : 255;
+  const resScale = 2;
 
   let buf;
   if (type === 'zsg_steamer') {
-    buf = createPixelBuffer(210, 160);
-    const cx = 105;
-    const cy = 88;
+    buf = createPixelBuffer(210 * resScale, 160 * resScale);
+    const cx = 105 * resScale;
+    const cy = 88 * resScale;
     const nx = -ty * 0.72;
     const ny = tx * 0.52;
-    const pt = (s, w, z) => [cx + tx * s + nx * w, cy + ty * s + ny * w - z];
+    const pt = (s, w, z) => [cx + (tx * s + nx * w) * resScale, cy + (ty * s + ny * w - z) * resScale];
 
+    // Dark waterline hull + warm teak main deck
     fillPolyPx(buf, [
       pt(-68, -12, 0), pt(44, -13, 0), pt(74, 0, 0), pt(44, 13, 0), pt(-68, 12, 0),
     ], [36, 58, 54], 255);
     fillPolyPx(buf, [
+      pt(-67, -11.8, 2.2), pt(44, -12.8, 2.2), pt(73.5, 0, 2.8), pt(44, 12.8, 2.2), pt(-67, 11.8, 2.2),
+    ], [228, 226, 220], 255);
+    fillPolyPx(buf, [
       pt(-66, -11.5, 4.5), pt(44, -12.5, 4.5), pt(73, 0, 5.5), pt(44, 12.5, 4.5), pt(-66, 11.5, 4.5),
     ], [186, 150, 104], 255);
 
-    const salon1Basis = makeIsoBasis(cx - tx * 6, cy - ty * 6, tx, ty);
+    const salon1Basis = makeIsoBasis(cx - tx * 6 * resScale, cy - ty * 6 * resScale, tx, ty);
     const drawSponson = (sideDir) => {
-      const spCx = cx + tx * 2 + salon1Basis.rx * sideDir * 10.6;
-      const spCy = cy + ty * 2 + salon1Basis.ry * sideDir * 10.6;
-      const spB = drawIsoBox(buf, spCx, spCy, tx, ty, 7.6, 2.2, 6.7, 4.5, {
+      const spCx = cx + tx * 2 * resScale + salon1Basis.rx * sideDir * 10.6 * resScale;
+      const spCy = cy + ty * 2 * resScale + salon1Basis.ry * sideDir * 10.6 * resScale;
+      const spB = drawIsoBox(buf, spCx, spCy, tx, ty, 7.6 * resScale, 2.2 * resScale, 6.7 * resScale, 4.5 * resScale, {
         roof: [238, 234, 226], side: [224, 220, 212], front: [230, 226, 218],
       }, false);
       if (sideDir === salon1Basis.visSide) {
-        const sv = spB.visSide * 2.28;
+        const sv = spB.visSide * 2.28 * resScale;
         fillPolyPx(buf, [
-          spB.pt(-5.8, sv, 4.7), spB.pt(5.8, sv, 4.7),
-          spB.pt(4.0, sv, 8.9), spB.pt(0.0, sv, 9.8), spB.pt(-4.0, sv, 8.9),
+          spB.pt(-5.8 * resScale, sv, 4.7 * resScale), spB.pt(5.8 * resScale, sv, 4.7 * resScale),
+          spB.pt(4.0 * resScale, sv, 8.9 * resScale), spB.pt(0.0, sv, 9.8 * resScale), spB.pt(-4.0 * resScale, sv, 8.9 * resScale),
         ], [42, 56, 66], 255);
+        // Subtle paddlewheel spoke accents inside wheelbox
         fillPolyPx(buf, [
-          spB.pt(-6.8, sv, 9.8), spB.pt(6.8, sv, 9.8),
-          spB.pt(6.8, sv, 10.9), spB.pt(-6.8, sv, 10.9),
+          spB.pt(-0.6 * resScale, sv, 4.9 * resScale), spB.pt(0.6 * resScale, sv, 4.9 * resScale),
+          spB.pt(0.6 * resScale, sv, 9.2 * resScale), spB.pt(-0.6 * resScale, sv, 9.2 * resScale),
+        ], [176, 148, 96], 255);
+        fillPolyPx(buf, [
+          spB.pt(-4.2 * resScale, sv, 6.6 * resScale), spB.pt(4.2 * resScale, sv, 6.6 * resScale),
+          spB.pt(4.2 * resScale, sv, 7.4 * resScale), spB.pt(-4.2 * resScale, sv, 7.4 * resScale),
+        ], [176, 148, 96], 255);
+        fillPolyPx(buf, [
+          spB.pt(-6.8 * resScale, sv, 9.8 * resScale), spB.pt(6.8 * resScale, sv, 9.8 * resScale),
+          spB.pt(6.8 * resScale, sv, 10.9 * resScale), spB.pt(-6.8 * resScale, sv, 10.9 * resScale),
         ], [226, 198, 134], 255);
       }
     };
 
     drawSponson(-salon1Basis.visSide);
 
-    const salon1 = drawIsoBox(buf, cx - tx * 6, cy - ty * 6, tx, ty, 46.0, 10.2, 8.0, 4.5, {
+    const salon1 = drawIsoBox(buf, cx - tx * 6 * resScale, cy - ty * 6 * resScale, tx, ty, 46.0 * resScale, 10.2 * resScale, 8.0 * resScale, 4.5 * resScale, {
       roof: [232, 230, 224], side: [216, 214, 208], front: [224, 222, 216],
     }, false, salon1Basis);
     drawSponson(salon1Basis.visSide);
 
-    const salon2 = drawIsoBox(buf, cx - tx * 4, cy - ty * 4, tx, ty, 32.0, 8.4, 7.0, 12.5, {
+    const salon2 = drawIsoBox(buf, cx - tx * 4 * resScale, cy - ty * 4 * resScale, tx, ty, 32.0 * resScale, 8.4 * resScale, 7.0 * resScale, 12.5 * resScale, {
       roof: [240, 238, 232], side: [222, 220, 214], front: [228, 226, 220],
     }, false);
-    drawIsoBox(buf, cx + tx * 20, cy + ty * 20, tx, ty, 7.0, 6.5, 5.5, 19.5, {
+    // Upper deck railing trim
+    fillPolyPx(buf, [
+      salon2.pt(-32.2 * resScale, salon2.visSide * 8.5 * resScale, 19.2 * resScale),
+      salon2.pt(32.2 * resScale, salon2.visSide * 8.5 * resScale, 19.2 * resScale),
+      salon2.pt(32.2 * resScale, salon2.visSide * 8.5 * resScale, 20.1 * resScale),
+      salon2.pt(-32.2 * resScale, salon2.visSide * 8.5 * resScale, 20.1 * resScale),
+    ], [186, 150, 104], 255);
+    drawIsoBox(buf, cx + tx * 20 * resScale, cy + ty * 20 * resScale, tx, ty, 7.0 * resScale, 6.5 * resScale, 5.5 * resScale, 19.5 * resScale, {
       roof: [238, 236, 230], side: [62, 84, 108], front: [62, 84, 108],
     }, false);
-    drawIsoBox(buf, cx + tx * 2, cy + ty * 2, tx, ty, 4.2, 3.6, 9.0, 19.5, {
+    const funnel = drawIsoBox(buf, cx + tx * 2 * resScale, cy + ty * 2 * resScale, tx, ty, 4.2 * resScale, 3.6 * resScale, 9.0 * resScale, 19.5 * resScale, {
       roof: [52, 54, 58], side: [226, 198, 134], front: [234, 208, 146],
     }, false);
+    // Crisp dark top band on ZSG ochre funnel
+    fillPolyPx(buf, [
+      funnel.pt(-4.2 * resScale, funnel.visSide * 3.65 * resScale, 26.5 * resScale),
+      funnel.pt(4.2 * resScale, funnel.visSide * 3.65 * resScale, 26.5 * resScale),
+      funnel.pt(4.2 * resScale, funnel.visSide * 3.65 * resScale, 28.5 * resScale),
+      funnel.pt(-4.2 * resScale, funnel.visSide * 3.65 * resScale, 28.5 * resScale),
+    ], [44, 48, 56], 255);
 
+    const mullionCol = isNight ? [146, 118, 72] : [188, 186, 180];
     for (let s = -44; s <= 32; s += 6.5) {
       fillPolyPx(buf, [
-        salon1.pt(s - 2.0, salon1.visSide * 10.4, 6.5),
-        salon1.pt(s + 2.0, salon1.visSide * 10.4, 6.5),
-        salon1.pt(s + 2.0, salon1.visSide * 10.4, 10.8),
-        salon1.pt(s - 2.0, salon1.visSide * 10.4, 10.8),
+        salon1.pt((s - 2.0) * resScale, salon1.visSide * 10.4 * resScale, 6.5 * resScale),
+        salon1.pt((s + 2.0) * resScale, salon1.visSide * 10.4 * resScale, 6.5 * resScale),
+        salon1.pt((s + 2.0) * resScale, salon1.visSide * 10.4 * resScale, 10.8 * resScale),
+        salon1.pt((s - 2.0) * resScale, salon1.visSide * 10.4 * resScale, 10.8 * resScale),
       ], winCol, winAlpha);
+      fillPolyPx(buf, [
+        salon1.pt((s - 0.25) * resScale, salon1.visSide * 10.45 * resScale, 6.5 * resScale),
+        salon1.pt((s + 0.25) * resScale, salon1.visSide * 10.45 * resScale, 6.5 * resScale),
+        salon1.pt((s + 0.25) * resScale, salon1.visSide * 10.45 * resScale, 10.8 * resScale),
+        salon1.pt((s - 0.25) * resScale, salon1.visSide * 10.45 * resScale, 10.8 * resScale),
+      ], mullionCol, 255);
     }
     for (let s = -30; s <= 20; s += 6.5) {
       fillPolyPx(buf, [
-        salon2.pt(s - 2.0, salon2.visSide * 8.6, 14.2),
-        salon2.pt(s + 2.0, salon2.visSide * 8.6, 14.2),
-        salon2.pt(s + 2.0, salon2.visSide * 8.6, 17.8),
-        salon2.pt(s - 2.0, salon2.visSide * 8.6, 17.8),
+        salon2.pt((s - 2.0) * resScale, salon2.visSide * 8.6 * resScale, 14.2 * resScale),
+        salon2.pt((s + 2.0) * resScale, salon2.visSide * 8.6 * resScale, 14.2 * resScale),
+        salon2.pt((s + 2.0) * resScale, salon2.visSide * 8.6 * resScale, 17.8 * resScale),
+        salon2.pt((s - 2.0) * resScale, salon2.visSide * 8.6 * resScale, 17.8 * resScale),
       ], winCol, winAlpha);
+      fillPolyPx(buf, [
+        salon2.pt((s - 0.25) * resScale, salon2.visSide * 8.65 * resScale, 14.2 * resScale),
+        salon2.pt((s + 0.25) * resScale, salon2.visSide * 8.65 * resScale, 14.2 * resScale),
+        salon2.pt((s + 0.25) * resScale, salon2.visSide * 8.65 * resScale, 17.8 * resScale),
+        salon2.pt((s - 0.25) * resScale, salon2.visSide * 8.65 * resScale, 17.8 * resScale),
+      ], mullionCol, 255);
     }
+
+    // Crisp 2x stern Swiss ensign with symmetric white cross
     const st = pt(-67, 0, 11);
     fillPolyPx(buf, [
-      [st[0] - 5, st[1] - 6], [st[0] + 1, st[1] - 6],
-      [st[0] + 1, st[1] - 1], [st[0] - 5, st[1] - 1],
+      [st[0] - 5 * resScale, st[1] - 6 * resScale], [st[0] + 1 * resScale, st[1] - 6 * resScale],
+      [st[0] + 1 * resScale, st[1] - 1 * resScale], [st[0] - 5 * resScale, st[1] - 1 * resScale],
     ], [212, 42, 38], 254);
-    setPx(buf, st[0] - 2, st[1] - 4, [250, 248, 244], 254);
-    setPx(buf, st[0] - 3, st[1] - 4, [250, 248, 244], 254);
-    setPx(buf, st[0] - 1, st[1] - 4, [250, 248, 244], 254);
-    setPx(buf, st[0] - 2, st[1] - 5, [250, 248, 244], 254);
-    setPx(buf, st[0] - 2, st[1] - 3, [250, 248, 244], 254);
+    const fxC = Math.round(st[0] - 2 * resScale);
+    const fyC = Math.round(st[1] - 3.5 * resScale);
+    for (let dx = -3; dx <= 3; dx++) {
+      setPx(buf, fxC + dx, fyC, [250, 248, 244], 254);
+      setPx(buf, fxC + dx, fyC - 1, [250, 248, 244], 254);
+    }
+    for (let dy = -3; dy <= 2; dy++) {
+      setPx(buf, fxC, fyC + dy, [250, 248, 244], 254);
+      setPx(buf, fxC - 1, fyC + dy, [250, 248, 244], 254);
+    }
 
     applySelOutAndShade(buf, mode);
-    spriteCache[key] = { canvas: buf.c, cx, cy };
+    spriteCache[key] = { canvas: buf.c, cx, cy, resScale };
     return spriteCache[key];
   }
 
   if (type === 'sailboat') {
-    buf = createPixelBuffer(64, 72);
-    const cx = 32;
-    const cy = 52;
+    buf = createPixelBuffer(64 * resScale, 72 * resScale);
+    const cx = 32 * resScale;
+    const cy = 52 * resScale;
     const nx = -ty * 0.72;
     const ny = tx * 0.52;
-    const pt = (s, w, z) => [cx + tx * s + nx * w, cy + ty * s + ny * w - z];
+    const pt = (s, w, z) => [cx + (tx * s + nx * w) * resScale, cy + (ty * s + ny * w - z) * resScale];
     fillPolyPx(buf, [
       pt(-13, -4.2, 0), pt(8, -4.2, 0), pt(16, 0, 1.5), pt(8, 4.2, 0), pt(-13, 4.2, 0),
     ], [230, 228, 222], 255);
+    // Crisp navy waterline stripe & teak cockpit inlay
+    fillPolyPx(buf, [
+      pt(-11, -3.1, 0.8), pt(7, -3.1, 0.8), pt(13, 0, 1.8), pt(7, 3.1, 0.8), pt(-11, 3.1, 0.8),
+    ], [46, 74, 112], 255);
+    fillPolyPx(buf, [
+      pt(-8, -2.0, 1.2), pt(1, -2.0, 1.2), pt(1, 2.0, 1.2), pt(-8, 2.0, 1.2),
+    ], [182, 146, 98], 255);
+    // Mainsail & jib
     fillPolyPx(buf, [
       pt(2, 0, 4), pt(-11, 2.2, 5), pt(1, 0, 36),
     ], [244, 242, 236], 255);
     fillPolyPx(buf, [
       pt(3, 0, 5), pt(14, -1.5, 4), pt(1, 0, 32),
     ], [222, 226, 232], 255);
+    // Crisp aluminum mast
+    fillPolyPx(buf, [
+      pt(0.7, -0.3, 2), pt(1.5, 0.3, 2), pt(1.5, 0.3, 36.5), pt(0.7, -0.3, 36.5),
+    ], [128, 138, 152], 255);
     applySelOutAndShade(buf, mode);
-    spriteCache[key] = { canvas: buf.c, cx, cy };
+    spriteCache[key] = { canvas: buf.c, cx, cy, resScale };
     return spriteCache[key];
   }
 
   // Boesch classic Kilchberg mahogany runabout
-  buf = createPixelBuffer(48, 42);
-  const cx = 24;
-  const cy = 24;
+  buf = createPixelBuffer(48 * resScale, 42 * resScale);
+  const cx = 24 * resScale;
+  const cy = 24 * resScale;
   const nx = -ty * 0.72;
   const ny = tx * 0.52;
-  const pt = (s, w, z) => [cx + tx * s + nx * w, cy + ty * s + ny * w - z];
+  const pt = (s, w, z) => [cx + (tx * s + nx * w) * resScale, cy + (ty * s + ny * w - z) * resScale];
   fillPolyPx(buf, [
     pt(-12, -4.5, 0), pt(7, -4.5, 0), pt(15, 0, 1.5), pt(7, 4.5, 0), pt(-12, 4.5, 0),
   ], [148, 78, 46], 255);
+  // Varnished mahogany foredeck highlight & cream cockpit bench
+  fillPolyPx(buf, [
+    pt(2, -3.4, 1.4), pt(7, -3.2, 1.5), pt(13.5, 0, 2.0), pt(7, 3.2, 1.5), pt(2, 3.4, 1.4),
+  ], [174, 98, 56], 255);
+  fillPolyPx(buf, [
+    pt(-9, -3.0, 1.6), pt(-3, -3.0, 1.6), pt(-3, 3.0, 1.6), pt(-9, 3.0, 1.6),
+  ], [234, 224, 204], 255);
   fillPolyPx(buf, [
     pt(-3, -3.4, 2.0), pt(4, -3.4, 2.0), pt(4, 3.4, 2.0), pt(-3, 3.4, 2.0),
   ], [198, 212, 226], 255);
   applySelOutAndShade(buf, mode);
-  spriteCache[key] = { canvas: buf.c, cx, cy };
+  spriteCache[key] = { canvas: buf.c, cx, cy, resScale };
   return spriteCache[key];
 }
 
 export function blitWorldSprite(targetCtx, cam, sp, wx, wy, wScale) {
   const { scale, offsetX, offsetY, width: canvasW, height: canvasH } = cam;
-  const drawScale = scale * wScale;
-  const sx = Math.round(offsetX + (wx - sp.cx * wScale) * scale);
-  const sy = Math.round(offsetY + (wy - sp.cy * wScale) * scale);
+  const resScale = sp.resScale || 1;
+  const drawScale = (scale * wScale) / resScale;
+  const sx = Math.round(offsetX + (wx - (sp.cx / resScale) * wScale) * scale);
+  const sy = Math.round(offsetY + (wy - (sp.cy / resScale) * wScale) * scale);
   const sw = Math.max(2, Math.round(sp.canvas.width * drawScale));
   const sh = Math.max(2, Math.round(sp.canvas.height * drawScale));
   if (sx + sw < -20 || sx > canvasW + 20 || sy + sh < -20 || sy > canvasH + 20) return;

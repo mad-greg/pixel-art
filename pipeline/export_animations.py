@@ -1622,7 +1622,7 @@ def _build_network(
     return network_out
 
 
-def export_animations(mpp_full: float = 0.25) -> Path:
+def export_animations(mpp_full: float = 0.125) -> Path:
     scene = _load_anim_scene(RAW_CACHE_DIR)
     cam = IsometricCamera(mpp=mpp_full)
     cam, _, _, W_full, H_full, shift_x, shift_y, *_ = compute_full_canvas_geometry(scene, cam, None, True)
@@ -2211,6 +2211,7 @@ def export_animations(mpp_full: float = 0.25) -> Path:
         "canvas_width": W_full,
         "canvas_height": H_full,
         "mpp": mpp_full,
+        "shift_y": round(float(shift_y), 6),
         "depth_min": DEPTH_MIN,
         "depth_max": DEPTH_MAX,
         "trains": trains_out,

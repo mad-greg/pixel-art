@@ -141,20 +141,20 @@ def sample_on_baseline(sign: SignAtlas, s, v, s0: float, v_base: float) -> np.nd
 SIGNS = [
     # Iconic roof-line letters of the 1899 Lindt & Sprüngli works (Seestrasse 204), seen from the lake
     dict(key="lindt_main", text="LINDT & SPRÜNGLI", font="gothic", cap_m=2.7, top_off=1.7,
-         fg=(196, 28, 40), panel=None, lit=True, edge=(250, 236, 214), fit=0.80),
+         fg=(196, 28, 40), panel=None, lit=True, edge=(250, 236, 214), edge_m=0.07, sh_off=0.14, fit=0.80),
     # Home of Chocolate: applied serif capitals stacked on the 13 m wide, 22 m tall white glazed-ceramic
     # curved facade (3 lines because the real curve is far narrower than the one-line word length)
     dict(key="lindt_hoc", text="LINDT", font="serif", cap_m=1.5, top_off=2.2, fg=(176, 124, 36), panel=None,
-         lit=True, edge=None, fit=0.96, thr=0.3, bins=[2, 3, 32, 33, 34, 35, 0, 1], curve=0.93, e_min=2684118.0, min_len=6.0),
+         lit=True, edge=None, sh_off=0.09, sh_mul=0.72, fit=0.96, thr=0.46, bins=[2, 3, 32, 33, 34, 35, 0, 1], curve=0.93, e_min=2684118.0, min_len=6.0),
     dict(key="lindt_hoc", text="HOME OF", font="serif", cap_m=1.5, top_off=4.0, fg=(176, 124, 36), panel=None,
-         lit=True, edge=None, fit=0.96, thr=0.3, bins=[2, 3, 32, 33, 34, 35, 0, 1], curve=0.93, e_min=2684118.0, min_len=6.0),
+         lit=True, edge=None, sh_off=0.09, sh_mul=0.72, fit=0.96, thr=0.46, bins=[2, 3, 32, 33, 34, 35, 0, 1], curve=0.93, e_min=2684118.0, min_len=6.0),
     dict(key="lindt_hoc", text="CHOCOLATE", font="serif", cap_m=1.5, top_off=5.8, fg=(176, 124, 36), panel=None,
-         lit=True, edge=None, fit=0.96, thr=0.3, bins=[2, 3, 32, 33, 34, 35, 0, 1], curve=0.93, e_min=2684118.0, min_len=6.0),
+         lit=True, edge=None, sh_off=0.09, sh_mul=0.72, fit=0.96, thr=0.46, bins=[2, 3, 32, 33, 34, 35, 0, 1], curve=0.93, e_min=2684118.0, min_len=6.0),
     # Station name board (SBB: dark lettering on white enamel)
     dict(key="bahnhof_station", text="KILCHBERG", font="swiss", cap_m=1.0, top_off=1.0,
          fg=(24, 26, 30), panel=(244, 244, 240), lit=False, edge=None, fit=0.70),
-    dict(key="seebad_bathhouse", text="SEEBAD KILCHBERG", font="swiss", cap_m=1.1, top_off=0.9,
-         fg=(250, 250, 244), panel=(30, 92, 150), lit=False, edge=None, fit=0.82),
+    dict(key="seebad_bathhouse", text="SEEBAD KILCHBERG", font="swiss", cap_m=0.82, top_off=1.45,
+         fg=(250, 250, 244), panel=(30, 92, 150), lit=False, edge=None, fit=0.72),
     dict(key="chez_fritz", text="CHEZ FRITZ", font="serif", cap_m=0.95, top_off=0.8,
          fg=(246, 226, 168), panel=(112, 34, 30), lit=True, edge=None, fit=0.84),
     dict(key="gemeindehaus_main", text="GEMEINDEHAUS", font="swiss", cap_m=1.1, top_off=1.7,
@@ -169,6 +169,15 @@ SIGNS = [
          fg=(250, 240, 214), panel=(48, 78, 58), lit=True, edge=None, fit=0.80),
     dict(key="st_elisabeth_nave", text="ST. ELISABETH", font="swiss", cap_m=1.0, top_off=2.4,
          fg=(236, 232, 224), panel=(70, 72, 78), lit=False, edge=None, fit=0.60),
+    # v10 +4 new baked landmark signs (zero floating UI fonts)
+    dict(key="bendlikon_pavilion", text="KILCHBERG ZH (SEE)", font="swiss", cap_m=0.68, top_off=1.20,
+         fg=(250, 250, 246), panel=(22, 82, 148), lit=True, edge=None, fit=0.94, min_len=4.5),
+    dict(key="hallenbad_pool_1448", text="HALLENBAD HOCHWEID", font="swiss", cap_m=1.0, top_off=1.35,
+         fg=(248, 250, 250), panel=(24, 108, 144), lit=True, edge=None, fit=0.72, min_len=8.0),
+    dict(key="stockengut_barn_807", text="STOCKENGUT", font="serif", cap_m=0.95, top_off=1.45,
+         fg=(54, 42, 30), panel=(230, 220, 194), lit=False, edge=None, fit=0.62, min_len=6.0),
+    dict(key="tc_clubhouse_1287", text="TC KILCHBERG", font="swiss", cap_m=0.78, top_off=0.8,
+         fg=(248, 248, 242), panel=(36, 98, 56), lit=False, edge=None, fit=0.76, min_len=5.0),
 ]
 
 def best_wall_run(scene, bidx: int, cam_az_deg: float, bins=None):
@@ -299,17 +308,23 @@ def bake_signs(resolved, w_bi, w_dbin, w_e, w_n, w_z, w_base, f_mat, wi, lit_mat
             col[inbox] = np.array(sp["panel"], dtype=np.float32)
             col[inbox & ~inner] = np.array(sp["panel"], dtype=np.float32) * 0.62
         else:
-            sh = sample_on_baseline(sg, s - 0.22, v + 0.22, r["s0"], r["v_base"]) >= thr
-            col[sh & ~letter] *= 0.58
+            sh_off = float(sp.get("sh_off", 0.16))
+            sh_mul = float(sp.get("sh_mul", 0.58))
+            sh = sample_on_baseline(sg, s - sh_off, v + sh_off, r["s0"], r["v_base"]) >= thr
+            col[sh & ~letter] *= sh_mul
             if sp["edge"] is not None:
+                em = float(sp.get("edge_m", 0.08))
                 near = np.zeros_like(letter)
-                for ds, dv in ((0.13, 0), (-0.13, 0), (0, 0.13), (0, -0.13)):
+                for ds, dv in ((em, 0), (-em, 0), (0, em), (0, -em)):
                     near |= sample_on_baseline(sg, s + ds, v + dv, r["s0"], r["v_base"]) >= thr
                 col[near & ~letter] = np.array(sp["edge"], dtype=np.float32)
         fg = np.array(sp["fg"], dtype=np.float32)
         glow = sp["lit"] and (is_night or preset_key == "sunset")
         if glow:
-            fg = np.minimum(255.0, fg * (1.25 if is_night else 1.1) + (30.0 if is_night else 0.0))
+            if sp["key"] == "lindt_hoc" and is_night:
+                fg = np.array((246, 204, 108), dtype=np.float32)
+            else:
+                fg = np.minimum(255.0, fg * (1.25 if is_night else 1.1) + (30.0 if is_night else 0.0))
         col[letter] = fg
         w_base[idx] = col
         if glow:
@@ -323,10 +338,11 @@ def bake_signs(resolved, w_bi, w_dbin, w_e, w_n, w_z, w_base, f_mat, wi, lit_mat
 #   hm       (hour, minute) shown;   lit  glows at dusk/night (illuminated dial)
 # ---------------------------------------------------------------------------------------------
 CLOCKS = [
-    dict(key="lindt_main", r=1.9, top_off=7.4, shift=14.0, hm=(10, 10), lit=True, min_len=8.0),
-    dict(key="bahnhof_station", r=1.2, top_off=2.6, shift=7.0, hm=(10, 10), lit=True, min_len=8.0),
-    dict(key="gemeindehaus_main", r=1.3, top_off=3.2, shift=-9.0, hm=(10, 10), lit=False, min_len=8.0),
-    dict(key="ref_kirche", r=1.6, top_off=5.0, shift=0.0, hm=(10, 10), lit=True, min_len=3.0),
+    dict(key="lindt_main", r=1.9, top_off=7.4, shift=14.0, hm=(10, 10), lit=True, min_len=8.0, gilded=True),
+    dict(key="bahnhof_station", r=1.2, top_off=2.6, shift=7.0, hm=(10, 10), lit=True, min_len=8.0, sbb=True),
+    dict(key="gemeindehaus_main", r=1.3, top_off=3.2, shift=-9.0, hm=(10, 10), lit=False, min_len=8.0, gilded=True),
+    dict(key="ref_kirche", r=1.6, top_off=5.0, shift=0.0, hm=(10, 10), lit=True, min_len=3.0, gilded=True),
+    dict(key="st_elisabeth_twr", r=1.1, top_off=4.2, shift=0.0, hm=(10, 10), lit=True, min_len=2.0),
 ]
 
 
@@ -359,32 +375,62 @@ def bake_clocks(resolved, w_bi, w_dbin, w_e, w_n, w_z, w_base, f_mat, wi, lit_ma
         y = (w_z[idx] - run["ztop"] + sp["top_off"]).astype(np.float32)   # up positive from dial centre
         r = c["r"]
         rr = np.hypot(x, y)
-        on = rr <= r
-        if not on.any():
+        bezel_outer = r * 1.08
+        on_all = rr <= bezel_outer
+        if not on_all.any():
             continue
+        on = rr <= r
         col = w_base[idx]
         glow = sp["lit"] and (is_night or preset_key == "sunset")
-        face = np.array((250, 236, 168) if glow else (238, 234, 222), dtype=np.float32)
-        ink = np.array((26, 26, 30), dtype=np.float32)
-        col[on] = face
-        ring = on & (rr >= r - max(0.14, 0.09 * r))
-        col[ring] = ink
+        face = np.array((250, 236, 168) if glow else (244, 240, 228), dtype=np.float32)
+        ink = np.array((24, 24, 28), dtype=np.float32)
+        # 3D metallic or gilded outer bezel ring (sunlit top-left, shaded bottom-right)
+        bezel = on_all & (rr >= r - max(0.10, 0.06 * r))
+        bezel_sun = (y - x) > 0.0
+        if sp.get("gilded"):
+            b_hi = np.array((222, 186, 98), dtype=np.float32)
+            b_lo = np.array((118, 90, 42), dtype=np.float32)
+        else:
+            b_hi = np.array((198, 204, 212), dtype=np.float32)
+            b_lo = np.array((72, 78, 88), dtype=np.float32)
+        col[bezel & bezel_sun] = b_hi
+        col[bezel & ~bezel_sun] = b_lo
+        inner_r = r - max(0.10, 0.06 * r)
+        dial = rr < inner_r
+        col[dial] = face
+        # Crisp dark inner rim
+        rim = dial & (rr >= inner_r - max(0.08, 0.05 * r))
+        col[rim] = ink
         ang = np.arctan2(x, y)  # clockwise from 12 o'clock
-        ticks = on & (rr >= 0.74 * r) & (rr < r - max(0.14, 0.09 * r))
+        # 4 bold cardinal hour bars (12/3/6/9) + 8 slender hour ticks
+        card_step = np.pi / 2.0
+        card_dev = np.abs(((ang + card_step / 2) % card_step) - card_step / 2) * rr
+        card_ticks = dial & (rr >= 0.66 * r) & (rr < inner_r - max(0.08, 0.05 * r)) & (card_dev < max(0.08, 0.055 * r))
         step = np.pi / 6.0
         dev = np.abs(((ang + step / 2) % step) - step / 2) * rr
-        col[ticks & (dev < max(0.07, 0.04 * r))] = ink
+        hour_ticks = dial & (rr >= 0.74 * r) & (rr < inner_r - max(0.08, 0.05 * r)) & (dev < max(0.055, 0.032 * r))
+        col[hour_ticks | card_ticks] = ink
         h, mi = sp["hm"]
         th_m = 2 * np.pi * mi / 60.0
         th_h = 2 * np.pi * ((h % 12) + mi / 60.0) / 12.0
 
-        def hand(theta, length, width):
+        def hand(theta, length, width, tail=0.14):
             ux, uy = np.sin(theta), np.cos(theta)
             along = x * ux + y * uy
             perp = np.abs(x * uy - y * ux)
-            return on & (along >= -0.12 * r) & (along <= length * r) & (perp <= width * r)
-        col[hand(th_h, 0.50, 0.075) | hand(th_m, 0.78, 0.05)] = ink
-        col[on & (rr <= 0.09 * r)] = ink
+            return dial & (along >= -tail * r) & (along <= length * r) & (perp <= width * r)
+
+        col[hand(th_h, 0.50, 0.072) | hand(th_m, 0.78, 0.048)] = ink
+        # Authentic SBB red seconds-paddle hand on Bahnhof Kilchberg clock
+        if sp.get("sbb"):
+            th_s = 2 * np.pi * 22.0 / 60.0  # classic ~22s SBB paddle pose
+            sbb_red = np.array((214, 34, 34), dtype=np.float32)
+            stem = hand(th_s, 0.62, 0.028, tail=0.18)
+            px_c = np.sin(th_s) * 0.60 * r
+            py_c = np.cos(th_s) * 0.60 * r
+            paddle = dial & (np.hypot(x - px_c, y - py_c) <= 0.11 * r)
+            col[stem | paddle] = sbb_red
+        col[dial & (rr <= 0.085 * r)] = ink
         w_base[idx] = col
         if glow:
-            f_mat[wi[idx[on]]] = lit_mat
+            f_mat[wi[idx[dial]]] = lit_mat

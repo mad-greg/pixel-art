@@ -28,7 +28,7 @@ import time
 from .config import CROPS_DIR, DOCS_DIR, IsometricCamera, LANDMARKS, RENDERS_DIR
 from .export_animations import export_animations
 from .extract_scene import extract_scene
-from .pixel_shader import SceneData, render_diorama, render_diorama_tiled_hires
+from .pixel_shader import SceneData, render_diorama, render_diorama_crop_tiled, render_diorama_tiled_hires
 
 CROP_SPECS = [
     ("lindt_hoc", "01_lindt_home_of_chocolate.png"),
@@ -89,8 +89,8 @@ PLATE_CARTOUCHE_META: dict[str, tuple[str, str]] = {
 
 
 def render_everything(
-    mpp_full: float = 0.25,
-    mpp_crop: float = 0.22,
+    mpp_full: float = 0.125,
+    mpp_crop: float = 0.11,
     presets: tuple[str, ...] = ("day", "sunset", "night"),
     skip_crops: bool = False,
     skip_animations: bool = False,
@@ -98,12 +98,20 @@ def render_everything(
     crops: tuple[str, ...] | None = None,
     crop_preset: str = "day",
     depth_only: bool = False,
+    macro_rows: tuple[int, int] | None = None,
+    finalize_tiles: bool = False,
+    crop_out_dir: str | None = None,
 ) -> None:
+    from pathlib import Path
+
     extract_scene(force=False)
-    RENDERS_DIR.mkdir(parents=True, exist_ok=True)
-    CROPS_DIR.mkdir(parents=True, exist_ok=True)
-    (DOCS_DIR / "data").mkdir(parents=True, exist_ok=True)
-    (DOCS_DIR / "assets").mkdir(parents=True, exist_ok=True)
+    if crop_out_dir is None:
+        RENDERS_DIR.mkdir(parents=True, exist_ok=True)
+        CROPS_DIR.mkdir(parents=True, exist_ok=True)
+        (DOCS_DIR / "data").mkdir(parents=True, exist_ok=True)
+        (DOCS_DIR / "assets").mkdir(parents=True, exist_ok=True)
+    else:
+        Path(crop_out_dir).mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
     scene = SceneData()
@@ -127,9 +135,11 @@ def render_everything(
 
     meta_out_p = DOCS_DIR / "data" / "kilchberg_interactive.json"
     if not skip_full:
+        do_finalize = finalize_tiles or (macro_rows is None)
+        finalize_only = finalize_tiles and (macro_rows is None)
         for idx_p, pkey in enumerate(presets):
             t_p = time.time()
-            need_meta = (pkey == "day") or (idx_p == 0 and not meta_out_p.exists())
+            need_meta = do_finalize and ((pkey == "day") or (idx_p == 0 and not meta_out_p.exists()))
             tiles_dir = DOCS_DIR / "assets" / "tiles" / pkey
             ov_webp = DOCS_DIR / "assets" / f"diorama_{pkey}.webp"
             out_png = RENDERS_DIR / f"kilchberg_diorama_{pkey}.png"
@@ -143,14 +153,23 @@ def render_everything(
                 full_png_path=out_png,
                 tile_size=1024,
                 collect_hit_boxes=need_meta,
+                macro_rows=macro_rows,
+                finalize_tiles=do_finalize,
+                finalize_only=finalize_only,
             )
-            if meta:
-                meta_out_p.write_text(json.dumps(meta, separators=(",", ":")))
-            mf = json.loads((tiles_dir / "manifest.json").read_text())
-            print(
-                f"[render] Ultra-HD Tiled Diorama ({pkey}): {mf['width']}x{mf['height']} px "
-                f"({mf['cols']}x{mf['rows']} tiles @ {mpp_full:.2f} m/px) in {time.time() - t_p:.1f}s"
-            )
+            if do_finalize:
+                if meta:
+                    meta_out_p.write_text(json.dumps(meta, separators=(",", ":")))
+                mf = json.loads((tiles_dir / "manifest.json").read_text())
+                print(
+                    f"[render] Ultra-HD Tiled Diorama ({pkey}): {mf['width']}x{mf['height']} px "
+                    f"({mf['cols']}x{mf['rows']} tiles @ {mpp_full:.3f} m/px) in {time.time() - t_p:.1f}s"
+                )
+            else:
+                print(
+                    f"[render] Macro-row band {macro_rows} ({pkey}) @ {mpp_full:.3f} m/px "
+                    f"streamed to /tmp memmap in {time.time() - t_p:.1f}s"
+                )
 
     if not skip_crops:
         import gc
@@ -159,6 +178,7 @@ def render_everything(
         crop_filter = set(crops) if crops else None
         p_c = PRESETS[crop_preset]
         crop_sh = compute_shadow_grid(scene, p_c.sun_az_deg, p_c.sun_alt_deg)
+        out_dir_override = Path(crop_out_dir) if crop_out_dir else None
         for lm_id, fname in CROP_SPECS:
             if crop_filter is not None and lm_id not in crop_filter:
                 continue
@@ -168,7 +188,7 @@ def render_everything(
             cam_c = IsometricCamera(mpp=mpp_crop)
             t_c = time.time()
             p_title, p_sub = PLATE_CARTOUCHE_META.get(lm_id, (None, None))
-            img_c, _ = render_diorama(
+            img_c = render_diorama_crop_tiled(
                 scene,
                 cam_c,
                 preset_key=crop_preset,
@@ -178,9 +198,12 @@ def render_everything(
                 plate_title=p_title,
                 plate_subtitle=p_sub,
             )
-            out_c = CROPS_DIR / fname
-            img_c.save(out_c, optimize=True)
-            img_c.save(DOCS_DIR / "assets" / fname.replace(".png", ".webp"), format="WEBP", lossless=True, method=4)
+            if out_dir_override is not None:
+                img_c.save(out_dir_override / fname.replace(".png", ".webp"), format="WEBP", lossless=True, method=4)
+            else:
+                out_c = CROPS_DIR / fname
+                img_c.save(out_c, optimize=True)
+                img_c.save(DOCS_DIR / "assets" / fname.replace(".png", ".webp"), format="WEBP", lossless=True, method=4)
             print(f"[render] Crop {fname} ({crop_preset}): {img_c.size[0]}x{img_c.size[1]} @ {mpp_crop:.2f} m/px ({time.time() - t_c:.1f}s)")
             del img_c
             gc.collect()
@@ -194,14 +217,17 @@ def render_everything(
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--presets", nargs="+", default=["day", "sunset", "night"])
-    ap.add_argument("--mpp-full", type=float, default=0.25)
-    ap.add_argument("--mpp-crop", type=float, default=0.22)
+    ap.add_argument("--mpp-full", type=float, default=0.125)
+    ap.add_argument("--mpp-crop", type=float, default=0.11)
     ap.add_argument("--skip-crops", action="store_true")
     ap.add_argument("--skip-animations", action="store_true")
     ap.add_argument("--skip-full", action="store_true")
     ap.add_argument("--crops", nargs="+", default=None)
     ap.add_argument("--crop-preset", choices=["day", "sunset", "night"], default="day")
     ap.add_argument("--depth-only", action="store_true")
+    ap.add_argument("--macro-rows", nargs=2, type=int, default=None, metavar=("START", "END"))
+    ap.add_argument("--finalize-tiles", action="store_true")
+    ap.add_argument("--crop-out-dir", type=str, default=None)
     args = ap.parse_args()
     render_everything(
         mpp_full=args.mpp_full,
@@ -213,4 +239,7 @@ if __name__ == "__main__":
         crops=tuple(args.crops) if args.crops else None,
         crop_preset=args.crop_preset,
         depth_only=args.depth_only,
+        macro_rows=tuple(args.macro_rows) if args.macro_rows else None,
+        finalize_tiles=args.finalize_tiles,
+        crop_out_dir=args.crop_out_dir,
     )

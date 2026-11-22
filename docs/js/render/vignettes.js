@@ -29,7 +29,7 @@ const FIREFLY_GROVES = [
   [0.71, 0.43], [0.77, 0.37], [0.47, 0.41], [0.35, 0.32],
 ];
 
-// Exact isometric ground-to-UV projection (azimuth=102 deg, pitch=30 deg, 0.25 m/px on 12331x5444)
+// Exact isometric ground-to-UV projection (azimuth=102 deg, pitch=30 deg, resolution-independent UV/m)
 const E_TO_U = 0.0000674436;
 const N_TO_U = 0.0003172971;
 const E_TO_V = 0.0003593489;
@@ -1952,7 +1952,7 @@ export function drawKilchbergDetails(
   // =========================================================================
   // 5b. LEGACY SUNSET JOGGERS (fallback only) & WARM CAFE/TERRACE GLOWS
   // =========================================================================
-  if (!hasDynamicPeds && isSunset && animData && animData.roads && scale >= 0.35) {
+  if (!hasDynamicPeds && isSunset && animData && animData.roads && s >= 0.35) {
     const seeRd = animData.roads.find((r) => r.id === 'seestrasse_sb');
     if (seeRd && seeRd.pts && seeRd.pts.length > 10) {
       const joggers = [
@@ -2015,7 +2015,7 @@ export function drawKilchbergDetails(
       ctx.beginPath();
       ctx.ellipse(tx, ty, rad * 1.15, rad * 0.72, 0, 0, Math.PI * 2);
       ctx.fill();
-      if (isSunset && scale >= 0.45) {
+      if (isSunset && s >= 0.45) {
         for (let g = 0; g < 2; g++) {
           const gu = tc.u + (g - 0.5) * 0.0011 + Math.sin(tSec * 0.3 + ti + g * 2.1) * 0.0002;
           const gv = tc.v + (g === 0 ? 0.0003 : -0.0002);
@@ -2685,7 +2685,14 @@ export function drawKilchbergDetails(
         // Subtle evening LED floodlight pools on 2 all-weather TC clay courts
         if (isNight && Array.isArray(tcSrc)) {
           for (let ci = 0; ci < Math.min(2, tcSrc.length); ci++) {
-            drawLanternGlow(ctx, toX(tcSrc[ci].c[0]), toY(tcSrc[ci].c[1]), 16.0 * s, true, '248, 250, 252', '#ffffff', 0.35);
+            const tc = tcSrc[ci];
+            if (!tc) continue;
+            const hasCenter = Array.isArray(tc.c) && tc.c.length >= 2;
+            const hasBounds = Array.isArray(tc.sw) && tc.sw.length >= 2 && Array.isArray(tc.ne) && tc.ne.length >= 2;
+            if (!hasCenter && !hasBounds) continue;
+            const cx = hasCenter ? tc.c[0] : (tc.sw[0] + tc.ne[0]) * 0.5;
+            const cy = hasCenter ? tc.c[1] : (tc.sw[1] + tc.ne[1]) * 0.5;
+            drawLanternGlow(ctx, toX(cx), toY(cy), 16.0 * s, true, '248, 250, 252', '#ffffff', 0.35);
           }
         }
       }

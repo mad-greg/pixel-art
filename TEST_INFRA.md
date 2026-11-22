@@ -1,4 +1,4 @@
-# Test Infrastructure — Kilchberg (ZH) Isometric Pixel-Art Diorama (v9.0 Museum-Grade Landmark Polish & Expansion)
+# Test Infrastructure — Kilchberg (ZH) Isometric Pixel-Art Diorama (v10 2×+ Resolution & Peak 90s SVGA Uplevel)
 
 ## 1. Test Philosophy
 
@@ -6,31 +6,33 @@ This E2E testing track implements an **opaque-box, requirement-driven 4-tier aut
 
 Core principles:
 1. **Zero-Install Native Runtime**: Runs directly on the provisioned VM toolchain without `pip install` or `npm install`:
-   - **Python 3.11** (`unittest`, `numpy`, `Pillow`, `ffprobe`) for static asset, manifest, tile pyramid, depth-map, detail-plate, JSON schema, audio integrity, pixel-quality, and geometric constraint verification.
-   - **Node.js 24** (built-in global `WebSocket` + `fetch` native Chrome DevTools Protocol driver) + **`/usr/bin/chromium`** (`--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage`) against an ephemeral local `node:http` server serving `docs/` (including native ES modules under `docs/js/**/*.js` with `?v=` query-string stripping) for live interactive web app, layout, Retina DPR, overview pin decluttering, deep-link/keyboard navigation, animation, spatial audio, and end-user journey verification.
+   - **Python 3.11** (`unittest`, `numpy`, `Pillow`, `ffprobe`, `concurrent.futures.ThreadPoolExecutor`) for static asset, manifest, 2-level tile pyramid (`z1` + `L2`), depth-map, detail-plate, JSON schema, audio integrity, pixel-quality, sharpness/anti-upscale, lettering orientation/legibility, footprint budget, and geometric constraint verification.
+   - **Node.js 24** (built-in global `WebSocket` + `fetch` native Chrome DevTools Protocol driver) + **`/usr/bin/chromium`** (`--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage`) against an ephemeral local `node:http` server serving `docs/` (including native ES modules under `docs/js/**/*.js` with `?v=` query-string stripping) for live interactive web app, layout, Retina DPR, overview pin decluttering, tile-streaming bounds, 2× sprite physical scale & roof opacity, inspector fidelity/scale-bar accuracy, deep-link/keyboard navigation, animation, spatial audio, and end-user journey verification.
 2. **Real User Gestures & Authentic Browser Contracts**:
    - Chromium is launched **without** `--autoplay-policy=no-user-gesture-required`; WebAudio unlocking is exercised through real trusted CDP `Input.dispatchMouseEvent` clicks on `#btn-toggle-sound`, validating genuine production autoplay compliance.
-   - External CDN font URLs (`fonts.googleapis.com` / `fonts.gstatic.com`) are blocked via CDP `Network.setBlockedURLs` to verify offline/self-contained resilience (`PROJECT.md § Interface Contracts #4`), while local origin (`127.0.0.1`) enforces zero HTTP `>= 400` application-asset or ES module failures, zero `Runtime.exceptionThrown`, and zero `console.error`.
-3. **100% Baseline Preservation & Honest Pre-v9.0 Failure Semantics**:
-   - All **88** pre-existing v8.0 tests (70 v7.0 baseline + 13 v8.0 living-world + 5 Tier 5 hardening tests `T4.08`–`T4.12`) are preserved 100% intact. Only the two hardcoded `== 10` landmark-count checks (`T1.FA2.01` and `T1.FA3.04`) were relaxed to `>= 10` while strictly enforcing that the original 10 `REQUIRED_LANDMARK_IDS` remain at indices `0..9`. `T1.FA2.07` (`ambient.swiss_flags == 4`) and `DETAIL_PLATES` (`01..06_*.webp`) remain strictly untouched.
-   - Every new v9.0 test checks preconditions cleanly and asserts real user-facing behavior, pixel metrics, geometric invariants, or public contract fields — failing cleanly with crisp `AssertionError` diagnostics against pre-v9.0 (`v8.0`) `docs/` with zero syntax, import, `FileNotFoundError`, `KeyError`, timeout, or process-leak errors.
+   - External CDN font URLs (`fonts.googleapis.com` / `fonts.gstatic.com`) are blocked via CDP `Network.setBlockedURLs` to verify offline/self-contained resilience, while local origin (`127.0.0.1`) enforces zero HTTP `>= 400` application-asset or ES module failures, zero `Runtime.exceptionThrown`, and zero `console.error`.
+3. **100% Baseline Preservation & Metadata-Driven v10 Alignment**:
+   - All **104** existing v9.4 baseline tests (**48 Python** including the 7 lettering tests `T2.LET.01`–`T2.LET.07` + **56 Node CDP**) are preserved 100% intact with zero deleted, skipped, or weakened guardrail assertions.
+   - `tests/lib/assets_helper.py` and 12 Python tests (`T1.FA1.01–04,06`, `T1.FA2.01,10`, `T2.FA1.02–03,06–09`, `T2.FA2.01`, `T2.LET.05–06`) are metadata-driven against `manifest.json`, overview dims, and fractional plate coordinates while keeping meter-consistent tolerances.
+   - Every v10-gating test checks preconditions cleanly and asserts real user-facing behavior, pixel metrics, geometric invariants, or public contract fields — failing cleanly with crisp `AssertionError` diagnostics against pre-v10 (`v9.4`) `docs/` with zero syntax, import, `FileNotFoundError`, `KeyError`, timeout, or process-leak errors.
 4. **Determinism, Speed & Process Hygiene**:
-   - Deterministic URL timestamps (`?t=10`, `?t=15`, `?t=22`, `?t=34`, `?t=35`, `?t=46`, `?t=48`) enable reproducible frame-motion, roof-opacity, IDM braking/yielding, deep-link, and church-bell phase assertions.
+   - Deterministic URL timestamps (`?t=10`, `?t=14`, `?t=15`, `?t=22`, `?t=26`, `?t=34`, `?t=35`, `?t=46`, `?t=48`) enable reproducible frame-motion, roof-opacity, 2× sprite scale, IDM braking/yielding, deep-link, and church-bell phase assertions.
+   - Parallel WebP tile decoding (`ThreadPoolExecutor(max_workers=8)`) in `T1.FA1.03` validates all L2 + `z1` pyramid tiles across 3 lighting presets in `< 5 s`.
    - One shared headless Chromium browser per Node runner with isolated incognito `Target.createBrowserContext` tabs and per-suite timeout `120 s` keeps `--tier all` clean and deterministic.
-   - Every local HTTP server, Chromium child process (sharing Node's process group so `os.killpg` terminates Node + Chromium atomically, with `forceClose()` signal teardown & `Browser.close` → `SIGTERM` → `SIGKILL` fallback), and temporary profile directory is torn down in `finally` blocks + signal handlers, leaving zero live orphan processes.
+   - Every local HTTP server, Chromium child process (sharing Node's process group so `os.killpg` terminates Node + Chromium atomically), and temporary profile directory is torn down in `finally` blocks + signal handlers, leaving zero live orphan processes.
 
 ---
 
 ## 2. Feature Inventory Mapped to Requirements & Test Tiers
 
-Every requirement from `ORIGINAL_REQUEST.md` and `PROJECT.md § Feature Inventory` (v7.0/v8.0 baseline + v9.0 Features #1–#21, Interface Contracts #1–#4, and Global Guardrails) is grouped into **4 Requirement Feature Areas** (`FA1`–`FA4`), covered across **97 total tests** (41 Python + 56 Node CDP):
+Every requirement from `ORIGINAL_REQUEST.md` and `PROJECT.md § Feature Inventory` (#1–#14, Interface Contracts #1–#3, and Global Guardrails) is grouped into **4 Requirement Feature Areas** (`FA1`–`FA4`), covered across **110 total tests** (**51 Python** + **59 Node CDP**):
 
 | Feature Area | `PROJECT.md` / `ORIGINAL_REQUEST.md` Mapping | Tier 1 (Feature Coverage) | Tier 2 (Boundary & Corner Cases) | Tier 3 (Cross-Feature) | Tier 4 (Journeys & Hardening) |
 |---|---|---|---|---|---|
-| **FA1: Static Visual Assets, Tile Pyramid, Depth Map, ES Modules & 10 Detail Plates** | v7.0/v8.0 assets + v9.0 F4–F16; Contract #2 & #4 (`12331×5444`, `78×3` lossless tiles, `6165×2722` overviews & depth PNG, open-air roof small hits `<2%` trains & `<1%` main roads, `<script type="module" src="app.js?v=...">` synced with `styles.css`, `docs/js/` modules, **10 detail plates `01..10_*.webp`** lossless `VP8L` RGB `>=2000×1400` `<=256` SVGA CLUTs, zero floating sky clusters + visual richness `std_luma>=20` & `entropy>=2.5`, spotless shore, sunset gold, night pools, Lindt 25 cm DOP10 roof) | `T1.FA1.01`–`T1.FA1.10` (10 tests) | `T2.FA1.01`–`T2.FA1.10` (10 tests) | `T3.01`, `T3.02`, `T3.05`, `T3.09` | `T4.01`, `T4.02`, `T4.07`, `T4.13` |
-| **FA2: Geospatial Metadata, 16 Landmarks, Authentic `cf_meyer_haus`, Vignettes & Multimodal Network** | v7.0/v8.0 data + v9.0 F2, F3, F17; Contract #1, #3 & #4 (`kilchberg_interactive.json` `>=16` landmarks preserving `0..9` + 6 new Tier-1 IDs, `cf_meyer_haus` `<=35 m` LV95 of `E=2683714, N=1241442`, all 16 inside `island_2x` with pairwise `duv>=0.045`, `kilchberg_animations.json <650 KB`, `ambient.swiss_flags == 4`, `ambient.vignettes` covering `sanatorium_ridge`, `moenchhof_horn`, `sulzergut_park` + 6 new landmarks in `[0,1]` UV, `cf_meyer_haus` vignette & fountain aligned `<=0.02` UV, `network` DEM/zero-water bounds, slow SUPs, zero paragliders/balloons) | `T1.FA2.01`–`T1.FA2.11` (11 tests) | `T2.FA2.01`–`T2.FA2.08` (8 tests) | `T3.02`, `T3.03`, `T3.08`, `T3.11` | `T4.02`, `T4.03`, `T4.04`, `T4.07`, `T4.13` |
-| **FA3: Interactive Web App, 16-Landmark UX, Pin Decluttering, Deep-Links & Living-World Simulation** | v7.0/v8.0 UI/sim + v9.0 F18, F19; Contract #1, #2 & #4 (zero JS/404/ES-module errors, lighting presets, zoom/tiles, `>=16` sidebar stops with dynamic `${N} STOPS` tag, `>=10` `#crop-gallery` plates with `01..06` preserved at `0..5` & `07..10` modal open, zoom-aware overview pin decluttering at `cssScale < 0.7` with zero severe overlap & active-pin persistence, `?landmark=<id>` deep-link boot & `[`/`]` keyboard landmark cycling, `window.__dioramaDebug` Contract #5 + `simStats`/`livingCounts`/`depthStats`, IDM/SUP/roof-opacity, Desktop `1280×800` & Mobile `390×844` zero clipping) | `T1.FA3.01`–`T1.FA3.14` (14 tests) | `T2.FA3.01`–`T2.FA3.10` (10 tests) | `T3.01`–`T3.03`, `T3.05`–`T3.09`, `T3.11` | `T4.01`–`T4.04`, `T4.06`–`T4.13` |
-| **FA4: Spatial Audio Soundscape, Church Bell Sync & Layer Mixer** | v7.0/v8.0 audio; Contract #3 & #4 (9 valid MP3 field recordings via `ffprobe`, trusted-gesture AudioContext unlock & 9/9 decode, shore-strict wave attenuation, Day birds vs Night crickets, paused animations audio updates, mute suspending AudioContext, `simStats.bellPhase` ↔ `audioGains.bells` sync, layer mixer popover) | `T1.FA4.01`–`T1.FA4.05` (5 tests) | `T2.FA4.01`–`T2.FA4.05` (5 tests) | `T3.04`, `T3.10` | `T4.05` |
+| **FA1: Static Visual Assets, 2-Level Tile Pyramid, Depth Map, ES Modules, 10 High-Res Plates & Baked Lettering** | v7.0–v9.4 assets + v10 F1–F10; Contract #1, #2 & #3 (`>=24000×10600`, `<=0.125 m/px`, `1024 px` lossless `VP8L` L2 + `z1` mid-res pyramid tiles, `diorama_{mode}.webp` == `kilchberg_depth.png` parity, open-air roof small hits `<2%` trains & `<1%` main roads, `<script type="module" src="app.js?v=...">` synced with `styles.css`, **10 detail plates `01..10_*.webp`** lossless `VP8L` RGB `>=3200×2200` `<=256` SVGA colors, high-frequency sharpness & anti-2×-NN-upscale check, `<300 MB` `docs/` & `<500 KB`/tile budget, spotless shore, sunset gold, night pools, Lindt 10 cm DOP10 roof, baked isometric lettering `T2.LET.01`–`T2.LET.07`) | `T1.FA1.01`–`T1.FA1.11` (11 tests) | `T2.FA1.01`–`T2.FA1.12` (12 tests) + `T2.LET.01`–`T2.LET.07` (7 tests) | `T3.01`, `T3.02`, `T3.05`, `T3.09`, `T3.12` | `T4.01`, `T4.02`, `T4.07`, `T4.13` |
+| **FA2: Geospatial Metadata, 16 Landmarks, Authentic `cf_meyer_haus`, `shift_y`, Vignettes & Multimodal Network** | v7.0–v9.4 data + v10 F9; Contract #1, #2 & #3 (`kilchberg_interactive.json` & `kilchberg_animations.json` parity with `manifest.json`, finite positive `shift_y`, `>=16` landmarks preserving `0..9` + 6 v9.0 IDs, `cf_meyer_haus` `<=35 m` LV95 of `E=2683714, N=1241442`, all 16 inside `island_2x` with pairwise `duv>=0.045`, `<650 KB` animations JSON, `ambient.swiss_flags == 4`, `ambient.vignettes` in `[0,1]` UV, `network` DEM/zero-water bounds, slow SUPs, zero paragliders/balloons) | `T1.FA2.01`–`T1.FA2.11` (11 tests) | `T2.FA2.01`–`T2.FA2.08` (8 tests) | `T3.02`, `T3.03`, `T3.08`, `T3.11`, `T3.12` | `T4.02`, `T4.03`, `T4.04`, `T4.07`, `T4.13` |
+| **FA3: Interactive Web App, 2-Level Tile Pyramid, 2× Live Sprites, Inspector Fidelity & Living-World Simulation** | v7.0–v9.4 UI/sim + v10 F11–F12; Contract #1, #2 & #3 (zero JS/404/ES-module errors, lighting presets, zoom/tiles, `0` L2 tiles at `Fit` & bounded `<=48` L2 tiles on `1:1` zoom-in, `>=16` sidebar stops, `>=10` `#crop-gallery` plates, zoom-aware overview pin decluttering, `?landmark=<id>` deep-link & `[`/`]` cycling, 2× live sprite physical scale & zero roof perforation at `zoom=1` & `zoom=2`, `#spec-fidelity` `12.5 cm/px` & metric scale bar halving `1:1 → 2×`, `window.__dioramaDebug` telemetry, IDM/SUP/roof-opacity, Desktop `1280×800` & Mobile `390×844` zero clipping) | `T1.FA3.01`–`T1.FA3.14` (14 tests) | `T2.FA3.01`–`T2.FA3.11` (11 tests) | `T3.01`–`T3.03`, `T3.05`–`T3.09`, `T3.11`–`T3.13` | `T4.01`–`T4.04`, `T4.06`–`T4.13` |
+| **FA4: Spatial Audio Soundscape, Church Bell Sync & Layer Mixer** | v7.0–v9.4 audio + v10 F11 `wScale` alignment (9 valid MP3 field recordings via `ffprobe`, trusted-gesture AudioContext unlock & 9/9 decode, shore-strict wave attenuation, Day birds vs Night crickets, paused animations audio updates, mute suspending AudioContext, `simStats.bellPhase` ↔ `audioGains.bells` sync, layer mixer popover) | `T1.FA4.01`–`T1.FA4.05` (5 tests) | `T2.FA4.01`–`T2.FA4.05` (5 tests) | `T3.04`, `T3.10` | `T4.05` |
 
 ---
 
@@ -42,13 +44,14 @@ tests/
 ├── lib/
 │   ├── __init__.py
 │   ├── report.py                 # Unified TestCaseResult / TierResult dataclasses, PASS/FAIL table & JSON summary
-│   ├── assets_helper.py          # Cached loaders for docs/data/*.json, WebPs (10 plates), depth PNG, manifests, ffprobe, RLE components, Lake Zurich 2x mask, RGB color counter & vignette UV extractor
+│   ├── assets_helper.py          # Metadata-driven cached loaders (get_canvas_dims, get_overview_dims, get_master_mpp, plate_cartouche_margins, clear_caches), WebPs, depth PNG, manifests, ffprobe, RLE components, Lake Zurich 2x mask, RGB color counter & vignette UV extractor
 │   └── cdp_harness.mjs           # Zero-dep Node 24 CDP driver, local docs/ HTTP server (ES modules + ?v=), shared Chromium + isolated incognito contexts, native ROI roof opacity analyzer
-├── tier1_assets_data.py          # Tier 1 (Python, 23 tests): FA1 (10), FA2 (11), FA4 static (2)
+├── tier1_assets_data.py          # Tier 1 (Python, 24 tests): FA1 (11), FA2 (11), FA4 static (2)
 ├── tier1_browser_features.mjs    # Tier 1 (Node CDP, 17 tests): FA3 (14), FA4 live (3)
-├── tier2_quality_bounds.py       # Tier 2 (Python, 18 tests): FA1 (10), FA2 (8)
-├── tier2_browser_bounds.mjs      # Tier 2 (Node CDP, 15 tests): FA3 (10), FA4 (5)
-├── tier3_combinations.mjs        # Tier 3 (Node CDP, 11 tests): pairwise cross-feature suites (T3.01–T3.11)
+├── tier2_quality_bounds.py       # Tier 2 (Python, 20 tests): FA1 (12), FA2 (8)
+├── tier2_lettering.py            # Tier 2 (Python, 7 tests): Baked isometric signage typography, projection, plate 01 angle/gold & no-overlay guard (T2.LET.01–T2.LET.07)
+├── tier2_browser_bounds.mjs      # Tier 2 (Node CDP, 16 tests): FA3 (11), FA4 (5)
+├── tier3_combinations.mjs        # Tier 3 (Node CDP, 13 tests): pairwise cross-feature suites (T3.01–T3.13)
 └── tier4_journeys.mjs            # Tier 4 (Node CDP, 13 tests): 8 end-user journeys (T4.01–T4.07, T4.13) + 5 Tier 5 hardening tests (T4.08–T4.12)
 ```
 
@@ -63,14 +66,15 @@ tests/
 
 ### Opaque-Box Public Contract Dependencies
 - Static files under `docs/assets/`, `docs/data/`, and `docs/js/`:
-  - `docs/assets/01..10_*.webp`: 10 high-res `0.22 m/px` detail plates (`VP8L` RGB, `>= 2000×1400`, body `<= 256` colors, zero floating sky clusters, `std_luma >= 20`, `entropy >= 2.5`).
-  - `docs/assets/kilchberg_depth.png`: `6165×2722` RGB (`R/G` 16-bit depth, `B` binary occluder), `0.12 <= occ_frac <= 0.35`, open-air roof small hits `< 2%` trains and `< 1%` main roads.
-  - `docs/data/kilchberg_interactive.json`: `>= 16` landmarks (`0..9` preserved + 6 new Tier-1 IDs), `cf_meyer_haus` `<= 35 m` LV95 of `E=2683714, N=1241442`, all inside `island_2x` with pairwise `duv >= 0.045`.
-  - `docs/data/kilchberg_animations.json`: `< 650 KB`, `ambient.swiss_flags` length `4`, `ambient.vignettes` covering all 9 newly/previously un-vignetted landmarks in `[0, 1]` UV, `cf_meyer_haus` vignette & fountain aligned `<= 0.02` UV.
-  - `docs/index.html`: `<script type="module" src="app.js?v=...">` synced with `styles.css?v=...`, zero external CDN scripts, modular ES files under `docs/js/`.
-- Public DOM controls (`docs/index.html`) accessed via stable IDs, semantic ARIA/title/placeholder/text locators, `data-lm-id`, `.tour-section .mono-tag`, `#pins-layer .lm-pin`, and `document.body.dataset.mode`.
+  - `docs/assets/tiles/{day,sunset,night}/manifest.json`: `width >= 24000`, `height >= 10600`, `mpp <= 0.125`, `tileSize == 1024`, `cols == ceil(width / tileSize)`, `rows == ceil(height / tileSize)`, plus consistent `z1` mid-res pyramid metadata (`width // 2`, `height // 2`, `mpp ≈ 0.25`, `path == "z1"`).
+  - `docs/assets/tiles/{mode}/{c}_{r}.webp` & `z1/{c}_{r}.webp`: lossless `VP8L`, exact edge dims, `<= 256` SVGA colors, `< 500 KB` each, genuine fine detail (no 2× nearest-neighbor upscaling).
+  - `docs/assets/01..10_*.webp`: 10 high-res `0.11 m/px` detail plates (`VP8L` RGB, `>= 3200×2200`, body `<= 256` colors, zero floating sky clusters, `std_luma >= 20`, `entropy >= 2.5`).
+  - `docs/assets/kilchberg_depth.png`: matches `diorama_day.webp` dims (`~6165×2722`), `< 10 MB`, `0.12 <= occ_frac <= 0.35`, open-air roof small hits `< 2%` trains and `< 1%` main roads.
+  - `docs/data/kilchberg_interactive.json` & `docs/data/kilchberg_animations.json`: agree with `manifest.json` on `canvas_width`, `canvas_height`, and `mpp`; `kilchberg_animations.json` `< 650 KB` with finite positive `shift_y`.
+  - `docs/` total footprint `< 300 MB`, zero individual files `> 90 MB`.
+- Public DOM controls (`docs/index.html`) accessed via stable IDs (`#spec-fidelity`, `#scale-bar-label`, `#scale-bar-line`, `#btn-zoom-1x`, `#btn-zoom-2x`, `#btn-zoom-4x`, `#btn-zoom-fit`, etc.), semantic ARIA/title/placeholder/text locators, `data-lm-id`, `.tour-section .mono-tag`, `#pins-layer .lm-pin`, and `document.body.dataset.mode`.
 - Public URL query parameters: `?mode=`, `?zoom=`, `?u=`, `?v=`, `?pins=`, `?cinema=`, `?follow=`, `?t=`, `?landmark=`.
-- Read-only telemetry accessor: `window.__dioramaDebug` (read via `typeof window.__dioramaDebug === 'function' ? window.__dioramaDebug() : window.__dioramaDebug`), exposing all 13 Contract #5 keys plus `livingCounts`, `depthStats`, `waterMaskReady`, `followTarget`, and `simStats`.
+- Read-only telemetry accessor: `window.__dioramaDebug` exposing all Contract #5 keys plus `livingCounts`, `depthStats`, `waterMaskReady`, `followTarget`, and `simStats`.
 
 ---
 
@@ -84,7 +88,7 @@ tests/
 6. **Journey 6 — Mobile Portrait Explorer (`T4.06`)**: Mobile `390×844` DPR=2 zero clipping → lighting presets → landmark selection.
 7. **Journey 7 — Living Kilchberg Commuter & Village Life (`T4.07`)**: `simStats` live activity → Follow Train/Bus → Pier/Lindt/Seebad → entity trip inspection.
 8. **Tier 5 Hardening (`T4.08`–`T4.12`)**: rAF loop stability on `Live` toggles, extreme `?t=` bounds, ZVV bus cold-load advancement, Follow Train selection & clean vehicle titles, mobile `.topbar` zero horizontal overflow.
-9. **Journey 8 — Kilchberg Heritage & New Landmarks Tour (`T4.13`)**: Cold desktop boot (`1280×800`, DPR=2) → tour fixed `cf_meyer_haus` and all 6 new Tier-1 landmarks (`gemeindehaus_alte_landstr`, `stockengut_farm`, `hallenbad_hochweid`, `broelberggut_estate`, `villa_spinnergut_tc`, `morfanlage_promenade`) → verify non-blank canvas & HTTP 200 tile streaming → open new detail plate (`08_cf_meyer_haus.webp` or `09_gemeindehaus_alte_landstrasse.webp`) and click `#btn-modal-fly` ("Fly Here") → verify modal closes, `activeLandmark` transitions, zero desktop clipping, and zero JS/console/HTTP errors.
+9. **Journey 8 — Kilchberg Heritage & New Landmarks Tour (`T4.13`)**: Cold desktop boot (`1280×800`, DPR=2) → tour fixed `cf_meyer_haus` and all 6 v9.0 landmarks → verify non-blank canvas & HTTP 200 tile streaming → open new detail plate (`08`/`09`) and click `#btn-modal-fly` ("Fly Here") → verify modal closes, `activeLandmark` transitions, zero desktop clipping, and zero JS/console/HTTP errors.
 
 ---
 
@@ -92,11 +96,11 @@ tests/
 
 | Metric | Required Threshold |
 |---|---|
-| Tier 1 feature coverage | `>= 5` tests per feature area (`FA1`: 10, `FA2`: 11, `FA3`: 14, `FA4`: 5; total **40**) |
-| Tier 2 boundary & corner coverage | `>= 5` tests per feature area (`FA1`: 10, `FA2`: 8, `FA3`: 10, `FA4`: 5; total **33**) |
-| Tier 3 cross-feature pairwise coverage | **11** pairwise combination suites (`T3.01`–`T3.11`) |
+| Tier 1 feature coverage | `>= 5` tests per feature area (`FA1`: 11, `FA2`: 11, `FA3`: 14, `FA4`: 5; total **41**) |
+| Tier 2 boundary & corner coverage | `>= 5` tests per feature area (`FA1`: 12 + `LET`: 7 = 19, `FA2`: 8, `FA3`: 11, `FA4`: 5; total **43**) |
+| Tier 3 cross-feature pairwise coverage | **13** pairwise combination suites (`T3.01`–`T3.13`) |
 | Tier 4 real-world journeys & hardening | **13** suites (`T4.01`–`T4.13`: 8 end-user journeys + 5 hardening tests) |
-| Total E2E test suite size | **97 tests** (88 preserved v8.0 baseline + 9 new v9.0 tests; 41 Python + 56 Node CDP) |
+| Total E2E test suite size | **110 tests** (104 preserved v9.4 baseline [48 Python incl. 7 `T2.LET.*` + 56 Node CDP] + 6 new v10 tests; **51 Python + 59 Node CDP**) |
 | Per-suite timeout budget | `120 s` per suite (`tests/run_e2e.py --timeout 120`) |
 | Orphan process tolerance | `0` live non-zombie Chromium/Node/HTTP processes after run completion |
-| Harness error tolerance | `0` syntax, import, timeout, or uncaught harness exceptions on both pre-v9.0 and v9.0 |
+| Harness error tolerance | `0` syntax, import, timeout, or uncaught harness exceptions on both pre-v10 and v10 |

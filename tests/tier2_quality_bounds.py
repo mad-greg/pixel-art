@@ -17,22 +17,27 @@ from tests.lib.assets_helper import (
     ASSETS_DIR,
     CANVAS_H,
     CANVAS_W,
+    DATA_DIR,
     DETAIL_PLATES,
+    DOCS_DIR,
     LINDT_HOC_ID,
     NEW_DETAIL_PLATES_V9,
     OVERVIEW_H,
     OVERVIEW_W,
     PRESETS,
     REQUIRED_ROAD_IDS,
+    TILES_DIR,
     compute_sky_reference,
     distance_to_exterior_sky_m,
     entropy_32b,
     extract_vignette_uv_anchors,
     filter_dilated_components,
     find_interior_components,
+    get_canvas_dims,
     get_day_island_and_exterior_masks,
     get_lake_zurich_mask_2x,
     get_landmark_uv,
+    get_overview_dims,
     load_animations_json,
     load_depth_rgb,
     load_interactive_json,
@@ -42,6 +47,7 @@ from tests.lib.assets_helper import (
     load_tile_rgb,
     max_channel_abs_diff_u8,
     pixel_turn_angles_deg,
+    plate_cartouche_margins,
     pool2x_max,
     rec709_luma,
     signed_hsv_hue_deg,
@@ -97,7 +103,15 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
 
     @test_meta("T2.FA1.02", "Per-preset curated 256-color CLUTs (night>=120, overlap<0.70)")
     def test_02_per_preset_cluts(self) -> None:
-        sample_tiles = ((4, 3), (5, 2), (6, 3), (5, 3))
+        m_day = load_manifest("day")
+        cols_n, rows_n = int(m_day["cols"]), int(m_day["rows"])
+        cx, cy = cols_n // 2, rows_n // 2
+        sample_tiles = (
+            (max(0, cx - 1), cy),
+            (cx, max(0, cy - 1)),
+            (min(cols_n - 1, cx + 1), cy),
+            (cx, cy),
+        )
         palettes = {}
         for preset in PRESETS:
             cols = []
@@ -133,8 +147,14 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
 
     @test_meta("T2.FA1.03", "Tile seam continuity (boundary_MAD / interior_MAD < 1.35)")
     def test_03_tile_seam_continuity(self) -> None:
-        horiz_pairs = [((4, 3), (5, 3)), ((5, 2), (6, 2))]
-        vert_pairs = [((5, 2), (5, 3)), ((6, 2), (6, 3))]
+        m_day = load_manifest("day")
+        cols_n, rows_n = int(m_day["cols"]), int(m_day["rows"])
+        cx, cy = cols_n // 2, rows_n // 2
+        c_lo = max(0, cx - 1)
+        c_hi = min(cols_n - 1, cx + 1)
+        r_lo = max(0, cy - 1)
+        horiz_pairs = [((c_lo, cy), (cx, cy)), ((cx, r_lo), (c_hi, r_lo))]
+        vert_pairs = [((cx, r_lo), (cx, cy)), ((c_hi, r_lo), (c_hi, cy))]
 
         for preset in ("day", "night"):
             for (c1, r1), (c2, r2) in horiz_pairs:
@@ -226,12 +246,13 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
         bad = []
         for fname in DETAIL_PLATES:
             arr = load_plate_rgb(fname)
+            mt, mb, mlr = plate_cartouche_margins(arr)
             comps = find_interior_components(
                 arr,
                 tol=18,
-                margin_top=110,
-                margin_bot=90,
-                margin_lr=24,
+                margin_top=mt,
+                margin_bot=mb,
+                margin_lr=mlr,
                 min_raw_2x=4,
                 min_dilated_2x=45,
             )
@@ -257,14 +278,15 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
             return (b > r + 15) & (g > r + 10)
 
         # Open water patches along ship paths
+        oh, ow = day.shape[:2]
         water_pixels = []
         for ship in anim.get("ships", []):
             pts = ship.get("pts", [])
             step = max(1, len(pts) // 80)
             for p in pts[::step]:
-                cx = int(round(p[0] * (OVERVIEW_W - 1)))
-                cy = int(round(p[1] * (OVERVIEW_H - 1)))
-                if 3 <= cx < OVERVIEW_W - 3 and 3 <= cy < OVERVIEW_H - 3:
+                cx = int(round(p[0] * (ow - 1)))
+                cy = int(round(p[1] * (oh - 1)))
+                if 3 <= cx < ow - 3 and 3 <= cy < oh - 3:
                     water_pixels.append(day[cy - 2 : cy + 3, cx - 2 : cx + 3, :].reshape(-1, 3))
         open_rgb = np.concatenate(water_pixels, axis=0)
         open_tan = float(np.mean(is_tan(open_rgb)))
@@ -275,21 +297,21 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
         # Near-shore water (+6..+18 overview px lakeside of shoreline toward lake center)
         shore = anim.get("ambient", {}).get("shoreline", [])
         self.assertGreaterEqual(len(shore), 40)
-        lake_center_x = 0.65 * OVERVIEW_W
-        lake_center_y = 0.72 * OVERVIEW_H
+        lake_center_x = 0.65 * ow
+        lake_center_y = 0.72 * oh
         near_pixels = []
         for i in range(len(shore)):
-            sx = shore[i][0] * (OVERVIEW_W - 1)
-            sy = shore[i][1] * (OVERVIEW_H - 1)
+            sx = shore[i][0] * (ow - 1)
+            sy = shore[i][1] * (oh - 1)
             if 0 < i < len(shore) - 1:
-                tx = (shore[i + 1][0] - shore[i - 1][0]) * OVERVIEW_W
-                ty = (shore[i + 1][1] - shore[i - 1][1]) * OVERVIEW_H
+                tx = (shore[i + 1][0] - shore[i - 1][0]) * ow
+                ty = (shore[i + 1][1] - shore[i - 1][1]) * oh
             elif i == 0:
-                tx = (shore[1][0] - shore[0][0]) * OVERVIEW_W
-                ty = (shore[1][1] - shore[0][1]) * OVERVIEW_H
+                tx = (shore[1][0] - shore[0][0]) * ow
+                ty = (shore[1][1] - shore[0][1]) * oh
             else:
-                tx = (shore[-1][0] - shore[-2][0]) * OVERVIEW_W
-                ty = (shore[-1][1] - shore[-2][1]) * OVERVIEW_H
+                tx = (shore[-1][0] - shore[-2][0]) * ow
+                ty = (shore[-1][1] - shore[-2][1]) * oh
             nlen = math.hypot(tx, ty)
             if nlen < 1e-6:
                 continue
@@ -300,7 +322,7 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
             for dist in (8, 12, 16):
                 px = int(round(sx + nx * dist))
                 py = int(round(sy + ny * dist))
-                if 2 <= px < OVERVIEW_W - 2 and 2 <= py < OVERVIEW_H - 2:
+                if 2 <= px < ow - 2 and 2 <= py < oh - 2:
                     near_pixels.append(day[py - 1 : py + 2, px - 1 : px + 2, :].reshape(-1, 3))
 
         near_rgb = np.concatenate(near_pixels, axis=0)
@@ -313,12 +335,13 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
         sunset = load_overview_rgb("sunset")
         bldgs = load_interactive_json().get("buildings", [])
 
+        oh, ow = day.shape[:2]
         day_samples = []
         sun_samples = []
         for b in bldgs[::2]:
-            cx = int(round(float(b["u"]) * (OVERVIEW_W - 1)))
-            cy = int(round(float(b["v"]) * (OVERVIEW_H - 1)))
-            if 6 <= cx < OVERVIEW_W - 6 and 2 <= cy < OVERVIEW_H - 14:
+            cx = int(round(float(b["u"]) * (ow - 1)))
+            cy = int(round(float(b["v"]) * (oh - 1)))
+            if 6 <= cx < ow - 6 and 2 <= cy < oh - 14:
                 day_samples.append(day[cy : cy + 12, cx - 5 : cx + 5, :].reshape(-1, 3))
                 sun_samples.append(sunset[cy : cy + 12, cx - 5 : cx + 5, :].reshape(-1, 3))
 
@@ -380,15 +403,16 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
             f"Night island warm amber pixel fraction {island_warm_frac * 100:.3f}% < 0.25% (F7)",
         )
 
+        oh, ow = night.shape[:2]
         roads = {rd["id"]: rd for rd in load_animations_json().get("roads", [])}
         for rid in ("seestrasse_sb", "dorfstrasse_viaduct_up", "alte_landstrasse_eb"):
             rd = roads[rid]
-            band_mask = np.zeros((OVERVIEW_H, OVERVIEW_W), dtype=bool)
+            band_mask = np.zeros((oh, ow), dtype=bool)
             for p in rd["pts"][::2]:
-                cx = int(round(p[0] * (OVERVIEW_W - 1)))
-                cy = int(round(p[1] * (OVERVIEW_H - 1)))
-                y0, y1 = max(0, cy - 6), min(OVERVIEW_H, cy + 7)
-                x0, x1 = max(0, cx - 6), min(OVERVIEW_W, cx + 7)
+                cx = int(round(p[0] * (ow - 1)))
+                cy = int(round(p[1] * (oh - 1)))
+                y0, y1 = max(0, cy - 6), min(oh, cy + 7)
+                x0, x1 = max(0, cx - 6), min(ow, cx + 7)
                 band_mask[y0:y1, x0:x1] = True
             street_warm = float(np.mean(warm[band_mask]))
             self.assertGreaterEqual(
@@ -397,23 +421,27 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
                 f"Night warm streetlamp pool fraction along {rid} is {street_warm * 100:.3f}% < 0.50% (F7)",
             )
 
-    @test_meta("T2.FA1.09", "Guardrail #4: Lindt HoC id=1443 25cm roof texture variance/entropy")
+    @test_meta("T2.FA1.09", "Guardrail #4: Lindt HoC id=1443 DOP10 roof texture variance/entropy")
     def test_09_lindt_25cm_roof_texture(self) -> None:
-        # Dynamically derive Lindt HoC (id=1443) tile (col, row) and local (tx, ty) from interactive metadata
+        # Dynamically derive Lindt HoC (id=1443) tile (col, row) and local (tx, ty) from manifest & interactive metadata
         inter = load_interactive_json()
         lindt = next((b for b in inter.get("buildings", []) if b.get("id") == LINDT_HOC_ID), None)
         self.assertIsNotNone(lindt, f"Lindt HoC building id={LINDT_HOC_ID} missing from kilchberg_interactive.json")
         manifest = load_manifest("day")
+        cw = int(manifest["width"])
+        ch = int(manifest["height"])
+        mpp = float(manifest.get("mpp", 0.25))
         tile_sz = int(manifest.get("tileSize", 1024))
-        px = float(lindt["u"]) * CANVAS_W
-        py = float(lindt["v"]) * CANVAS_H
+        rad = max(16, int(round(32 * (0.25 / mpp))))
+        px = float(lindt["u"]) * cw
+        py = float(lindt["v"]) * ch
         col = int(px // tile_sz)
         row = int(py // tile_sz)
         tile = load_tile_rgb("day", col, row)
         th, tw = tile.shape[:2]
-        tx = max(32, min(tw - 32, int(round(px - col * tile_sz))))
-        ty = max(32, min(th - 32, int(round(py - row * tile_sz))))
-        patch = tile[ty - 32 : ty + 32, tx - 32 : tx + 32, :]
+        tx = max(rad, min(tw - rad, int(round(px - col * tile_sz))))
+        ty = max(rad, min(th - rad, int(round(py - row * tile_sz))))
+        patch = tile[ty - rad : ty + rad, tx - rad : tx + rad, :]
         luma = rec709_luma(patch)
         std_l = float(np.std(luma))
         ent = entropy_32b(luma)
@@ -427,10 +455,11 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
         self.assertGreaterEqual(ent, 1.8, f"Lindt tile ({col},{row}) roof entropy={ent:.2f} < 1.8")
         self.assertGreaterEqual(uniq, 12, f"Lindt tile ({col},{row}) roof uniq_colors={uniq} < 12")
 
-        # Detail plate 01 center 160x160 patch
+        # Detail plate 01 center patch (scaled proportionally with plate width)
         plate = load_plate_rgb("01_lindt_home_of_chocolate.webp")
         cy, cx = plate.shape[0] // 2, plate.shape[1] // 2
-        pp = plate[cy - 80 : cy + 80, cx - 80 : cx + 80, :]
+        prad = max(80, int(round(80 * plate.shape[1] / 2794)))
+        pp = plate[cy - prad : cy + prad, cx - prad : cx + prad, :]
         p_luma = rec709_luma(pp)
         self.assertGreaterEqual(float(np.std(p_luma)), 25.0, "Plate 01 Lindt center std_luma < 25.0")
         self.assertGreaterEqual(entropy_32b(p_luma), 2.8, "Plate 01 Lindt center entropy < 2.8")
@@ -441,12 +470,13 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
         self.assertEqual(missing, [], f"Missing v9.0 detail plates: {', '.join(missing)}")
         for fname in NEW_DETAIL_PLATES_V9:
             arr = load_plate_rgb(fname)
+            mt, mb, mlr = plate_cartouche_margins(arr)
             comps = find_interior_components(
                 arr,
                 tol=18,
-                margin_top=110,
-                margin_bot=90,
-                margin_lr=24,
+                margin_top=mt,
+                margin_bot=mb,
+                margin_lr=mlr,
                 min_raw_2x=4,
                 min_dilated_2x=45,
             )
@@ -455,12 +485,139 @@ class TestTier2FA1PixelQuality(unittest.TestCase):
                 1,
                 f"{fname} has {len(comps) - 1} floating sky clusters",
             )
-            body = arr[110:-90, 24:-24, :]
+            body = arr[mt:-mb, mlr:-mlr, :]
             luma = rec709_luma(body)
             std_l = float(np.std(luma))
             ent = entropy_32b(luma)
             self.assertGreaterEqual(std_l, 20.0, f"{fname} body std_luma={std_l:.2f} < 20.0")
             self.assertGreaterEqual(ent, 2.5, f"{fname} body entropy={ent:.2f} < 2.5")
+
+    @test_meta("T2.FA1.11", "v10 high-frequency sharpness & genuine >=2x detail (anti-NN-upscale check)")
+    def test_11_v10_sharpness_and_anti_upscale(self) -> None:
+        m_day = load_manifest("day")
+        mpp = float(m_day.get("mpp", 1.0))
+        self.assertLessEqual(mpp, 0.125, f"day manifest mpp={mpp} > 0.125 (v10 >=2x required)")
+
+        cols_n, rows_n = int(m_day["cols"]), int(m_day["rows"])
+        cx, cy = cols_n // 2, rows_n // 2
+        sample_tiles = (
+            (max(0, cx - 1), cy),
+            (cx, max(0, cy - 1)),
+            (min(cols_n - 1, cx + 1), cy),
+            (cx, cy),
+        )
+
+        grads = []
+        nn_ratios = []
+        for c, r in sample_tiles:
+            tile = load_tile_rgb("day", c, r)
+            luma = rec709_luma(tile)
+            mg = 0.5 * (
+                float(np.abs(luma[:, 1:] - luma[:, :-1]).mean())
+                + float(np.abs(luma[1:, :] - luma[:-1, :]).mean())
+            )
+            grads.append(mg)
+
+            # Anti-2x-nearest-neighbor-upscale check on aligned 2x2 blocks over textured regions
+            h2 = (tile.shape[0] // 2) * 2
+            w2 = (tile.shape[1] // 2) * 2
+            b00 = tile[0:h2:2, 0:w2:2]
+            b01 = tile[0:h2:2, 1:w2:2]
+            b10 = tile[1:h2:2, 0:w2:2]
+            b11 = tile[1:h2:2, 1:w2:2]
+            uniform = (
+                np.all(b00 == b01, axis=-1)
+                & np.all(b00 == b10, axis=-1)
+                & np.all(b00 == b11, axis=-1)
+            )
+            diff_r = np.zeros_like(uniform)
+            diff_r[:, :-1] = np.any(b00[:, :-1] != b00[:, 1:], axis=-1)
+            diff_d = np.zeros_like(uniform)
+            diff_d[:-1, :] = np.any(b00[:-1, :] != b00[1:, :], axis=-1)
+            textured = diff_r | diff_d
+            nn_ratio = float(uniform[textured].mean()) if textured.any() else 1.0
+            nn_ratios.append(nn_ratio)
+
+        mean_grad = float(np.mean(grads))
+        max_grad = float(np.max(grads))
+        mean_nn = float(np.mean(nn_ratios))
+        max_nn = float(np.max(nn_ratios))
+
+        self.assertGreaterEqual(
+            mean_grad,
+            4.5,
+            f"Central 0.125 m/px tiles mean 1px gradient energy {mean_grad:.2f} < 4.5 (blurred/flat)",
+        )
+        self.assertGreaterEqual(
+            max_grad,
+            7.0,
+            f"Central 0.125 m/px village tile peak 1px gradient energy {max_grad:.2f} < 7.0",
+        )
+        self.assertLess(
+            max_nn,
+            0.70,
+            f"Central tile 2x2 block duplication ratio {max_nn:.3f} >= 0.70 (suspected 2x NN upscale)",
+        )
+        self.assertLess(
+            mean_nn,
+            0.55,
+            f"Central tiles mean 2x2 block duplication ratio {mean_nn:.3f} >= 0.55 (suspected 2x NN upscale)",
+        )
+
+    @test_meta("T2.FA1.12", "v10 GitHub Pages & asset footprint budget (<300MB docs, <500KB tiles, <650KB anim, <10MB depth, zero >90MB)")
+    def test_12_v10_asset_footprint_budget(self) -> None:
+        total_docs_bytes = 0
+        oversized_files = []
+        for fp in DOCS_DIR.rglob("*"):
+            if fp.is_file():
+                sz = fp.stat().st_size
+                total_docs_bytes += sz
+                if sz > 90 * 1024 * 1024:
+                    oversized_files.append(f"{fp.relative_to(DOCS_DIR)} ({sz / (1024 * 1024):.1f} MB)")
+
+        self.assertEqual(
+            oversized_files,
+            [],
+            f"Files in docs/ exceed 90 MB GitHub limit guard: {', '.join(oversized_files)}",
+        )
+        self.assertLess(
+            total_docs_bytes,
+            300 * 1024 * 1024,
+            f"Total docs/ size {total_docs_bytes / (1024 * 1024):.1f} MB >= 300 MB budget",
+        )
+
+        oversized_tiles = []
+        tile_count = 0
+        for tp in TILES_DIR.rglob("*.webp"):
+            if tp.is_file():
+                tile_count += 1
+                sz = tp.stat().st_size
+                if sz >= 500 * 1024:
+                    oversized_tiles.append(f"{tp.relative_to(TILES_DIR)} ({sz / 1024:.1f} KB)")
+        self.assertGreater(tile_count, 0, "No WebP tiles found under docs/assets/tiles/")
+        self.assertEqual(
+            oversized_tiles,
+            [],
+            f"Individual tiles >= 500 KB ({len(oversized_tiles)}): {', '.join(oversized_tiles[:5])}",
+        )
+
+        anim_path = DATA_DIR / "kilchberg_animations.json"
+        self.assertTrue(anim_path.is_file(), "Missing docs/data/kilchberg_animations.json")
+        anim_sz = anim_path.stat().st_size
+        self.assertLess(
+            anim_sz,
+            650 * 1024,
+            f"kilchberg_animations.json size {anim_sz / 1024:.1f} KB >= 650 KB budget",
+        )
+
+        depth_path = ASSETS_DIR / "kilchberg_depth.png"
+        self.assertTrue(depth_path.is_file(), "Missing docs/assets/kilchberg_depth.png")
+        depth_sz = depth_path.stat().st_size
+        self.assertLess(
+            depth_sz,
+            10 * 1024 * 1024,
+            f"kilchberg_depth.png size {depth_sz / (1024 * 1024):.2f} MB >= 10 MB budget",
+        )
 
 
 class TestTier2FA2GeospatialBounds(unittest.TestCase):
@@ -468,10 +625,11 @@ class TestTier2FA2GeospatialBounds(unittest.TestCase):
 
     @test_meta("T2.FA2.01", "Zero road kinks > 45 deg in pixel space across all 8 roads")
     def test_01_zero_road_kinks(self) -> None:
+        cw, ch = get_canvas_dims()
         roads = {rd["id"]: rd for rd in load_animations_json().get("roads", [])}
         violations = []
         for rid in REQUIRED_ROAD_IDS:
-            max_ang, gt45, gt90 = pixel_turn_angles_deg(roads[rid]["pts"], CANVAS_W, CANVAS_H)
+            max_ang, gt45, gt90 = pixel_turn_angles_deg(roads[rid]["pts"], cw, ch)
             if gt45 > 0 or max_ang > 45.0:
                 violations.append(f"{rid} (max={max_ang:.1f} deg, >45={gt45}, >90={gt90})")
         self.assertEqual(

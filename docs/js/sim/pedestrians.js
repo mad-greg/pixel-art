@@ -202,6 +202,7 @@ export function createPedestrianSim(animData) {
   const depthMin = (animData && typeof animData.depth_min === 'number') ? animData.depth_min : -2400.0;
   const depthMax = (animData && typeof animData.depth_max === 'number') ? animData.depth_max : 2400.0;
   const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+  const resFactor = 0.25 / mppMaster;
   const depthSlopeGround = mppMaster * Math.sqrt(3) * (65535.0 / Math.max(1.0, depthMax - depthMin));
   const network = (animData && animData.network) || {};
   const vig = (animData && animData.ambient && animData.ambient.vignettes) || {};
@@ -332,7 +333,7 @@ export function createPedestrianSim(animData) {
       const pos = samplePathAt(rd.pts, rd.stops[sIdx], masterW, masterH, 3);
       if (!pos) continue;
       let bestPoi = null;
-      let bestDist = 42;
+      let bestDist = 42 * resFactor;
       for (const bp of busPois) {
         const d = Math.hypot(bp.u * masterW - pos.wx, bp.v * masterH - pos.wy);
         if (d < bestDist) {
@@ -495,7 +496,7 @@ export function createPedestrianSim(animData) {
       rx = -gy / gm;
       ry = (gx / gm) * isoY;
     }
-    const latPx = isMain ? 6.2 : 2.8;
+    const latPx = (isMain ? 6.2 : 2.8) * resFactor;
     const wx = pos.wx + rx * latPx;
     const wy = pos.wy + ry * latPx;
     const baseD16 = pos.d16 || 30000;
@@ -647,7 +648,10 @@ export function createPedestrianSim(animData) {
   }
 
   const u16PerM = 65535.0 / Math.max(1.0, depthMax - depthMin);
-  const depthC0 = (0 - depthMin) * u16PerM + depthSlopeGround * 2927.412592;
+  const shiftY = (animData && Number.isFinite(animData.shift_y))
+    ? animData.shift_y
+    : (2927.412592 * resFactor);
+  const depthC0 = (0 - depthMin) * u16PerM + depthSlopeGround * shiftY;
   const depthSlopeZ = 2.0 * 1.16 * u16PerM;
   function evalEstD16(u, v, zGnd) {
     const wyM = v * masterH;
@@ -658,7 +662,7 @@ export function createPedestrianSim(animData) {
     const distPx = Math.hypot((targetU - ag.u) * masterW, (targetV - ag.v) * masterH);
     const resolvedEndD16 = targetD16 != null ? targetD16 : evalEstD16(targetU, targetV, targetZGnd);
     ag.connNext = nextAction;
-    if (distPx < 3.0) {
+    if (distPx < 3.0 * resFactor) {
       ag.u = targetU;
       ag.v = targetV;
       ag.d16 = resolvedEndD16;
@@ -678,7 +682,7 @@ export function createPedestrianSim(animData) {
     ag.connStartZGnd = ag.zGnd;
     ag.connEndZGnd = targetZGnd;
     ag.connProgress = 0;
-    ag.connLenM = Math.max(0.6, distPx * 0.28);
+    ag.connLenM = Math.max(0.6, distPx * (mppMaster * 1.12));
     ag.onElevatedDeck = !!onElevated;
     ag.tx = (targetU - ag.u) * masterW;
     ag.ty = (targetV - ag.v) * masterH;
@@ -691,12 +695,12 @@ export function createPedestrianSim(animData) {
     const p0 = sampleEdgeAt(route[0], 0);
     if (!p0) return false;
     const distPx = Math.hypot((p0.u - ag.u) * masterW, (p0.v - ag.v) * masterH);
-    if (distPx < 8.0) {
+    if (distPx < 8.0 * resFactor) {
       return assignFootpathTrip(ag, fromPoi, toPoi, labelPrefix);
     }
-    // Snap directly to footpath start if separated across a station building (> 22 px)
+    // Snap directly to footpath start if separated across a station building (> 22 ref px)
     // so commuters never walk through building roofs on a straight-line connector.
-    if (distPx > 22.0 && fromPoi === 'poi_bahnhof') {
+    if (distPx > 22.0 * resFactor && fromPoi === 'poi_bahnhof') {
       ag.u = p0.u;
       ag.v = p0.v;
       ag.d16 = p0.d16;
@@ -812,13 +816,13 @@ export function createPedestrianSim(animData) {
       const nMag = Math.hypot(cw.nx, cw.ny) || 1;
       const ux = cw.nx / nMag;
       const uy = cw.ny / nMag;
-      const spanPx = (p - 0.5) * 18.0 * ag.cwDir;
+      const spanPx = (p - 0.5) * 18.0 * resFactor * ag.cwDir;
       wx = baseWx + ux * spanPx;
       wy = baseWy + uy * spanPx;
       ag.tx = ux * ag.cwDir;
       ag.ty = uy * ag.cwDir;
     } else {
-      const spanPx = (p - 0.5) * 11.5 * ag.cwDir;
+      const spanPx = (p - 0.5) * 11.5 * resFactor * ag.cwDir;
       wx = baseWx + cw.nx * spanPx;
       wy = baseWy + cw.ny * spanPx * 0.55;
       ag.tx = cw.nx * ag.cwDir;
@@ -898,8 +902,8 @@ export function createPedestrianSim(animData) {
       if (stopPoi && i < Math.min(activeBusPoiIds.length * 2, Math.ceil(counts.bus_rider * 0.55))) {
         const geo = poiCurbGeo.get(stopPoi);
         ag.state = 'queue_bus';
-        const along = ((ag.stopSlot % 3) - 1) * 3.8;
-        const lat = geo.isMain ? 6.2 : 5.0;
+        const along = ((ag.stopSlot % 3) - 1) * 3.8 * resFactor;
+        const lat = (geo.isMain ? 6.2 : 5.0) * resFactor;
         ag.u = clamp(geo.u + (geo.rx * lat + geo.tx * along) / masterW, 0.002, 0.998);
         ag.v = clamp(geo.v + (geo.ry * lat + geo.ty * along) / masterH, 0.002, 0.998);
         ag.d16 = geo.d16;
@@ -1124,7 +1128,7 @@ export function createPedestrianSim(animData) {
     for (let i = 0; i < socialAnchors.length; i++) {
       const sa = socialAnchors[i];
       const dPx = Math.hypot((ag.u - sa.u) * masterW, (ag.v - sa.v) * masterH);
-      if (dPx < 14.0 && rng.chance(0.28)) {
+      if (dPx < 14.0 * resFactor && rng.chance(0.28)) {
         ag.resumeState = ag.state;
         ag.state = 'social_pause';
         ag.stateTimer = rng.range(3.0, 5.0);
@@ -1223,7 +1227,7 @@ export function createPedestrianSim(animData) {
               ag.state = 'alighting';
               ag.stateTimer = 0.85;
               ag.targetStopPoiId = poiId;
-              const lat = (geo.isMain ? 5.2 : 4.2);
+              const lat = (geo.isMain ? 5.2 : 4.2) * resFactor;
               ag.u = clamp(geo.u + (geo.rx * lat) / masterW, 0.002, 0.998);
               ag.v = clamp(geo.v + (geo.ry * lat) / masterH, 0.002, 0.998);
               ag.d16 = geo.d16;
@@ -1322,7 +1326,7 @@ export function createPedestrianSim(animData) {
         } else if (ag.role === 'bus_rider' && ag.targetStopPoiId) {
           const geo = poiCurbGeo.get(ag.targetStopPoiId);
           if (geo) {
-            const lat = (geo.isMain ? 4.8 : 3.8);
+            const lat = (geo.isMain ? 4.8 : 3.8) * resFactor;
             ag.u = clamp(geo.u + (geo.rx * lat) / masterW, 0.002, 0.998);
             ag.v = clamp(geo.v + (geo.ry * lat) / masterH, 0.002, 0.998);
           }
@@ -1639,7 +1643,7 @@ export function createPedestrianSim(animData) {
           }
           if (ag.role === 'bus_rider' && curPoi === ag.targetStopPoiId && poiCurbGeo.has(curPoi)) {
             const geo = poiCurbGeo.get(curPoi);
-            const lat = geo.isMain ? 6.2 : 3.2;
+            const lat = (geo.isMain ? 6.2 : 3.2) * resFactor;
             const targetU = clamp(geo.u + (geo.rx * lat) / masterW, 0.002, 0.998);
             const targetV = clamp(geo.v + (geo.ry * lat) / masterH, 0.002, 0.998);
             const curbD16 = clamp(Math.round(geo.d16 - geo.ry * lat * depthSlopeGround), 1, 65534);
@@ -1810,7 +1814,7 @@ export function createPedestrianSim(animData) {
   }
 
   function getDrawablePedestrians(worldW, worldH, wScale, cam, depthMgr) {
-    if (!cam || cam.scale < 0.35) return [];
+    if (!cam || (cam.scale * wScale) < 0.35) return [];
     const { scale, offsetX, offsetY, width: canvasW, height: canvasH } = cam;
     const padU = Math.max(0.005, 48 / Math.max(1, worldW * scale));
     const padV = Math.max(0.010, 48 / Math.max(1, worldH * scale));

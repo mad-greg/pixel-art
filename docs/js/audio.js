@@ -49,7 +49,7 @@ const TREE_BIRD_PERCHES = [
 ];
 
 export function createAudioEngine({
-  assetVer = '8.0',
+  assetVer = '10.0',
   getCamera,
   getMode,
   getWorldSize,
@@ -152,7 +152,9 @@ export function createAudioEngine({
     const v1 = (canvasH - offsetY) / (worldH * scale);
     const uC = (u0 + u1) * 0.5;
     const halfVisU = Math.max(0.02, (u1 - u0) * 0.5);
-    const zoomNorm = Math.max(0.15, Math.min(4.0, scale / Math.max(1, dpr)));
+    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+    const wScale = (worldW / (animData.canvas_width || 12331)) * (0.25 / mppMaster);
+    const zoomNorm = Math.max(0.15, Math.min(4.0, (scale * wScale) / Math.max(1, dpr)));
     const isNight = mode === 'night';
     const isSunset = mode === 'sunset';
 
@@ -187,7 +189,6 @@ export function createAudioEngine({
       if (force) {
         trafficSim.updateToTime(tSec, mode);
       }
-      const wScale = worldW / (animData.canvas_width || 12331);
       const drawables = trafficSim.getDrawableVehicles(worldW, worldH, wScale);
       for (const b of drawables.buses) {
         if (!b.pos) continue;

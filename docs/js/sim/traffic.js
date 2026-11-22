@@ -94,6 +94,8 @@ function activeBusCountForRoad(rd, busMode) {
 export function createTrafficSim(animData) {
   const masterW = (animData && animData.canvas_width) ? animData.canvas_width : 12331;
   const masterH = (animData && animData.canvas_height) ? animData.canvas_height : 5444;
+  const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+  const resFactor = 0.25 / mppMaster;
   const roads = (animData && Array.isArray(animData.roads)) ? animData.roads : [];
   const trains = (animData && Array.isArray(animData.trains)) ? animData.trains : [];
   const ships = (animData && Array.isArray(animData.ships)) ? animData.ships : [];
@@ -114,7 +116,7 @@ export function createTrafficSim(animData) {
     for (const rd of roads) {
       if (rd.kind === 'motorway') continue;
       const proj = closestFracOnPts(rd.pts, cw.u, cw.v, masterW, masterH);
-      if (proj.distPx < 25.0) {
+      if (proj.distPx < 25.0 * resFactor) {
         const sM = proj.frac * rd.length_m;
         const binding = { cwIdx, cwId: cw.id, roadId: rd.id, frac: proj.frac, sM };
         bindings.push(binding);

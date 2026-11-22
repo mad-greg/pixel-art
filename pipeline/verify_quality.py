@@ -60,9 +60,10 @@ def _check_zero_floating_sky_pixels(img_path, strict_outer_margin: bool = True) 
     """Verify zero disconnected foreground pixel islands (detached tree crowns, chimneys, cars, goals) float in exterior sky."""
     arr = np.asarray(Image.open(img_path).convert("RGB"), dtype=np.int16)
     H, W, _ = arr.shape
-    # Exclude museum cartouche border, top title/compass header (y < 118), and bottom credit/scale band (y > H - 78)
-    y_top, y_bot = 118, H - 78
-    x_l, x_r = 28, W - 28
+    # Exclude museum cartouche border, top title/compass header, and bottom credit/scale band (2x scaled for >=4000 px v10 plates)
+    cs = 2 if W >= 4000 else 1
+    y_top, y_bot = 118 * cs, H - 78 * cs
+    x_l, x_r = 28 * cs, W - 28 * cs
     roi = arr[y_top:y_bot, x_l:x_r]
     # Estimate clean per-row sky gradient from outer left/right margin columns
     sky_ref = np.median(np.concatenate([roi[:, :24, :], roi[:, -24:, :]], axis=1), axis=1)
@@ -128,14 +129,27 @@ def verify_all() -> None:
         mf = json.loads(mf_p.read_text())
         if mode == "day":
             mf_day = mf
-        assert mf["width"] >= 11500 and mf["height"] >= 5200, f"Expected >=11.5k x 5.2k tiled canvas, got {mf}"
+        assert mf["width"] >= 23000 and mf["height"] >= 10400 and float(mf["mpp"]) <= 0.13, (
+            f"Expected >=23k x 10.4k @ <=0.13 m/px tiled canvas, got {mf}"
+        )
         n_tiles = mf["cols"] * mf["rows"]
         existing_tiles = list(tdir.glob("*.webp"))
         assert len(existing_tiles) == n_tiles, f"Expected {n_tiles} tiles in {tdir}, found {len(existing_tiles)}"
         tiles_mb = sum(tp.stat().st_size for tp in existing_tiles) / 1e6
 
-        # F6: Strict <= 256-color SVGA hardware CLUT verification on interior tiles
-        for tile_name in ("5_2.webp", "6_3.webp"):
+        if "z1" in mf:
+            z1 = mf["z1"]
+            z1_dir = tdir / z1.get("path", "z1")
+            z1_expected = int(z1["cols"]) * int(z1["rows"])
+            z1_existing = list(z1_dir.glob("*.webp")) if z1_dir.exists() else []
+            assert len(z1_existing) == z1_expected, (
+                f"Expected {z1_expected} z1 tiles in {z1_dir}, found {len(z1_existing)}"
+            )
+            tiles_mb += sum(tp.stat().st_size for tp in z1_existing) / 1e6
+
+        # F6: Strict <= 256-color SVGA hardware CLUT verification on dynamic interior center tiles
+        cx, cy = int(mf["cols"]) // 2, int(mf["rows"]) // 2
+        for tile_name in (f"{cx}_{cy}.webp", f"{max(0, cx - 1)}_{cy}.webp"):
             tp_chk = tdir / tile_name
             if tp_chk.exists():
                 t_arr = np.asarray(Image.open(tp_chk).convert("RGB"))
@@ -143,19 +157,23 @@ def verify_all() -> None:
                 n_uniq = int(len(np.unique(packed)))
                 assert n_uniq <= 256, f"SVGA palette exceeded 256 colors ({n_uniq}) in {mode}/{tile_name}"
 
-        # F7/F8/F9: Zero macro-tile seam check along exact 6x3 macro boundaries!
+        # F7/F8/F9: Zero macro-tile seam check along exact macroCols x macroRows macro boundaries!
         Wf, Hf = int(mf["width"]), int(mf["height"])
+        nx_m = int(mf.get("macroCols", 6))
+        ny_m = int(mf.get("macroRows", 3))
+        y_pad_seam = 440 if Hf >= 9000 else 220
+        x_pad_seam = 440 if Wf >= 18000 else 220
         max_ratio = 0.0
-        for k in range(1, 6):
-            xs = (Wf * k) // 6
-            st = _load_canvas_strip_v(tdir, mf, xs, 220, Hf - 220)
+        for k in range(1, nx_m):
+            xs = (Wf * k) // nx_m
+            st = _load_canvas_strip_v(tdir, mf, xs, y_pad_seam, Hf - y_pad_seam)
             d_seam = float(np.abs(st[:, 2, :] - st[:, 1, :]).mean())
             d_ctrl = 0.5 * (float(np.abs(st[:, 1, :] - st[:, 0, :]).mean()) + float(np.abs(st[:, 3, :] - st[:, 2, :]).mean()))
             if d_ctrl > 0.5:
                 max_ratio = max(max_ratio, d_seam / d_ctrl)
-        for k in range(1, 3):
-            ys = (Hf * k) // 3
-            st = _load_canvas_strip_h(tdir, mf, ys, 220, Wf - 220)
+        for k in range(1, ny_m):
+            ys = (Hf * k) // ny_m
+            st = _load_canvas_strip_h(tdir, mf, ys, x_pad_seam, Wf - x_pad_seam)
             d_seam = float(np.abs(st[2, :, :] - st[1, :, :]).mean())
             d_ctrl = 0.5 * (float(np.abs(st[1, :, :] - st[0, :, :]).mean()) + float(np.abs(st[3, :, :] - st[2, :, :]).mean()))
             if d_ctrl > 0.5:
@@ -199,7 +217,7 @@ def verify_all() -> None:
     assert depth_p.exists(), f"Missing 16-bit depth map {depth_p}"
     d_img = Image.open(depth_p)
     assert mf_day is not None
-    exp_dsize = (int(mf_day["width"]) // 2, int(mf_day["height"]) // 2)
+    exp_dsize = Image.open(DOCS_DIR / "assets" / "diorama_day.webp").size
     assert d_img.size == exp_dsize, f"Expected depth map {exp_dsize}, got {d_img.size}"
     d_arr = np.asarray(d_img)
     n_occ = int((d_arr[:, :, 2] == 255).sum())
@@ -211,7 +229,7 @@ def verify_all() -> None:
         assert cp.exists(), f"Missing crop {cp}"
         img = Image.open(cp)
         w, h = img.size
-        assert w >= 2000 and h >= 1400, f"Unexpected crop size {fname}: {w}x{h}"
+        assert w >= 3200 and h >= 2200, f"Unexpected crop size {fname}: {w}x{h}"
         _check_zero_floating_sky_pixels(
             cp,
             strict_outer_margin=(fname in ("02_reformierte_kirche_dorf.png", "03_bendlikon_harbor_pier.png")),

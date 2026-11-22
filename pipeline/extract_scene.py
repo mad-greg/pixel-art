@@ -221,17 +221,20 @@ def _iter_linestrings(geom) -> list[LineString]:
 
 
 def _ensure_v2_rasters(cache_dir: Path, bldg_npz: Path, force: bool = False) -> None:
-    """Ensure 25cm SWISSIMAGE texture atlas, exact 2D building roof mask, and 25cm roof parapet edge step exist."""
-    ortho25_p = cache_dir / "ortho_25cm.npy"
+    """Ensure native 10cm SWISSIMAGE texture atlas (ortho_10cm.npy), exact 2D building roof mask, and 25cm roof parapet edge step exist."""
+    ortho10_p = cache_dir / "ortho_10cm.npy"
     roof_mask_p = cache_dir / "bldg_roof_mask_05m.npy"
     roof_edge25_p = cache_dir / "roof_edge_step_25cm.npy"
 
+    w10 = int(round((E_MAX - E_MIN) / 0.10))
+    h10 = int(round((N_MAX - N_MIN) / 0.10))
     w25 = int(round((E_MAX - E_MIN) / 0.25))
     h25 = int(round((N_MAX - N_MIN) / 0.25))
 
-    if not ortho25_p.exists():
-        print("[scene] Building 25 cm SWISSIMAGE DOP10 true-color texture atlas (ortho_25cm.npy)...")
-        out25 = np.zeros((h25, w25, 3), dtype=np.uint8)
+    if not ortho10_p.exists():
+        print(f"[scene] Building native 10 cm SWISSIMAGE DOP10 true-color texture atlas (ortho_10cm.npy, {h10}x{w10})...")
+        out10 = np.lib.format.open_memmap(ortho10_p, mode="w+", dtype=np.uint8, shape=(h10, w10, 3))
+        out10[:] = 0
         for e_km in (2682, 2683, 2684, 2685):
             for n_km in (1240, 1241, 1242, 1243):
                 tp = cache_dir / "swissimage" / f"{e_km}-{n_km}.tif"
@@ -241,16 +244,28 @@ def _ensure_v2_rasters(cache_dir: Path, bldg_npz: Path, force: bool = False) -> 
                 in0, in1 = max(N_MIN, n_km * 1000.0), min(N_MAX, (n_km + 1) * 1000.0)
                 if ie1 <= ie0 or in1 <= in0:
                     continue
-                c0 = int(round((ie0 - E_MIN) / 0.25))
-                c1 = int(round((ie1 - E_MIN) / 0.25))
-                r0 = int(round((N_MAX - in1) / 0.25))
-                r1 = int(round((N_MAX - in0) / 0.25))
+                c0 = int(round((ie0 - E_MIN) / 0.10))
+                c1 = int(round((ie1 - E_MIN) / 0.10))
+                r0 = int(round((N_MAX - in1) / 0.10))
+                r1 = int(round((N_MAX - in0) / 0.10))
                 with rasterio.open(tp) as ds:
-                    win = rasterio.windows.from_bounds(ie0, in0, ie1, in1, transform=ds.transform)
-                    arr = ds.read([1, 2, 3], window=win, out_shape=(3, r1 - r0, c1 - c0), resampling=Resampling.average)
-                    out25[r0:r1, c0:c1, :] = np.transpose(arr, (1, 2, 0))
-        np.save(ortho25_p, out25)
-        del out25
+                    # Stream in vertical strips (<=2500 rows) to keep build RAM well under 150 MB
+                    strip_h = 2500
+                    for sr0 in range(r0, r1, strip_h):
+                        sr1 = min(r1, sr0 + strip_h)
+                        sn1 = N_MAX - sr0 * 0.10
+                        sn0 = N_MAX - sr1 * 0.10
+                        win = rasterio.windows.from_bounds(ie0, sn0, ie1, sn1, transform=ds.transform)
+                        arr = ds.read(
+                            [1, 2, 3],
+                            window=win,
+                            out_shape=(3, sr1 - sr0, c1 - c0),
+                            resampling=Resampling.bilinear,
+                        )
+                        out10[sr0:sr1, c0:c1, :] = np.transpose(arr, (1, 2, 0))
+                        del arr
+        out10.flush()
+        del out10
 
     if (force or not roof_mask_p.exists() or not roof_edge25_p.exists()) and bldg_npz.exists():
         print("[scene] Rasterizing exact LOD2 building roof mask & 25cm parapet rim bands...")

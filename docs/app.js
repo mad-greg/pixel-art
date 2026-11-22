@@ -56,13 +56,19 @@ import { createTrafficSim } from './js/sim/traffic.js';
     { file: '10_stockengut_ridge_farm.webp', label: 'Stockengut Ridge Farm', lmId: 'stockengut_farm' },
   ];
 
-  const ASSET_VER = '9.0';
+  const ASSET_VER = '10.0';
+  const MAX_CACHED_TILES = 128;
 
-  // Overview images, ultra-high-res 0.25 m/px tile pyramids & 16-bit 3D Depth Manager
+  // Overview images, 2-level 0.25/0.125 m/px tile pyramids (LRU-bounded) & 16-bit 3D Depth Manager
   const overviewImages = {};
-  const tileManifests = {};   // mode -> { width, height, tileSize, cols, rows, mpp } | null
-  const tileCache = {};       // "mode:c:r" -> HTMLImageElement | 'loading' | 'error'
+  const tileManifests = {};   // mode -> { width, height, tileSize, cols, rows, mpp, z1? } | null
+  const tileCache = new Map(); // "${mode}:${level}:${col}_${row}" -> HTMLImageElement | 'loading' | 'error'
+  const visibleTileKeys = new Set();
   const depthMgr = createDepthManager();
+
+  function formatMppCm(mpp) {
+    return `${(mpp * 100).toFixed(1).replace(/\.0$/, '')} cm/px`;
+  }
   let trafficSim = null;
   let pedSim = null;
   let lastSimSnapshot = null;
@@ -72,7 +78,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
   let animData = null;
 
   // World space = full-resolution diorama pixel space (either tileManifest width/height or overview width/height)
-  let scale = 0.25;
+  let scale = 0.05;
   let offsetX = 0;
   let offsetY = 0;
 
@@ -147,7 +153,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
         tileManifests[mode] = data;
         if (data && data.mpp) {
           const fidEl = document.getElementById('spec-fidelity');
-          if (fidEl) fidEl.textContent = `${Math.round(data.mpp * 100)} cm/px · ${data.width.toLocaleString()}×${data.height.toLocaleString()}`;
+          if (fidEl) fidEl.textContent = `${formatMppCm(data.mpp)} · ${data.width.toLocaleString()}×${data.height.toLocaleString()}`;
         }
         return data;
       })
@@ -157,19 +163,39 @@ import { createTrafficSim } from './js/sim/traffic.js';
       });
   }
 
-  function requestTile(mode, col, row) {
-    const key = `${mode}:${col}:${row}`;
-    if (tileCache[key]) return tileCache[key];
-    tileCache[key] = 'loading';
+  function evictTileCache() {
+    if (tileCache.size <= MAX_CACHED_TILES) return;
+    for (const key of tileCache.keys()) {
+      if (tileCache.size <= MAX_CACHED_TILES) break;
+      if (!visibleTileKeys.has(key)) {
+        tileCache.delete(key);
+      }
+    }
+  }
+
+  function requestTile(mode, level, col, row, subPath = '') {
+    const key = `${mode}:${level}:${col}_${row}`;
+    visibleTileKeys.add(key);
+    if (tileCache.has(key)) {
+      const cached = tileCache.get(key);
+      tileCache.delete(key);
+      tileCache.set(key, cached);
+      return cached;
+    }
+    tileCache.set(key, 'loading');
+    const relPath = subPath ? `${mode}/${subPath}/${col}_${row}.webp` : `${mode}/${col}_${row}.webp`;
     const img = new Image();
     img.onload = () => {
-      tileCache[key] = img;
+      if (tileCache.has(key)) tileCache.delete(key);
+      tileCache.set(key, img);
+      evictTileCache();
       scheduleDraw();
     };
     img.onerror = () => {
-      tileCache[key] = 'error';
+      tileCache.set(key, 'error');
     };
-    img.src = `assets/tiles/${mode}/${col}_${row}.webp?v=${ASSET_VER}`;
+    img.src = `assets/tiles/${relPath}?v=${ASSET_VER}`;
+    evictTileCache();
     return 'loading';
   }
 
@@ -195,7 +221,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     }
   }
 
-  function resizeViewport() {
+  function resizeViewport(skipDraw = false) {
     const rect = viewport.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
     const nd = getDeviceRatio();
@@ -224,7 +250,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     const tb = document.getElementById('topbar');
     if (tb) document.documentElement.style.setProperty('--topbar-h', `${Math.round(tb.getBoundingClientRect().height)}px`);
     sizeMinimap();
-    draw();
+    if (skipDraw !== true) draw();
   }
 
   function getCenterUV() {
@@ -381,7 +407,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
     if (!bar || !label) return;
     const mf = tileManifests[currentMode];
     const world = getWorldSize();
-    const mpp = (mf && mf.mpp ? mf.mpp : 0.25) * (mf && mf.width ? 1 : 12331 / Math.max(1, world.width));
+    const fallbackW = (meta && meta.canvas_width) || (animData && animData.canvas_width) || 24661;
+    const fallbackMpp = (meta && meta.camera && meta.camera.mpp) || (animData && animData.mpp) || 0.125;
+    const mpp = (mf && mf.mpp ? mf.mpp : fallbackMpp) * (mf && mf.width ? 1 : fallbackW / Math.max(1, world.width));
     const metresPerCssPx = mpp / Math.max(1e-6, cssScale());
     const minM = metresPerCssPx * 64;
     const pow = Math.pow(10, Math.floor(Math.log10(minM)));
@@ -413,41 +441,106 @@ import { createTrafficSim } from './js/sim/traffic.js';
       ctx.drawImage(ov, destX, destY, destW, destH);
     }
 
-    // 2. Stream ultra-crisp 0.25 m/px lossless WebP tiles seamlessly once zoomed past 2:1 overview density (~50%)!
+    // 2. Stream 2-level lossless WebP tile pyramid: overview (0.50 m/px) -> z1 (0.25 m/px) -> L2 (0.125 m/px)
     let tilesLoaded = 0;
     let tilesVisible = 0;
+    visibleTileKeys.clear();
     const ovWidth = ov ? ov.width : 0;
+    const z1 = (mf && mf.z1 && mf.z1.width && mf.z1.height && mf.z1.cols && mf.z1.rows) ? mf.z1 : null;
     const needTiles = tiled && mf && (!ov || (width * scale) > ovWidth * 0.98);
+    const useZ1 = !!(needTiles && z1 && (width * scale) <= z1.width * 1.05);
 
-    if (needTiles) {
+    if (needTiles && useZ1) {
+      const z1ts = z1.tileSize || 1024;
+      const z1Path = z1.path || 'z1';
+      const scaleX = width / z1.width;
+      const scaleY = height / z1.height;
+      const c0 = Math.max(0, Math.floor((-offsetX / (scale * scaleX)) / z1ts));
+      const c1 = Math.min(z1.cols - 1, Math.floor(((canvas.width - offsetX) / (scale * scaleX)) / z1ts));
+      const r0 = Math.max(0, Math.floor((-offsetY / (scale * scaleY)) / z1ts));
+      const r1 = Math.min(z1.rows - 1, Math.floor(((canvas.height - offsetY) / (scale * scaleY)) / z1ts));
+
+      ctx.imageSmoothingEnabled = (scale * scaleX) < 0.95;
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          tilesVisible++;
+          const tImg = requestTile(currentMode, 'z1', c, r, z1Path);
+          if (tImg && tImg !== 'loading' && tImg !== 'error') {
+            tilesLoaded++;
+            const tx0 = Math.round(offsetX + c * z1ts * scaleX * scale);
+            const ty0 = Math.round(offsetY + r * z1ts * scaleY * scale);
+            const tx1 = Math.round(offsetX + (c * z1ts + tImg.width) * scaleX * scale);
+            const ty1 = Math.round(offsetY + (r * z1ts + tImg.height) * scaleY * scale);
+            ctx.drawImage(tImg, tx0, ty0, tx1 - tx0, ty1 - ty0);
+          }
+        }
+      }
+      evictTileCache();
+    } else if (needTiles) {
       const ts = mf.tileSize;
       const c0 = Math.max(0, Math.floor((-offsetX / scale) / ts));
       const c1 = Math.min(mf.cols - 1, Math.floor(((canvas.width - offsetX) / scale) / ts));
       const r0 = Math.max(0, Math.floor((-offsetY / scale) / ts));
       const r1 = Math.min(mf.rows - 1, Math.floor(((canvas.height - offsetY) / scale) / ts));
 
-      ctx.imageSmoothingEnabled = scale < 0.95;
+      const l2List = [];
+      let anyMissing = false;
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
           tilesVisible++;
-          const tImg = requestTile(currentMode, c, r);
+          const tImg = requestTile(currentMode, 'l2', c, r, '');
           if (tImg && tImg !== 'loading' && tImg !== 'error') {
             tilesLoaded++;
-            const sxWorld = c * ts;
-            const syWorld = r * ts;
-            const tx0 = Math.round(offsetX + sxWorld * scale);
-            const ty0 = Math.round(offsetY + syWorld * scale);
-            const tx1 = Math.round(offsetX + (sxWorld + tImg.width) * scale);
-            const ty1 = Math.round(offsetY + (syWorld + tImg.height) * scale);
-            ctx.drawImage(tImg, tx0, ty0, tx1 - tx0, ty1 - ty0);
+            l2List.push({ c, r, tImg });
+          } else {
+            anyMissing = true;
           }
         }
       }
+
+      // Progressive fallback: if any L2 tile is still decoding, paint any already-cached z1 tiles underneath
+      if (anyMissing && z1) {
+        const z1ts = z1.tileSize || 1024;
+        const scaleX = width / z1.width;
+        const scaleY = height / z1.height;
+        const zc0 = Math.max(0, Math.floor((-offsetX / (scale * scaleX)) / z1ts));
+        const zc1 = Math.min(z1.cols - 1, Math.floor(((canvas.width - offsetX) / (scale * scaleX)) / z1ts));
+        const zr0 = Math.max(0, Math.floor((-offsetY / (scale * scaleY)) / z1ts));
+        const zr1 = Math.min(z1.rows - 1, Math.floor(((canvas.height - offsetY) / (scale * scaleY)) / z1ts));
+        ctx.imageSmoothingEnabled = (scale * scaleX) < 0.95;
+        for (let r = zr0; r <= zr1; r++) {
+          for (let c = zc0; c <= zc1; c++) {
+            const zKey = `${currentMode}:z1:${c}_${r}`;
+            const zImg = tileCache.get(zKey);
+            if (zImg && zImg !== 'loading' && zImg !== 'error') {
+              const tx0 = Math.round(offsetX + c * z1ts * scaleX * scale);
+              const ty0 = Math.round(offsetY + r * z1ts * scaleY * scale);
+              const tx1 = Math.round(offsetX + (c * z1ts + zImg.width) * scaleX * scale);
+              const ty1 = Math.round(offsetY + (r * z1ts + zImg.height) * scaleY * scale);
+              ctx.drawImage(zImg, tx0, ty0, tx1 - tx0, ty1 - ty0);
+            }
+          }
+        }
+      }
+
+      ctx.imageSmoothingEnabled = scale < 0.95;
+      for (let i = 0; i < l2List.length; i++) {
+        const { c, r, tImg } = l2List[i];
+        const sxWorld = c * ts;
+        const syWorld = r * ts;
+        const tx0 = Math.round(offsetX + sxWorld * scale);
+        const ty0 = Math.round(offsetY + syWorld * scale);
+        const tx1 = Math.round(offsetX + (sxWorld + tImg.width) * scale);
+        const ty1 = Math.round(offsetY + (syWorld + tImg.height) * scale);
+        ctx.drawImage(tImg, tx0, ty0, tx1 - tx0, ty1 - ty0);
+      }
+      evictTileCache();
     }
 
     if (lodStatusEl) {
       if (needTiles) {
-        const mppStr = mf.mpp ? `${Math.round(mf.mpp * 100)} cm/px` : 'HD';
+        const activeMpp = useZ1 ? (z1.mpp || 0.25) : mf.mpp;
+        const mppStr = activeMpp ? formatMppCm(activeMpp) : 'HD';
         lodStatusEl.textContent = tilesLoaded < tilesVisible
           ? `Streaming ${mppStr} HD Tiles (${tilesLoaded}/${tilesVisible})…`
           : `Ultra-HD ${mppStr} Pixel Art Active (${scale >= 1 ? scale.toFixed(1) + '×' : Math.round(scale * 100) + '%'})`;
@@ -728,7 +821,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
       let drewAll = true;
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
-          const tImg = requestTile(currentMode, c, r);
+          const tImg = requestTile(currentMode, 'l2', c, r, '');
           if (tImg && tImg !== 'loading' && tImg !== 'error') {
             const dx = (c * ts - sx0) * mag;
             const dy = (r * ts - sy0) * mag;
@@ -847,7 +940,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
   }
 
   function hitTestEntity(clientX, clientY, wasFollowing) {
-    if (!showAnimations || (!wasFollowing && cssScale() < 0.85) || lastHitTestEntities.length === 0) return false;
+    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+    const refScale = 0.25 / mppMaster;
+    if (!showAnimations || (!wasFollowing && (cssScale() * refScale) < 0.85) || lastHitTestEntities.length === 0) return false;
     const rect = viewport.getBoundingClientRect();
     const clickX = clientX - rect.left;
     const clickY = clientY - rect.top;
@@ -1295,7 +1390,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
   };
 
   function drawAnimations(worldW, worldH, tSec) {
-    const wScale = worldW / (animData.canvas_width || 12331);
+    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.25;
+    const wScale = (worldW / (animData.canvas_width || 12331)) * (0.25 / mppMaster);
     const isNight = currentMode === 'night';
     const isSunset = currentMode === 'sunset';
     const cam = getCamState();
@@ -1402,7 +1498,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
           ],
         });
       }
-      if (scale >= 0.35) {
+      if ((scale * wScale) >= 0.35) {
         for (const cycItem of drawables.cyclists) {
           if (!hasDepth && cycItem.pos.occ) continue;
           livingFrameCounts.cyclists++;
@@ -1441,7 +1537,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     }
 
     // M4 Purposeful O-D Pedestrians (Bahnhof, Bus Stops, Bendlikon Pier, Lindt, Crosswalks, Micro-Archetypes)
-    if (pedSim && scale >= 0.35) {
+    if (pedSim && (scale * wScale) >= 0.35) {
       const pedItems = pedSim.getDrawablePedestrians(worldW, worldH, wScale, cam, depthMgr);
       for (let i = 0; i < pedItems.length; i++) {
         const pItem = pedItems[i];
@@ -1855,7 +1951,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     scheduleDraw();
   });
 
-  window.addEventListener('resize', resizeViewport);
+  window.addEventListener('resize', () => resizeViewport());
   if (window.ResizeObserver) {
     new ResizeObserver(() => resizeViewport()).observe(viewport);
   }
@@ -2162,7 +2258,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
       lastSimSnapshot = trafficSim.updateToTime(t0, currentMode, ped0.occupiedCrosswalks);
     }
     populateSidebar();
-    resizeViewport();
+    resizeViewport(true);
     const qLandmarkId = (urlParams.get('landmark') || '').trim();
     const qLandmark = (qLandmarkId && meta && Array.isArray(meta.landmarks))
       ? meta.landmarks.find((l) => l.id === qLandmarkId)

@@ -45,7 +45,7 @@ export function createDepthManager() {
     return waterMask[my * waterW + mx] === 1;
   }
 
-  function loadDepthMap(assetVer = '8.0') {
+  function loadDepthMap(assetVer = '10.0') {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -131,7 +131,9 @@ export function createDepthManager() {
     const u16PerM = 65535.0 / Math.max(1.0, depthMax - depthMin);
     const depthSlopeGround = mppMaster * Math.sqrt(3) * u16PerM;
     const depthSlopeVert = depthSlopeGround / 3.0;
-    const shiftY = 2927.412592;
+    const shiftY = (animData && Number.isFinite(animData.shift_y))
+      ? animData.shift_y
+      : (2927.412592 * (0.25 / mppMaster));
     const c0 = (0 - depthMin) * u16PerM + depthSlopeGround * shiftY;
     const slopeZ = 2.0 * 1.16 * u16PerM;
     return { depthMin, depthMax, mppMaster, u16PerM, depthSlopeGround, depthSlopeVert, c0, slopeZ };
@@ -139,7 +141,7 @@ export function createDepthManager() {
 
   function evalWalkerD16(wx, wy, zGnd, worldW, worldH, onElevatedDeck = false) {
     const dc = getDepthConstants();
-    const masterH = (animData && animData.canvas_height) ? animData.canvas_height : 5444;
+    const masterH = (animData && animData.canvas_height) ? animData.canvas_height : 10888;
     const wyMaster = wy * (masterH / Math.max(1, worldH));
     let d16 = Math.round(dc.c0 - dc.depthSlopeGround * wyMaster - dc.slopeZ * (zGnd - 348.0) - 10);
     if (onElevatedDeck && depthPixels && depthW > 0 && depthH > 0) {
@@ -213,15 +215,16 @@ export function createDepthManager() {
     const dc = getDepthConstants();
     const depthSlopeGround = dc.depthSlopeGround;
     const depthSlopeVert = dc.depthSlopeVert;
-    const masterW = (animData && animData.canvas_width) ? animData.canvas_width : 12331;
+    const masterW = (animData && animData.canvas_width) ? animData.canvas_width : 24661;
     const wScaleInv = masterW / Math.max(1, worldW);
     const invWorldScaleX = depthW / (worldW * scale);
     const invWorldScaleY = depthH / (worldH * scale);
 
     // Row-wise conservative 3-way pre-check over depthPixels before touching vehScratch or getImageData().
     // dyW >= 0 (down along ground toward camera): closer by depthSlopeGround.
-    // dyW < 0 (up vertically on vehicle roof): closer by depthSlopeVert, capped at excess height extraVertPx.
-    const maxVertPx = Math.max(0, Number.isFinite(extraVertPx) ? extraVertPx : 0);
+    // dyW < 0 (up vertically on vehicle roof): closer by depthSlopeVert, capped at excess height extraVertPx * resFactor.
+    const resFactor = 0.25 / dc.mppMaster;
+    const maxVertPx = Math.max(0, Number.isFinite(extraVertPx) ? extraVertPx : 0) * resFactor;
     const evalRowD16 = (dyW) => (
       dyW >= 0
         ? vehD16 - dyW * depthSlopeGround
