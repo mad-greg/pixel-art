@@ -1,75 +1,198 @@
-# Project: Kilchberg Isometric Diorama — v13.0 Modular Living Layer & Realistic Botanical Vegetation Overhaul
+# Project: Kilchberg Pixel-Art Diorama v14 — Moving/Living Layer Redo
 
 ## Architecture
-- **Baseline (v12.0, `main` HEAD `82cb265`)**: Full `0.11 m/px` (`27,971 × 12,294`) 2-level lossless VP8L tile pyramid (`day`, `sunset`, `night`, `docs/` = `106.47 MB`, 0 obsolete detail plates), 16 photo-accurate landmarks, TinyRJ-grade cel-shaded architecture, Swiss `Sockel` foundation plinths, solid 3D parked cars, smooth SDF roads/sidewalks, 60fps smooth camera & async `ImageBitmap` tile streaming, 7/7 `pipeline.verify_quality` `[ok]`, 125/125 E2E PASS.
-- **Pillar 1 — Modular, Jaw-Dropping Living Layer (`docs/js/living/`)**:
-  - Replace the monolithic `drawAnimations()` (`docs/app.js`) and 2,791-line `docs/js/render/vignettes.js` orchestration with a clean, zero-dependency, 8-layer plugin architecture (`docs/js/living/{engine,context,diurnal,draw}.js` + 10 modular plugins under `docs/js/living/plugins/`).
-  - Declarative plugin contract: `{ id, name, category, layers, priority, enabledByDefault, init(ctx), update(dt, ctx), getDrawables(cam, ctx), getInspectables(ctx), getAudioSignals(ctx), getLivingCounts(ctx), getFollowTarget(kind, ctx), destroy?() }`.
-  - 8-layer painter's pipeline: `water_fx` → `water` → unified Y-sorted `ground_y` → `pre_rail` → `rail` → `landmark` → `air` → `overlay`, preserving per-entity height-aware depth occlusion (`extraVertPx`: trains `7.5`, buses `6.5`, ships `6.0`, cars `3.0`, walkers/cyclists `2.0`).
-  - 100% deterministic (`?t=` bit-identical via per-plugin `rngFor(pluginId, salt)` `mulberry32`, zero `Math.random()`/`Date.now()`/`performance.now()` in sim/draw), `< 4 ms` JS frame budget at 60fps, additive `window.__dioramaDebug.livingRegistry` telemetry, and full backwards compatibility with `docs/js/sim/{pedestrians,traffic}.js` exports, `docs/js/render/vignettes.js` structural anchors, `window.__dioramaDebug` Contract #5, and `docs/js/audio.js` 90 ms `Live: Off` clock.
-- **Pillar 2 — Realistic Swiss/Zürichsee Botanical Vegetation (`pipeline/pixel_shader.py`)**:
-  - Reuses existing `/home/antigravity/.cache/kilchberg-cache/scene_kilchberg_05m.npz` (`134 MB`, symlinked at `/tmp/kilchberg-cache`, ZERO cache rebuild!).
-  - Replaces bubble-ball broadleaf clusters, stacked-cone spruces, barcode willows (fixing the tile-local `gx` seam bug), football cypresses, melted-pillow hedges, and speckled vineyards with **8 geographically-assigned Swiss/Zürichsee tree species** (Swiss Oak/Beech with 2-pass interior branch forks & scalloped leaf boughs, tiered drooping-bough Alpine Spruce, pale lenticel-bark Silver Birch with airy negative-space canopy, parabolic-droop Lakeside Weeping Willow, tufted columnar Lombardy Poplar/Cypress, dappled Blossoming Orchard/Cherry, Copper Beech, upright Linden/Maple), **4 botanical bush/hedge types** (clipped Swiss boxwood hedges, flowering hydrangea/rose/rhododendron shrubs, woodland bramble thickets, strictly land-side lakeside reeds), and **clean cel-shaded terraced vineyard rows**.
-  - Stays strictly within `<= 256` unique colors/tile, `< 500 KB` VP8L/tile, `docs/ < 300 MB`, anti-stipple smoothness (`alt_y < 0.14`, `chk_flat < 5.0`, `mean_cb < 6.5`), macro-seam `< 1.35`, `< 4.5 GiB` RSS, and `< 10 min` per `16×8` `--macro-rows` batch.
-- **E2E Verification (`tests/`)**: 125 existing tests + 10 new v13.0 tests (`tests/tier2_v13_living.mjs` `T2.V13.L01–L06` and `tests/tier2_v13_vegetation.py` `T2.V13.V01–V04`) = 135 total E2E tests.
+Kilchberg v14 replaces stateless, collision-blind moving-layer routines with a **modular, specification-driven, collision-free, real-time-capable simulation engine** layered cleanly on top of the finalized `0.11 m/px` (`27,971 × 12,294`) static diorama tiles (zero static tile re-renders required).
 
-## Code Layout
-- `pipeline/pixel_shader.py`, `pipeline/verify_quality.py`, `pipeline/render_all.py`, `pipeline/config.py`, `pipeline/signage.py` — 3D isometric shader, v13.0 botanical vegetation, split `16×8` `0.11 m/px` renders & quality gate
-- `docs/js/living/engine.js`, `docs/js/living/context.js`, `docs/js/living/diurnal.js`, `docs/js/living/draw.js` — (new in v13.0) modular 8-layer Living Layer engine, context, diurnal profiles & shared pixel-art helpers
-- `docs/js/living/plugins/{index,shoreline,vessels,traffic,pedestrians,trains,wildlife,sports,seebad,landmarks,atmosphere}.js` — (new in v13.0) 10 modular living-world plugins + manifest
-- `docs/app.js`, `docs/index.html`, `docs/styles.css`, `docs/js/audio.js` — viewer shell (`ASSET_VER = '13.0'`), LivingEngine wiring, spatial audio signal bridge
-- `docs/js/camera.js`, `docs/js/tiles.js`, `docs/js/render/depth.js`, `docs/js/render/vehicles.js`, `docs/js/render/vignettes.js` — 60fps camera/tiles, depth masking, uplevelled 3D vehicle sprites, preserved structural anchors in `vignettes.js`
-- `docs/js/sim/{traffic,pedestrians,schedule,rng}.js` — deterministic 20 Hz simulation engines (public exports preserved for `T2.SM.03`)
-- `docs/assets/**`, `renders/**`, `docs/data/kilchberg_{interactive,animations}.json` — `0.11 m/px` (`27,971 × 12,294`) 2-level lossless VP8L tile pyramids (`day`, `sunset`, `night`) & metadata
-- `tests/run_e2e.py`, `tests/lib/cdp_harness.mjs`, `tests/tier*.{py,mjs}`, `TEST_INFRA.md`, `TEST_READY.md` — 4-tier E2E suite (135 tests)
+### Core Subsystems & Data Flow
+```
+KilchbergClock (Europe/Zurich live | manual scrub | deterministic ?t=)
+        │
+        ▼
+SpecRegistry (RailServiceSpec | BusRouteSpec | InhabitantSpec | VesselSpec | SportsScheduleSpec)
+        │
+        ├──► 2D Spatial Hash Grid (docs/js/sim/spatial.js — 16 m cells, shared by Traffic/Peds & Vessels)
+        │
+        ├──► Rail Plugin (trains.js + engine.js trackRank-first sort + vehicles.js back-to-front gangways)
+        ├──► Traffic & Pedestrians (traffic.js + pedestrians.js: cross-lane IDM, 6 junctions, bidirectional crosswalks, 2D ped/cyclist braking, named inhabitants)
+        ├──► Sports Sim (sports_sim.js + sports.js: TennisRallySim 2-arc bounce + SoccerMatchSim possession/pass/shot)
+        ├──► Vessel Sim (vessel_sim.js + vessels.js: COLREGs priority, CPA speed yield, water-masked lateral avoidance)
+        └──► Seebad, Wildlife, Landmarks, Shoreline, Atmosphere, Audio (single-source-of-truth signals)
+```
+
+### Non-Negotiable Guardrails (Carried Forward from v8–v13.1)
+1. **Zero static tile re-renders**: Preserve all finalized `0.11 m/px` `day`/`sunset`/`night` WebP tiles and `pipeline/verify_quality.py` (10/10 `[ok]`).
+2. **Opaque train & bus roofs**: Preserve `depth.js` `depthSlopeVert` and `extraVertPx` (`trains: 7.5`, `buses: 6.5`, `ships: 6.0`, `cars: 3.0`, `cyclists/peds: 2.0`).
+3. **Bahnhof NW board/clock behind passing trains**: Render NW departure board & SBB Mondaine clocks in `'pre_rail'` strictly before `'rail'`.
+4. **No paragliders; slow SUPs (`1.5–1.8 m/s`, 0 at night); 4-petal white-flower Kilchberg municipal flag; clock-free St. Elisabeth & Gemeindehaus**.
+5. **DEM-exact edge-to-edge roads & footpaths**: Zero roof walking, zero trackbed walking.
+6. **60 fps budget**: Single `rAF` loop, zero per-frame radial gradients, zero DOM layout thrash, `updateMs < 50`, `drawMs < 50`.
+7. **Shore-strict spatial audio**: Preserve `CHANNEL_MAX_RANGE.lake_waves = 0.042` + `waveZoomGate`.
+8. **100% seeded determinism under `?t=`**: Zero `Math.random()`, pixel-identical `?t=<sec>` snapshots, and `/?t=<num>` without `&mode=` locks deterministically to `day` so CI never flakes at night in Zurich.
+9. **Backwards-compatible E2E & module contracts**: Preserve `window.__dioramaDebug` (`livingRegistry`, `simStats`, `livingCounts`, `audioGains`, `depthStats`, `frameStats`), `docs/js/sim/{traffic,pedestrians}.js` exports (`T2.SM.03`), and `docs/js/render/vignettes.js` regex anchors (`T2.LET.07`, `T2.LM.01`, `T2.LM.02`).
+10. **Zero `localhost` URLs** in any user-facing text.
+
+---
 
 ## Feature Inventory
-Every Survey feature assigned a milestone (none unassigned).
+Every Survey feature is assigned a milestone (0 unassigned).
 
 | # | Feature | Description | Milestone | Source |
-|---|---------|-------------|-----------|--------|
-| 1 | Persistent cache symlink & zero-rebuild `tree_species_v13` | Symlink `/tmp/kilchberg-cache -> /home/antigravity/.cache/kilchberg-cache`; compute deterministic geographic 8-species `self.tree_species_v13` in `SceneData.__init__` from existing `scene_kilchberg_05m.npz` | M1 | Explorers 2, 3 |
-| 2 | 8 Swiss/Zürichsee botanical tree species | 2-pass interior woody branch forks + angular leaf-tuft scalloped crowns (killing Voronoi bubble creases): Oak/Beech, drooping-bough Alpine Spruce, pale lenticel-bark airy Silver Birch, parabolic-droop Lakeside Weeping Willow (fixing `gx` seam bug), columnar Lombardy Poplar/Cypress, dappled Blossoming Orchard/Cherry, Copper Beech, upright Linden/Maple | M1 | Explorer 2 |
-| 3 | 4 botanical bush/hedge types & cel-shaded vineyards | Replace melted-pillow hedges with clipped Swiss boxwood hedges, flowering hydrangea/rose/rhododendron shrubs, woodland bramble thickets, strictly land-side lakeside reeds; remove `p_hash` noise from vineyard rows; night birch attenuation & crisp scalloped outlines | M1 | Explorer 2 |
-| 4 | Mandatory 1:1 botanical crop visual verification & `verify_quality.py` v13 checks | Render & visually inspect 5 LV95 `0.11 m/px` crops (`day`, plus `sunset` & `night` on Crop 1) before full render; add botanical species diversity check to `pipeline/verify_quality.py` | M1 | Explorers 2, 3 |
-| 5 | Modular `LivingEngine` core (`docs/js/living/`) | `engine.js`, `context.js`, `diurnal.js`, `draw.js`, `plugins/index.js`: 8-layer painter's pipeline, unified `ground_y` Y-sort, declarative plugin contract (`init`/`update`/`getDrawables`/`getInspectables`/`getAudioSignals`/`getLivingCounts`/`getFollowTarget`), `register`/`unregister`/`setEnabled`, deterministic `rngFor`, cached glow sprites, `drawMiniPersonV2` | M2A | Explorer 1 |
-| 6 | Uplevelled Transit & Street Life plugins (`trains`, `traffic`, `pedestrians`) | SBB KISS/DPZ/IC articulated pantograph + arc sparks + warm interior windows + boarding light spill + pre-rail Bahnhof board; ZVV 161/165 LEDs + roof HVAC + curb door spill; upgraded 3D cars/vans/cyclists; expressive `drawPedestrianEntity` (arms, umbrellas, bags, dogs, strollers, joggers) — preserving `sim/traffic.js` & `sim/pedestrians.js` exports/physics/bounds & opaque roofs | M2A | Explorers 1, 3 |
-| 7 | Uplevelled Lake Zurich & Wildlife plugins (`shoreline`, `vessels`, `wildlife`) | Sunlit shallow-water caustics + shoreline waves; ZSG steamer paddlewheel spray + funnel steam + tacking sailboats + Boesch + moored pennants + slow ~1.6 m/s SUPs + skiff; Mute Swans + trailing cygnets, diving mallards, wading Grey Heron, gliding gulls, darting swallows, soaring Red Kites, bell-triggered church pigeons, Stockengut Grauvieh cattle (all inspectable, zero paragliders) | M2A | Explorer 1 |
-| 8 | Uplevelled Seebad, Sports, Landmarks & Atmosphere plugins (`seebad`, `sports`, `landmarks`, `atmosphere`) | Seebad 3m Sprungturm animated diver + splash plume; sports live rallies + spectators + floodlights; all 16 photo-accurate landmark vignettes (Lindt chocolate-aroma steam, clock-free St. Elisabeth, 4-petal Kilchberg flag); terraced vineyard workers, wind-synced laundry lines, shimmering village fountains, living apartment windows (warm + flickering TV + curtains), streetlamp orbiting moths, park fireflies, Hochkamin/chimney smoke, cloud shadows | M2B | Explorer 1 |
-| 9 | Viewer & Audio integration (`app.js`, `audio.js`, `index.html`, `vignettes.js` anchors) | Wire `LivingEngine` into `app.js` (update/draw/hitTest/follow/additive `window.__dioramaDebug.livingRegistry`), bridge `getAudioSignals` into `audio.js` (keeping 90 ms `Live: Off` clock & shore-strict mix), preserve `docs/js/render/vignettes.js` E2E regex anchors, bump `ASSET_VER = '13.0'`, capture live Chromium preview screenshots | M2B | Explorers 1, 3 |
-| 10 | Full `0.11 m/px` 3-preset botanical world render & quality gate | Symlink `/tmp/kilchberg-cache`; split `16×8` `--macro-rows` renders (`0 2`, `2 4`, `4 6`, `6 8 --finalize-tiles`) for `day`, `sunset`, `night`; verify `pipeline.verify_quality` 100% `[ok]`, `< 500 KB` VP8L, `docs/ < 300 MB`, visual inspection | M3 | Explorers 2, 3 |
-| 11 | Requirement-driven v13.0 E2E suites (`TEST_READY.md`) | Author `tests/tier2_v13_living.mjs` (`T2.V13.L01–L06`) and `tests/tier2_v13_vegetation.py` (`T2.V13.V01–V04`), register in `tests/run_e2e.py` (135 total tests), update `TEST_INFRA.md` & publish `TEST_READY.md` | E2E | Explorer 3 |
-| 12 | Final 100% E2E pass (135/135) + Tier 5 Hardening + Preview Captures + Publish | Pass 135/135 E2E + `verify_quality` 100% `[ok]`, whole-project Forensic Audit, live Chromium preview PNGs, commit & push `origin main`, verify GitHub Pages `"built"`, report to Sentinel | M4 | Project Pattern |
+|---|---|---|---|---|
+| F1 | Declarative `SpecRegistry` | Hot-injectable registry for Rail, Bus, Inhabitant, Vessel, and Sports specs with validation & `__dioramaDebug.specs` API | M1 | survey_1, survey_2, survey_3 |
+| F2 | Kilchberg Default Data Packs | Declarative specs for SBB S8/S24/IC, ZVV 161/162/163/165, named Kilchberg inhabitants with daily routines, ZSG vessels, and sports schedules | M1 | survey_1, survey_2 |
+| F3 | Real-Time `KilchbergClock` & Continuous Diurnal | `Europe/Zurich` live CET/CEST time, solar elevation auto-preset, continuous time-of-day curves, real-time Swiss clock dials, manual scrub & deterministic `?t=` override | M1 | survey_1, survey_3 |
+| F4 | Unified 2D Spatial Hash Grid | Fast 16 m cell spatial index (`docs/js/sim/spatial.js`) for O(1) proximity queries across vehicles, pedestrians, cyclists, and vessels | M1 | survey_1, survey_2 |
+| F5 | Multi-Key `'rail'` Layer Sorting | Update `LivingEngine` (`engine.js`) to support `(trackRank, sortY)` primary/secondary sorting on `'rail'` | M1 | survey_1 |
+| F6 | Glitch-Free Double-Track Train Passing | Assign `trackRank` (Gleis 2 NW = 0, Gleis 1 SE = 1) in `trains.js`, fix back-to-front inter-car gangways in `vehicles.js`, wire `RailServiceSpec` + `KilchbergClock`, preserve `'pre_rail'` board/clocks & opaque roofs | M2 | survey_1, survey_3 |
+| F7 | Cross-Lane Shared-Corridor & Junction Traffic | 2D cross-lane IDM across overlapping physical roads (`dorfstrasse_viaduct` ↔ `alte_landstrasse`/`seestrasse`), 6-junction conflict-box reservation (`network.junctions`), feeder-to-main yielding, true 2D `overlapCount`/`clippingCount` | M2 | survey_1, survey_3 |
+| F8 | Collision-Free Vehicle–Pedestrian & Cyclist Safety | Bidirectional crosswalk yielding (no `minStopDist` skip, pedestrian curb look-ahead), 2D forward-cone ped/cyclist braking for all vehicles, lateral offset for `walk_feeder` walkers, cyclist-car awareness | M2 | survey_1, survey_3 |
+| F9 | Spec-Driven ZVV Buses & Named Inhabitants | Consume `BusRouteSpec` in `traffic.js` and `InhabitantSpec` (named residents with home/work/errand routines & click inspection) in `pedestrians.js`, preserving `T2.SM.03` exports & `simStats` bounds | M2 | survey_1, survey_3 |
+| F10 | Realistic Tennis Match State Machine | `TennisRallySim` on 3 TC Kilchberg courts + lakeside court: 2-segment arc with clay bounce + dust puff, `1.25–1.75 s` shots (`14–20 m/s`), rally pauses/serves, `2.5–5.5 m/s` footwork, displacement-driven stride | M3 | survey_2, survey_3 |
+| F11 | Realistic Soccer & Multisport State Machine | `SoccerMatchSim` on Hochweid, Brunnenmoos, Hochweid Upper & 2 multisport courts: `<= 6.5 m/s` player cap, 3D ballistic/rolling ball (zero solo circles), possession/dribble/pass/shot/goal-kick state machine | M3 | survey_2, survey_3 |
+| F12 | Collision-Free Maritime `VesselSim` & ZSG Specs | Stateful `VesselSim` (`ctx.shared.vesselSim`) with `VesselSpec`, COLREGs priority (`steamer > sailboat > skiff/sup > motorboat`), 15 s CPA speed yield + water-masked lateral avoidance, pier/swimmer/moored-boat exclusion, slow SUPs preserved | M3 | survey_2, survey_3 |
+| F13 | Seebad/Wildlife Calibration & Single-Source Audio | Slow open-lake swimmers (`0.75–0.90 m/s`), pool swimmers (`0.85–1.05 m/s`), swans (`0.65–0.85 m/s`), ducks (`0.55–0.75 m/s`), swallows (`~11 m/s`), jetty spacing; `landmarks.js` & `audio.js` read single-source live state while preserving shore-strict `lake_waves` | M3 | survey_2 |
+| F14 | App Wiring, Real-Time Kilchberg HUD & v14.0 Sync | Wire `KilchbergClock` & `SpecRegistry` into `app.js`/`living/index.js`, add top-right `.viewport-ui` Live Kilchberg Clock & manual scrub pill (mobile/Cinema safe), expose v14 debug telemetry, bump `ASSET_VER = '14.0'` & `?v=14.0`, capture fresh live screenshots | M4 | survey_1, survey_3 |
+| F15 | Opaque-Box v14 E2E Test Suite | Update `TEST_INFRA.md`, update `T2.V13.V04` for `>= 13.0`/`14.0`, add `tests/tier2_v14_simulation.mjs` covering F1–F14, publish `TEST_READY.md` | E2E | survey_3 |
+| F16 | Final Milestone Verification & Adversarial Hardening | Phase 1: 100% E2E pass (Tiers 1–4) + `pipeline.verify_quality` (10/10 `[ok]`); Phase 2: Tier 5 adversarial challenger hardening; visual verification screenshots for Sentinel Victory Audit | M5 | survey_1, survey_2, survey_3 |
+
+---
 
 ## Milestones
 
-| # | Name | Scope | Dependencies | Exclusive Write Ownership | Status | Sub-orch Conv ID |
-|---|------|-------|-------------|---------------------------|--------|------------------|
-| M1 | Botanical Vegetation Overhaul & 1:1 Crop Verification | Features 1–4: 8 tree species, 4 bush/hedge types, cel-shaded vineyards in `pixel_shader.py`, botanical check in `verify_quality.py`, mandatory 5-crop visual verification | none | `pipeline/pixel_shader.py`, `pipeline/verify_quality.py` | DONE (5/5 Unanimous Gate PASS, Iter 1; 7 crops visually verified, `verify_quality` 8/8 `[ok]`, bit-exact seam test) | `67d3446d305da789ef306cad339dfa8c` |
-| M2A | Modular Living Engine Core + Transit, Lake & Wildlife Plugins | Features 5–7: `docs/js/living/{engine,context,diurnal,draw}.js`, `plugins/{trains,traffic,pedestrians,shoreline,vessels,wildlife}.js`, `vehicles.js` & `pedestrians.js` draw upgrades | none | `docs/js/living/engine.js`, `docs/js/living/context.js`, `docs/js/living/diurnal.js`, `docs/js/living/draw.js`, `docs/js/living/plugins/trains.js`, `docs/js/living/plugins/traffic.js`, `docs/js/living/plugins/pedestrians.js`, `docs/js/living/plugins/shoreline.js`, `docs/js/living/plugins/vessels.js`, `docs/js/living/plugins/wildlife.js`, `docs/js/render/vehicles.js`, `docs/js/sim/pedestrians.js` | DONE (5/5 Unanimous Gate PASS, Iter 1; 1.44–2.52 ms V8 frame time, 100% deterministic & water-strict) | `2f4c5d7bb953036120c45c8ad03d0a63` |
-| E2E | E2E Testing Track (v13.0 Living & Vegetation Suites) | Feature 11: `tests/tier2_v13_living.mjs`, `tests/tier2_v13_vegetation.py`, `tests/run_e2e.py`, `TEST_INFRA.md`, `TEST_READY.md` | none | `TEST_INFRA.md`, `TEST_READY.md`, `tests/tier2_v13_living.mjs`, `tests/tier2_v13_vegetation.py`, `tests/run_e2e.py` | DONE (5/5 Unanimous Gate PASS, Iter 2; 135 total E2E tests, `TEST_READY.md` published) | `92ca96b215512e588810c68d084a7e8f` |
-| M2B | Village Vignettes, Seebad, Sports, Atmosphere + App/Audio Wiring | Features 8–9: `plugins/{seebad,sports,landmarks,atmosphere,index}.js`, `app.js`, `audio.js`, `index.html` (`?v=13.0`), `vignettes.js` preserved anchors, live Chromium previews | M2A | `docs/js/living/plugins/seebad.js`, `docs/js/living/plugins/sports.js`, `docs/js/living/plugins/landmarks.js`, `docs/js/living/plugins/atmosphere.js`, `docs/js/living/plugins/index.js`, `docs/app.js`, `docs/js/audio.js`, `docs/index.html`, `docs/js/render/vignettes.js` | DONE (5/5 Unanimous Gate PASS, Iter 1; 70/70 Node CDP + 12/12 Python E2E PASS; 4 live Retina previews verified) | `b9a9ec4c2d72c0d601b4e881c2c8ea11` |
-| M1B | Systemic 0.5 m Splat-to-Solid Fix, Harbor/Pier/Bridge Polish & Whole-Shore Water | Systemic audit of ALL 0.5 m point-splat paths at `0.11 m/px` in `pixel_shader.py` (all piers/jetties/gangways/platforms/bridges/viaducts/moored boats/elevated props + whole-shoreline water), resolution-aware continuous cell-filling, bush/path clearance, Studio Ghibli vegetation art overhaul, 9-crop 1:1 verification, and hardened 9th guard in `verify_quality.py` | M1 | `pipeline/pixel_shader.py`, `pipeline/verify_quality.py` | DONE (5/5 Unanimous Gate PASS, Iter 2; 9 crops visually verified, 19/19 guard probes PASS, 0 wet trees, 0 path/pier bushes) | `f0067ac56bb6c71e43c0d3cb7d54714d` |
-| M3 | ~~Full `0.11 m/px` 3-Preset World Render~~ | Superseded by urgent harbor/pier/shoreline fix (`Screenshot_20261122_223942.jpg`) | M1 | — | CANCELLED (stopped mid-`sunset` to save compute) | `a40ab0e12fde0f8451bcaabff9b0301b` |
-| M3B | Full `0.11 m/px` 3-Preset World Render & Quality Gate (incl. M1 + M1B) | Split `16×8` `--macro-rows` renders (`day`, `sunset`, `night`) @ `0.11 m/px`, `verify_quality` 9/9 `[ok]`, visual inspection | M1B | `docs/assets/**`, `renders/**`, `docs/data/kilchberg_interactive.json`, `docs/data/kilchberg_animations.json` | DONE (`day`/`sunset`/`night` 462 VP8L tiles each, `docs/` 116.69 MB, `verify_quality` 9/9 `[ok]`, M3B 5-agent wave CLEAN/APPROVE on all renders) | `433e3554d2a5c4339a8c9dd54cd7f728` |
-| M4 | Final Milestone: 135/135 E2E + Hardening + Previews + Publish | Feature 12: 135/135 E2E PASS, M2B polish, Tier 5 hardening, Whole-Project Forensic Audit, final live Chromium previews, commit & push `origin main`, verify GitHub Pages `"built"` | M2B, M3B, E2E | full repo (sequential) | DONE (5/5 Unanimous Whole-Project Gate PASS; 135/135 E2E, 9/9 `verify_quality`, 7/7 live Chromium shots verified, `docs/` 118.43 MB) | `ba30aa62b4ea6474ee6820779c63b47e` |
+| # | Name | Scope | Dependencies | Status |
+|---|---|---|---|---|
+| M1 | Core Clock, Spec Registry, 2D Spatial Kernel & Rail-Layer Sorting | F1, F2, F3, F4, F5 | none | DONE (5/5 unanimous, Iter 3) |
+| E2E | E2E Testing Track (v14 Suite + `TEST_READY.md`) | F15 | none | DONE (5/5 unanimous, 14 suites / 146 tests) |
+| M2 | Glitch-Free Trains + Collision-Free Traffic & Modular Inhabitants | F6, F7, F8, F9 | M1 | DONE (5/5 unanimous, Iter 2) |
+| M3 | Realistic Sports Physics + Collision-Free Maritime, Wildlife & Audio | F10, F11, F12, F13 | M1 | DONE (5/5 unanimous, Iter 2) |
+| M4 | App Integration, Real-Time Kilchberg HUD & Visual Captures | F14 | M2, M3 | DONE (5/5 unanimous, Iter 1, 7 screenshots) |
+| M5 | Final Milestone (Tiers 1–4 Pass + Tier 5 Adversarial Hardening) | F16 | M4, E2E | IN_PROGRESS (`d6d47adb`) |
+
+---
 
 ## Interface Contracts
 
-### `docs/js/living/engine.js` ↔ `docs/js/living/plugins/*.js`
-- `LivingPlugin`: `{ id, name, category, layers, priority, enabledByDefault?, init?(ctx), update?(dt, ctx), getDrawables(cam, ctx), getInspectables?(ctx), getAudioSignals?(ctx), getLivingCounts?(ctx), getFollowTarget?(kind, ctx), destroy?() }`.
-- `LAYER_ORDER`: `['water_fx', 'water', 'ground_y', 'pre_rail', 'rail', 'landmark', 'air', 'overlay']`.
-- `LivingEngine` API: `register(plugin)`, `unregister(id)`, `setEnabled(id, bool)`, `listPlugins()`, `init(animData, meta, depthMgr)`, `update(tSec, dt, mode)`, `draw(ctx, cam, worldW, worldH, tSec, mode, fixedAnimTime)`, `hitTest(clientX, clientY, viewportRect, cam, wasFollowing)`, `getFollowTarget(kind, worldW, worldH)`, `getAudioSignals(worldW, worldH, tSec, mode)`, `getSimStats()`, `getLivingCounts()`, `getEngineStats()`.
-- `Drawable`: `{ layer, sortY, depthMasked?, wx?, wy?, bounds?, d16?, extraVertPx?, draw(targetCtx, cam, ctx) }`.
-- `Inspectable`: `{ kind, id, wx, wy, radiusCss, title, sub, specs }`.
-- `AudioSignal`: `{ channel, u, v, weight, brightnessMul?, offscreenRange?, sumMode? }`.
+### 1. `KilchbergClock` (`docs/js/living/clock.js`)
+```js
+export function createKilchbergClock(opts = {})
+// Returns clock instance:
+// - setMode(mode: 'live' | 'manual' | 'deterministic')
+// - setManualMinutes(minutesOfDay: number)          // 0..1440
+// - setPresetOverride(preset: 'auto' | 'day' | 'sunset' | 'night')
+// - setDeterministic(tSec: number, preset: 'day' | 'sunset' | 'night')
+// - setSpeedMultiplier(mult: number)                // default 1
+// - sample(nowMs: number, tSec: number): ClockSnapshot
+//
+// ClockSnapshot:
+// {
+//   clockMode: 'live' | 'manual' | 'deterministic',
+//   zurichSecOfDay: number,      // 0..86400
+//   hours: number,               // 0..23
+//   minutes: number,             // 0..59
+//   seconds: number,             // 0..59
+//   tzLabel: 'CET' | 'CEST',
+//   formattedHHMM: string,       // e.g. '14:22'
+//   dayOfWeek: number,           // 0=Sun..6=Sat
+//   solarElevationDeg: number,   // Kilchberg 47.324°N, 8.549°E
+//   autoPreset: 'day' | 'sunset' | 'night',
+//   effectivePreset: 'day' | 'sunset' | 'night',
+//   diurnalActivity: {
+//     commuterFactor: number,    // 0.1..1.4 (peaks 07:30, 17:45)
+//     trafficFactor: number,     // 0.15..1.2
+//     pedestrianFactor: number,  // 0.12..1.2
+//     leisureFactor: number,     // 0.0..1.2 (daytime lake/sports)
+//     nightFactor: number        // 0.0..1.0
+//   }
+// }
+```
 
-### `docs/app.js` ↔ `window.__dioramaDebug` & Existing E2E Contracts (MUST NOT BREAK)
-- Preserve ALL 13 existing top-level keys (`mode`, `scale`, `u`, `v`, `dpr`, `animTime`, `fps`, `audioEnabled`, `audioState`, `audioGains`, `activeLandmark`, `selectedBuilding`, `searchResultCount`) + `livingCounts` (incl. `sups >= 2` day / `0` night), `depthStats`, `simStats` (`vehicles` in `[40, 160]`, `pedestrians` in `[40, 220]` day, `night < sunset < day`, `night >= 2`), `frameStats`.
-- Add additive `window.__dioramaDebug.livingRegistry` (`{ pluginCount, pluginIds, enabledPlugins, drawablesCount, inspectablesCount, updateMs, drawMs, perPluginCounts, register, unregister, setEnabled }`).
-- Preserve `docs/js/sim/pedestrians.js` (`createPedestrianSim`) and `docs/js/sim/traffic.js` (`createTrafficSim`) exact exports and signatures (`T2.SM.03`).
-- Preserve `docs/js/render/vignettes.js` structural anchors inspected by `T2.LET.07`, `T2.LM.01`, `T2.LM.02` (`drawSignPlaque`/`drawRotatedSignText` no-ops, zero `fillText(`, `// 8a. Katholische Kirche St. Elisabeth` 0 clocks, `drawAmbientEffects` `if (fIdx === 3) continue;`, `drawSwissOrMuniFlag` 4-petal flower, `// 8e. Gemeindehaus` dual flags / 0 `ghCenter` clock).
+### 2. `SpecRegistry` (`docs/js/specs/registry.js`)
+```js
+export function createSpecRegistry(initialPacks = {})
+// Methods:
+// - registerRailService(spec) / removeRailService(id) / getRailServices()
+// - registerBusRoute(spec) / removeBusRoute(id) / getBusRoutes()
+// - registerInhabitant(spec) / removeInhabitant(id) / getInhabitants()
+// - registerVessel(spec) / removeVessel(id) / getVessels()
+// - registerSportsSchedule(spec) / removeSportsSchedule(id) / getSportsSchedules()
+// - onChange(domain, listener) -> unsubscribe()
+// - getSummary() -> { rail, bus, inhabitants, vessels, sports }
+// Validation throws descriptive Error on missing required fields (`id`, coordinates/routes, etc.).
+```
 
-### `pipeline/pixel_shader.py` ↔ `pipeline/verify_quality.py` ↔ `tests/tier2_v13_vegetation.py`
-- Master resolution: `0.11 m/px` (`27,971 × 12,294`), `16×8` macro grid, 2-level `1024 px` lossless VP8L tile pyramid (`day`, `sunset`, `night`), `<= 256` unique RGB colors/tile, `< 500 KB` VP8L/tile, `docs/ < 300 MB`, anti-stipple `alt_y < 0.14`, `chk_flat < 5.0`, `mean_cb < 6.5`, macro-seam `< 1.35`, botanical foliage diversity (`>= 10` foliage RGBs, luminance IQR `>= 22`).
-- Guardrails: zero bubble-ball canopies, zero barcode willows, zero macro-tile seams, strictly land-side reeds (spotless Lake Zurich shoreline), Lindt HoC roof + baked `pipeline/signage.py` lettering, St. Elisabeth clock-free white tower, 4-petal Kilchberg flag, Bahnhof NW board behind trains, opaque train/bus roofs, solid 3D parked cars, clean walls/parapets & Swiss `Sockel` plinths, smooth Bendlikon viaduct, flat SBB bridges, slow SUPs (~1.6 m/s), no paragliders, DEM-exact roads, 60fps smoothness, `?t=` determinism, shore-strict 9-channel spatial audio.
+### 3. `SpatialGrid2D` (`docs/js/sim/spatial.js`)
+```js
+export function createSpatialGrid(cellSizeM = 16)
+// Methods (zero-allocation steady-state):
+// - clear()
+// - insert(id, xM, yM, radiusM, kind, data)
+// - queryRadius(xM, yM, radiusM, filterKind?, outArray?) -> Array<Entry>
+// - uvToMeters(u, v) -> { xM, yM }   // exact inverse of Kilchberg isometric projection
+// - metersToUv(xM, yM) -> { u, v }
+```
+
+### 4. `LivingEngine` Multi-Key `'rail'` Sort (`docs/js/living/engine.js`)
+- `'rail'` drawables accept optional `trackRank` (number, default `0`) in addition to `sortY`.
+- Sorting comparator for `'rail'`: `(a.trackRank ?? 0) - (b.trackRank ?? 0) || (a.sortY || 0) - (b.sortY || 0)`.
+- Gleis 2 (NW / back track, larger `d16`) uses `trackRank = 0`; Gleis 1 (SE / front track, smaller `d16`) uses `trackRank = 1`.
+
+### 5. `ctx.shared` Cross-Plugin Contracts (`docs/js/living/context.js`)
+- `ctx.clock`: current `ClockSnapshot` from `KilchbergClock`
+- `ctx.specs`: active `SpecRegistry` instance
+- `ctx.shared.spatialGrid`: shared `SpatialGrid2D`
+- `ctx.shared.vesselSim`: active `VesselSim` exposing `getPierDockState(pierId)`, `getTelemetry()`, `getVessels()`
+- `ctx.shared.sportsSim`: active `SportsSim` exposing `getTelemetry()`
+- `ctx.shared.railTelemetry`: `{ activeTrains, passingNow, trackInterleaveViolations }`
+
+### 6. `window.__dioramaDebug` v14 Telemetry Extensions (Additive Only)
+Keep ALL existing v13 keys untouched, and add:
+- `window.__dioramaDebug.clock`: current `ClockSnapshot` + `setMode`/`setManualMinutes`/`setPresetOverride`
+- `window.__dioramaDebug.specs`: `SpecRegistry` API (`registerInhabitant`, `registerBusRoute`, `registerRailService`, `registerVessel`, `remove*`, `getSummary`)
+- `window.__dioramaDebug.simStats.pedVehicleOverlapCount`: number (must be `0`)
+- `window.__dioramaDebug.railTelemetry`: `{ activeTrains, passingNow, trackInterleaveViolations }`
+- `window.__dioramaDebug.sportsTelemetry`: `{ tennisCourts, soccerPitches, maxSoccerPlayerMps, minTennisShotSec, maxTennisShotSec, tennisBouncesObserved, ballModes }`
+- `window.__dioramaDebug.vesselTelemetry`: `{ activeVessels, minPairwiseClearanceM, collisionCount, maxSupSpeedMps }`
+
+---
+
+## Code Layout (Exclusive Ownership per Milestone)
+- **M1**:
+  - `docs/js/specs/registry.js` (new)
+  - `docs/js/specs/sbb_kilchberg.js` (new)
+  - `docs/js/specs/zvv_kilchberg.js` (new)
+  - `docs/js/specs/inhabitants_kilchberg.js` (new)
+  - `docs/js/specs/vessels_kilchberg.js` (new)
+  - `docs/js/specs/sports_kilchberg.js` (new)
+  - `docs/js/sim/spatial.js` (new)
+  - `docs/js/living/clock.js` (new)
+  - `docs/js/living/diurnal.js` (update)
+  - `docs/js/living/context.js` (update)
+  - `docs/js/living/engine.js` (update)
+  - `docs/js/living/draw.js` (update)
+- **M2**:
+  - `docs/js/living/plugins/trains.js` (update)
+  - `docs/js/render/vehicles.js` (update — train gangway order only)
+  - `docs/js/sim/traffic.js` (update)
+  - `docs/js/sim/pedestrians.js` (update)
+  - `docs/js/living/plugins/traffic.js` (update)
+  - `docs/js/living/plugins/pedestrians.js` (update)
+- **M3**:
+  - `docs/js/sim/sports_sim.js` (new)
+  - `docs/js/living/plugins/sports.js` (update)
+  - `docs/js/sim/vessel_sim.js` (new)
+  - `docs/js/living/plugins/vessels.js` (update)
+  - `docs/js/living/plugins/seebad.js` (update)
+  - `docs/js/living/plugins/wildlife.js` (update)
+  - `docs/js/living/plugins/landmarks.js` (update)
+  - `docs/js/audio.js` (update)
+- **M4**:
+  - `docs/js/living/index.js` (update)
+  - `docs/app.js` (update)
+  - `docs/index.html` (update)
+  - `docs/styles.css` (update)
+- **E2E Track**:
+  - `TEST_INFRA.md` (update)
+  - `TEST_READY.md` (update)
+  - `tests/tier2_v13_vegetation.py` (update `T2.V13.V04` version check)
+  - `tests/tier2_v14_simulation.mjs` (new)
+  - `tests/run_e2e.py` (register `tier2_v14_simulation.mjs`)

@@ -283,15 +283,42 @@ export function drawMiniPerson(
   });
 }
 
-export function getZurichClockTime(tSec, mode = 'day') {
+function pad2Clock(n) {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+function wrapIntClock(val, mod) {
+  if (typeof val !== 'number' || !Number.isFinite(val)) return 0;
+  return ((Math.floor(val) % mod) + mod) % mod;
+}
+
+export function getZurichClockTime(tSec, mode = 'day', clockSnapshot = null) {
+  const snap = (clockSnapshot && typeof clockSnapshot === 'object' && Number.isFinite(clockSnapshot.hours))
+    ? clockSnapshot
+    : ((mode && typeof mode === 'object' && Number.isFinite(mode.hours)) ? mode : null);
+
+  if (snap) {
+    const hr = wrapIntClock(snap.hours, 24);
+    const min = wrapIntClock(snap.minutes, 60);
+    const sec = wrapIntClock(snap.seconds, 60);
+    const validFmt = typeof snap.formattedHHMM === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(snap.formattedHHMM);
+    const formattedHHMM = validFmt
+      ? snap.formattedHHMM
+      : `${pad2Clock(hr)}:${pad2Clock(min)}`;
+    const tzLabel = typeof snap.tzLabel === 'string' ? snap.tzLabel : 'CET';
+    return { hr, min, sec, hours: hr, minutes: min, seconds: sec, formattedHHMM, tzLabel };
+  }
+
+  const safeT = Number.isFinite(tSec) ? tSec : 0;
   const baseSec = mode === 'night'
     ? (22 * 3600 + 15 * 60)
     : (mode === 'sunset' ? (19 * 3600 + 42 * 60) : (14 * 3600 + 22 * 60));
-  const totalSec = (((baseSec + tSec) % 86400) + 86400) % 86400;
+  const totalSec = (((baseSec + safeT) % 86400) + 86400) % 86400;
   const hr = Math.floor(totalSec / 3600) % 24;
   const min = Math.floor((totalSec % 3600) / 60);
   const sec = totalSec % 60;
-  return { hr, min, sec };
+  const formattedHHMM = `${pad2Clock(hr)}:${pad2Clock(min)}`;
+  return { hr, min, sec, hours: hr, minutes: min, seconds: sec, formattedHHMM, tzLabel: 'CEST' };
 }
 
 /**
@@ -306,7 +333,7 @@ export function drawSwissClockDial(ctx, cx, cy, r, tSec, opts = {}) {
   const detailAlpha = opts.detailAlpha != null ? opts.detailAlpha : 1.0;
   const isNight = mode === 'night';
   const isSunset = mode === 'sunset';
-  const { hr, min, sec } = getZurichClockTime(tSec, mode);
+  const { hr, min, sec } = getZurichClockTime(tSec, mode, opts.clockSnapshot || opts.clock || null);
   const minAng = ((min + sec / 60) / 60) * Math.PI * 2 - Math.PI * 0.5;
   const hrAng = (((hr % 12) + min / 60) / 12) * Math.PI * 2 - Math.PI * 0.5;
 

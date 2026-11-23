@@ -321,9 +321,9 @@ class TestTier2V13Vegetation(unittest.TestCase):
             f"Night foliage collapsed to flat black/monotone: std_luma={nit_std_luma:.2f} < 4.0",
         )
 
-    @test_meta("T2.V13.V04", "v13.0 asset budget (<500 KB VP8L tiles, <300 MB docs/, <650 KB animations) & ASSET_VER=13.0")
+    @test_meta("T2.V13.V04", "v13+ asset budget (<500 KB VP8L tiles, <300 MB docs/, <650 KB animations) & ASSET_VER >= 13.0 sync")
     def test_04_v13_asset_budget_and_cache_bust_integrity(self) -> None:
-        # 1. Cache-bust version checks in docs/app.js and docs/index.html
+        # 1. Cache-bust version checks in docs/app.js and docs/index.html (accepts 13.0, 14.0, ...)
         app_js_path = DOCS_DIR / "app.js"
         index_html_path = DOCS_DIR / "index.html"
         self.assertTrue(app_js_path.is_file(), "Missing docs/app.js")
@@ -332,19 +332,33 @@ class TestTier2V13Vegetation(unittest.TestCase):
         app_js = app_js_path.read_text(encoding="utf-8")
         index_html = index_html_path.read_text(encoding="utf-8")
 
-        self.assertIsNotNone(
-            re.search(r"""ASSET_VER\s*=\s*['"]13\.0['"]""", app_js),
-            "docs/app.js must declare ASSET_VER = '13.0'",
+        m_asset = re.search(r"""ASSET_VER\s*=\s*['"](\d+(?:\.\d+)*)['"]""", app_js)
+        m_css = re.search(r"""styles\.css\?v=(\d+(?:\.\d+)*)(?=['"&])""", index_html)
+        m_app = re.search(r"""app\.js\?v=(\d+(?:\.\d+)*)(?=['"&])""", index_html)
+
+        self.assertIsNotNone(m_asset, "docs/app.js must declare ASSET_VER = '<major>.<minor>'")
+        self.assertIsNotNone(m_css, "docs/index.html must reference styles.css?v=<version>")
+        self.assertIsNotNone(m_app, "docs/index.html must reference app.js?v=<version>")
+
+        asset_ver = m_asset.group(1)
+        css_ver = m_css.group(1)
+        app_ver = m_app.group(1)
+
+        self.assertEqual(
+            asset_ver,
+            css_ver,
+            f"Version mismatch between docs/app.js ASSET_VER='{asset_ver}' and docs/index.html styles.css?v={css_ver}",
         )
-        self.assertIn(
-            "styles.css?v=13.0",
-            index_html,
-            "docs/index.html must reference styles.css?v=13.0",
+        self.assertEqual(
+            asset_ver,
+            app_ver,
+            f"Version mismatch between docs/app.js ASSET_VER='{asset_ver}' and docs/index.html app.js?v={app_ver}",
         )
-        self.assertIn(
-            "app.js?v=13.0",
-            index_html,
-            "docs/index.html must reference app.js?v=13.0",
+        major_ver = int(asset_ver.split(".")[0])
+        self.assertGreaterEqual(
+            major_ver,
+            13,
+            f"Expected ASSET_VER major version >= 13 (e.g. '13.0' or '14.0'), got '{asset_ver}'",
         )
 
         # 2. All L2 and z1 tiles across day/sunset/night strictly < 500,000 bytes and lossless VP8L

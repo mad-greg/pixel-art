@@ -1,15 +1,16 @@
 /**
- * Purposeful Pedestrians Plugin (Kilchberg v13.0).
+ * Purposeful Pedestrians & Named Kilchberg Inhabitants Plugin (Kilchberg v14.0).
  *
- * Thin adapter wrapping docs/js/sim/pedestrians.js (createPedestrianSim) UNCHANGED
- * so all 20 Hz O-D routing, transit transfers, zebra crosswalk curb-waits, and
- * T2.SM.03 / T2.FA3.07 invariants remain 100% intact.
+ * Wraps docs/js/sim/pedestrians.js (createPedestrianSim) with SpecRegistry hot-sync
+ * for named Kilchberg residents (`InhabitantSpec`), KilchbergClock routine awareness,
+ * and rich click inspection while preserving all T2.SM.03 / T2.FA3.07 invariants.
  */
 
 import { createPedestrianSim, drawPedestrianEntity } from '../../sim/pedestrians.js';
 
 export function createPedestriansPlugin() {
   let pedSim = null;
+  let unsubInhabSpecs = null;
   let counts = { roadPeds: 0, busStopCommuters: 0 };
   let cachedInspectables = [];
 
@@ -22,7 +23,19 @@ export function createPedestriansPlugin() {
     enabledByDefault: true,
 
     init(ctx) {
+      if (unsubInhabSpecs) {
+        unsubInhabSpecs();
+        unsubInhabSpecs = null;
+      }
       pedSim = ctx.animData ? createPedestrianSim(ctx.animData) : null;
+      if (pedSim && ctx.specs && typeof ctx.specs.getInhabitants === 'function') {
+        pedSim.setInhabitantSpecs(ctx.specs.getInhabitants());
+        if (typeof ctx.specs.onChange === 'function') {
+          unsubInhabSpecs = ctx.specs.onChange('inhabitants', () => {
+            if (pedSim) pedSim.setInhabitantSpecs(ctx.specs.getInhabitants());
+          });
+        }
+      }
       ctx.shared.pedSim = pedSim;
       counts = { roadPeds: 0, busStopCommuters: 0 };
       cachedInspectables = [];
@@ -30,10 +43,14 @@ export function createPedestriansPlugin() {
 
     update(_dt, ctx) {
       if (!pedSim) return;
+      if (typeof pedSim.setClockSnapshot === 'function') {
+        pedSim.setClockSnapshot(ctx.clock || null);
+      }
       const liveSnap = (ctx.shared.lastSimSnapshot && ctx.shared.lastSimSnapshot.mode === ctx.mode)
         ? ctx.shared.lastSimSnapshot
         : null;
-      pedSim.updateToTime(ctx.tSec, ctx.mode, liveSnap);
+      const isLiveMode = !!(ctx.clock && ctx.clock.clockMode !== 'deterministic');
+      pedSim.updateToTime(ctx.tSec, ctx.mode, liveSnap, isLiveMode);
       ctx.shared.occupiedCrosswalks = pedSim.getOccupiedCrosswalks();
       ctx.shared.pedStats = pedSim.getStats();
     },
@@ -62,20 +79,31 @@ export function createPedestriansPlugin() {
           counts.roadPeds++;
         }
 
+        const isInhab = !!pItem.inhabitantName;
         inspectables.push({
           kind: 'pedestrian',
           id: pItem.id,
+          inhabitantId: pItem.inhabitantId || null,
           wx: pItem.pos.wx,
           wy: pItem.pos.wy,
           radiusCss: 8,
-          title: pItem.tripLabel || 'Villager · Kilchberg',
-          sub: `Purposeful Footpath Trip · ${pItem.state.replace(/_/g, ' ')}`,
-          specs: [
-            ['Origin', pItem.originName || 'Kilchberg'],
-            ['Destination', pItem.destName || 'Kilchberg'],
-            ['Role', pItem.role.replace(/_/g, ' ')],
-            ['Status', pItem.state.replace(/_/g, ' ')],
-          ],
+          title: isInhab ? pItem.inhabitantName : (pItem.tripLabel || 'Villager · Kilchberg'),
+          sub: isInhab
+            ? `${pItem.inhabitantRole || 'Kilchberg Resident'} · ${pItem.activityLabel || pItem.state.replace(/_/g, ' ')}`
+            : `Purposeful Footpath Trip · ${pItem.state.replace(/_/g, ' ')}`,
+          specs: isInhab
+            ? [
+                ['Resident', pItem.inhabitantName],
+                ['Home', pItem.homeLabel || pItem.originName || 'Kilchberg'],
+                ['Activity', pItem.activityLabel || 'Walking'],
+                ['Destination', pItem.destName || 'Kilchberg'],
+              ]
+            : [
+                ['Origin', pItem.originName || 'Kilchberg'],
+                ['Destination', pItem.destName || 'Kilchberg'],
+                ['Role', pItem.role.replace(/_/g, ' ')],
+                ['Status', pItem.state.replace(/_/g, ' ')],
+              ],
         });
 
         const bounds = pItem.bounds || { ex: 4.5 * wScale, eyUp: 9.5 * wScale, eyDn: 3.5 * wScale };
@@ -111,6 +139,10 @@ export function createPedestriansPlugin() {
     },
 
     destroy() {
+      if (unsubInhabSpecs) {
+        unsubInhabSpecs();
+        unsubInhabSpecs = null;
+      }
       pedSim = null;
       cachedInspectables = [];
     },

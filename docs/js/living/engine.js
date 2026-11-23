@@ -265,11 +265,32 @@ export class LivingEngine {
       if (bucket.length === 0) continue;
 
       if (SORTED_LAYERS.has(layer) && bucket.length > 1) {
-        bucket.sort((a, b) => {
-          const sy = (a.sortY || 0) - (b.sortY || 0);
-          if (sy !== 0) return sy;
-          return (a._priority || 0) - (b._priority || 0);
-        });
+        if (layer === 'rail') {
+          bucket.sort((a, b) => {
+            const tr = (a.trackRank ?? 0) - (b.trackRank ?? 0);
+            if (tr !== 0) return tr;
+            const sy = (a.sortY || 0) - (b.sortY || 0);
+            if (sy !== 0) return sy;
+            return (a._priority || 0) - (b._priority || 0);
+          });
+        } else {
+          bucket.sort((a, b) => {
+            const sy = (a.sortY || 0) - (b.sortY || 0);
+            if (sy !== 0) return sy;
+            return (a._priority || 0) - (b._priority || 0);
+          });
+        }
+      }
+
+      if (layer === 'rail' && this._ctx && this._ctx.shared && this._ctx.shared.railTelemetry) {
+        let violations = 0;
+        let maxRankSeen = -Infinity;
+        for (let j = 0; j < bucket.length; j++) {
+          const r = bucket[j].trackRank ?? 0;
+          if (r < maxRankSeen) violations++;
+          if (r > maxRankSeen) maxRankSeen = r;
+        }
+        this._ctx.shared.railTelemetry.trackInterleaveViolations = violations;
       }
 
       for (let j = 0; j < bucket.length; j++) {

@@ -57,10 +57,49 @@ const DIURNAL_CACHE = {
   }),
 };
 
-export function getLivingDiurnalProfile(mode = 'day') {
+export function getLivingDiurnalProfile(mode = 'day', clockSnapshot = null) {
+  if (clockSnapshot && typeof clockSnapshot === 'object' && clockSnapshot.diurnalActivity) {
+    return getContinuousDiurnal(clockSnapshot, mode);
+  }
   if (mode === 'night') return DIURNAL_CACHE.night;
   if (mode === 'sunset') return DIURNAL_CACHE.sunset;
   return DIURNAL_CACHE.day;
 }
 
+/**
+ * Continuous diurnal profile modulated by KilchbergClock's smooth time-of-day curves.
+ * Falls back cleanly to the discrete cached preset when `clockSnapshot` is absent.
+ */
+export function getContinuousDiurnal(clockSnapshot, fallbackMode = 'day') {
+  if (!clockSnapshot || typeof clockSnapshot !== 'object' || !clockSnapshot.diurnalActivity) {
+    return getLivingDiurnalProfile(fallbackMode);
+  }
+  const preset = clockSnapshot.effectivePreset || fallbackMode || 'day';
+  const base = preset === 'night'
+    ? DIURNAL_CACHE.night
+    : (preset === 'sunset' ? DIURNAL_CACHE.sunset : DIURNAL_CACHE.day);
+  const act = clockSnapshot.diurnalActivity;
+
+  const trafficMul = Number.isFinite(act.trafficFactor) ? act.trafficFactor : base.carFactor;
+  const pedMul = Number.isFinite(act.pedestrianFactor) ? act.pedestrianFactor : base.pedFactor;
+  const leisureMul = Number.isFinite(act.leisureFactor) ? act.leisureFactor : base.swimmerActivity;
+  const nightF = Number.isFinite(act.nightFactor) ? act.nightFactor : (base.isNight ? 1 : 0);
+
+  return {
+    ...base,
+    continuous: true,
+    diurnalActivity: act,
+    carFactor: Math.max(0.15, Math.min(1.2, trafficMul)),
+    pedFactor: Math.max(0.12, Math.min(1.2, pedMul)),
+    cyclistFactor: Math.max(0.1, Math.min(1.2, 0.55 * pedMul + 0.45 * leisureMul)),
+    crosswalkRate: Math.max(0.15, Math.min(1.2, pedMul)),
+    wildlifeActivity: Math.max(0.12, Math.min(1.1, 1.0 - 0.85 * nightF)),
+    swimmerActivity: Math.max(0.0, Math.min(1.2, leisureMul)),
+    glowAlpha: Math.max(0.14, Math.min(0.95, 0.14 + 0.81 * nightF)),
+    headlightAlpha: Math.max(0.0, Math.min(0.28, 0.28 * nightF)),
+    windowAlpha: Math.max(0.0, Math.min(0.88, 0.88 * nightF)),
+  };
+}
+
 export { getDiurnalProfile };
+

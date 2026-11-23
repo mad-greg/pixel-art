@@ -159,22 +159,30 @@ export function createAudioEngine({
     const isNight = mode === 'night';
     const isSunset = mode === 'sunset';
 
-    // 1. SBB Trains (hushes when dwelling at Bahnhof Kilchberg)
+    // Collect single-source-of-truth signals from LivingEngine plugins (trains, vessels, etc.)
+    const livingSignals = (typeof getLivingAudioSignals === 'function')
+      ? (getLivingAudioSignals(worldW, worldH, tSec, mode) || [])
+      : [];
+    const livingLayerActive = livingSignals.length > 0;
+
+    // 1. SBB Trains (single-source via livingSignals when active; legacy fallback otherwise)
     let bestTrain = { level: 0, brightness: 0.08, pan: 0 };
-    for (const tr of (animData.trains || [])) {
-      const st = evalTrainState(tr, tSec);
-      if (st.headFrac < 0.01 || st.headFrac > 1.12) continue;
-      const isMoving = !st.isDwelling && st.speedRatio > 0.05;
-      const midF = Math.max(0.01, Math.min(0.99, st.midFrac));
-      const pos = samplePathAt(tr.pts, midF, worldW, worldH, 2);
-      if (!pos) continue;
-      const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.14);
-      const lvl = sp.level * (isMoving ? (0.35 + 0.65 * st.speedRatio) : 0.12);
-      if (lvl > bestTrain.level) {
-        bestTrain = { level: lvl, brightness: sp.brightness * (isMoving ? 1.0 : 0.4), pan: sp.pan };
+    if (!livingLayerActive) {
+      for (const tr of (animData.trains || [])) {
+        const st = evalTrainState(tr, tSec);
+        if (st.headFrac < 0.01 || st.headFrac > 1.12) continue;
+        const isMoving = !st.isDwelling && st.speedRatio > 0.05;
+        const midF = Math.max(0.01, Math.min(0.99, st.midFrac));
+        const pos = samplePathAt(tr.pts, midF, worldW, worldH, 2);
+        if (!pos) continue;
+        const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.14);
+        const lvl = sp.level * (isMoving ? (0.35 + 0.65 * st.speedRatio) : 0.12);
+        if (lvl > bestTrain.level) {
+          bestTrain = { level: lvl, brightness: sp.brightness * (isMoving ? 1.0 : 0.4), pan: sp.pan };
+        }
       }
+      applyChannelSpatial('train', bestTrain.level, bestTrain.brightness, bestTrain.pan);
     }
-    applyChannelSpatial('train', bestTrain.level, bestTrain.brightness, bestTrain.pan);
 
     // 2. ZVV Buses, 3a. A3 Motorway Traffic & 3b. Town Street Traffic (coupled to live IDM trafficSim!)
     let bestBus = { level: 0, brightness: 0.08, pan: 0 };
@@ -278,20 +286,22 @@ export function createAudioEngine({
     const townPan = bestTownCar.level > 0.001 ? (townPanSum / Math.max(0.001, Math.sqrt(townSumLvl))) : 0;
     applyChannelSpatial('town_traffic', townFinalLvl, bestTownCar.brightness, townPan);
 
-    // 4. Lake Zurich ZSG Steamer & Boats
+    // 4. Lake Zurich ZSG Steamer & Boats (single-source via livingSignals when active; legacy fallback otherwise)
     let bestBoat = { level: 0, brightness: 0.08, pan: 0 };
-    for (const ship of (animData.ships || [])) {
-      const st = evalShipState(ship, tSec, mode);
-      if (!st.visible || st.frac < 0 || st.frac > 1) continue;
-      const pos = samplePathAt(ship.pts, st.frac, worldW, worldH, 2);
-      if (!pos) continue;
-      const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.09);
-      const mul = ship.kind === 'zsg_steamer' ? (st.isDocked ? 0.35 : 1.0) : 0.28;
-      if (sp.level * mul > bestBoat.level) {
-        bestBoat = { level: sp.level * mul, brightness: sp.brightness, pan: sp.pan };
+    if (!livingLayerActive) {
+      for (const ship of (animData.ships || [])) {
+        const st = evalShipState(ship, tSec, mode);
+        if (!st.visible || st.frac < 0 || st.frac > 1) continue;
+        const pos = samplePathAt(ship.pts, st.frac, worldW, worldH, 2);
+        if (!pos) continue;
+        const sp = computeSpatialFactor(pos.wx / worldW, pos.wy / worldH, u0, u1, v0, v1, uC, halfVisU, zoomNorm, 0.09);
+        const mul = ship.kind === 'zsg_steamer' ? (st.isDocked ? 0.35 : 1.0) : 0.28;
+        if (sp.level * mul > bestBoat.level) {
+          bestBoat = { level: sp.level * mul, brightness: sp.brightness, pan: sp.pan };
+        }
       }
+      applyChannelSpatial('boat', bestBoat.level, bestBoat.brightness, bestBoat.pan);
     }
-    applyChannelSpatial('boat', bestBoat.level, bestBoat.brightness, bestBoat.pan);
 
     // 5. Lake Zurich Shoreline Waves (shore-strict: silent inland & soft in overview)
     let bestWave = { level: 0, brightness: 0.08, pan: 0 };
@@ -337,11 +347,7 @@ export function createAudioEngine({
         if (lvl > bestBell.level) bestBell = { level: lvl, brightness: sp.brightness, pan: sp.pan };
       }
     }
-    const livingSignals = (typeof getLivingAudioSignals === 'function')
-      ? (getLivingAudioSignals(worldW, worldH, tSec, mode) || [])
-      : [];
-
-    if (livingSignals.length > 0) {
+    if (livingLayerActive) {
       const CHANNEL_MAX_RANGE = {
         train: 0.14,
         bus: 0.075,

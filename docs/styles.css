@@ -596,6 +596,128 @@ body.cinema-mode .exit-cinema-btn {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
 }
 
+/* ---- Kilchberg Real-Time Swiss Clock HUD Pill (top-right viewport slot) ---- */
+.kilchberg-clock {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  user-select: none;
+}
+.clock-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(19, 25, 36, 0.9);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--border-warm);
+  border-radius: 6px;
+  padding: 5px 10px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  transition: border-color 0.15s, background 0.15s;
+}
+.clock-pill-btn:hover {
+  background: rgba(25, 34, 49, 0.95);
+  border-color: var(--accent-gold);
+}
+.clock-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #48b8c0;
+  box-shadow: 0 0 6px rgba(72, 184, 192, 0.65);
+}
+.clock-dot.manual {
+  background: #e2b45b;
+  box-shadow: 0 0 6px rgba(226, 180, 91, 0.65);
+}
+.clock-dot.deterministic {
+  background: #7c8ba1;
+  box-shadow: none;
+}
+.clock-place {
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.clock-time {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.clock-tz {
+  color: var(--accent-gold);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.clock-scrub-panel {
+  width: 224px;
+  background: rgba(19, 25, 36, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-warm);
+  border-radius: 6px;
+  padding: 8px 10px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+}
+.clock-scrub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clock-scrub-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+#clock-scrub {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent-gold);
+  cursor: pointer;
+}
+.clock-live-btn {
+  flex-shrink: 0;
+  background: rgba(72, 184, 192, 0.16);
+  border: 1px solid rgba(72, 184, 192, 0.45);
+  border-radius: 4px;
+  color: #7ee3ea;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 7px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.clock-live-btn:hover {
+  background: rgba(72, 184, 192, 0.28);
+  border-color: #7ee3ea;
+}
+.clock-live-btn.active {
+  background: rgba(72, 184, 192, 0.28);
+  border-color: #48b8c0;
+}
+@media (max-width: 760px) {
+  .kilchberg-clock { top: 10px; right: 10px; max-width: calc(100% - 76px); }
+  .clock-pill-btn { padding: 4px 8px; font-size: 10.5px; gap: 5px; }
+  .clock-place { display: none; }
+  .clock-scrub-panel { width: min(210px, calc(100vw - 24px)); }
+}
+
 /* ---- Search ---- */
 .search-wrap {
   position: relative;

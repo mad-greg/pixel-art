@@ -15,6 +15,7 @@
  */
 
 import { createRng, hashString } from './rng.js';
+import { metersToUv, uvToMeters } from './spatial.js';
 import {
   evalBusScheduleState,
   evalShipState,
@@ -138,7 +139,7 @@ export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, tSec = 
   const facing = ux >= 0 ? 1 : -1;
 
   // Deterministic role-authentic accessories (hats, scarves, sun parasols, Lindt gold bags, jogger sweatbands)
-  let hatCol = null;
+  let hatCol = item.hatCol ? shadeHex(item.hatCol, 1.0, mode) : null;
   let scarfCol = null;
   let umbrellaCol = null;
   let sweatbandCol = null;
@@ -151,7 +152,7 @@ export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, tSec = 
   } else if (!isNight && (item.role === 'seebad_bather' || item.role === 'village_walker') && (idHash % 9 === 0)) {
     const parasolPalette = ['#f43f5e', '#38bdf8', '#fbbf24', '#10b981'];
     umbrellaCol = shadeHex(parasolPalette[idHash % parasolPalette.length], 1.0, mode);
-  } else if ((idHash % 5) === 1 && item.role !== 'schoolkid') {
+  } else if (!hatCol && (idHash % 5) === 1 && item.role !== 'schoolkid') {
     const hatPalette = ['#475569', '#78350f', '#1e293b', '#92400e'];
     hatCol = shadeHex(hatPalette[(idHash >>> 3) % hatPalette.length], 1.0, mode);
   } else if ((isNight || mode === 'sunset') && (idHash % 4) === 2) {
@@ -528,6 +529,288 @@ export function createPedestrianSim(animData) {
   const prevStopDwelling = new Map();
   let prevShipDocked = false;
 
+  // v14 spec-driven named inhabitants, clock, and vehicle safety state
+  let inhabitantSpecs = null;
+  let clockSnapshot = null;
+  let lastVehiclePositions = null;
+
+  function getCurrentMinOfDay() {
+    if (clockSnapshot && Number.isFinite(clockSnapshot.zurichSecOfDay)) {
+      return ((clockSnapshot.zurichSecOfDay / 60) % 1440 + 1440) % 1440;
+    }
+    if (currentMode === 'sunset') return 19 * 60 + 42;
+    if (currentMode === 'night') return 22 * 60 + 15;
+    return 14 * 60 + 22;
+  }
+
+  function findNearestFpPoi(u, v) {
+    let bestId = fpNodeList[0] || null;
+    let bestD2 = Infinity;
+    for (let i = 0; i < fpNodeList.length; i++) {
+      const id = fpNodeList[i];
+      const p = poiById.get(id);
+      if (!p) continue;
+      const du = (p.u - u) * masterW;
+      const dv = (p.v - v) * masterH;
+      const d2 = du * du + dv * dv;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        bestId = id;
+      }
+    }
+    return bestId;
+  }
+
+  function resolvePoiToFp(poiId, uvFallback) {
+    if (poiId && fpNodes.has(poiId)) return poiId;
+    if (poiId && poiById.has(poiId)) {
+      const p = poiById.get(poiId);
+      return findNearestFpPoi(p.u, p.v);
+    }
+    if (Array.isArray(uvFallback) && uvFallback.length >= 2) {
+      return findNearestFpPoi(uvFallback[0], uvFallback[1]);
+    }
+    return fpNodeList[0] || null;
+  }
+
+  function resolveInhabitantSlot(spec, minOfDay) {
+    const routine = Array.isArray(spec.routine) ? spec.routine : [];
+    for (let i = 0; i < routine.length; i++) {
+      const s = routine[i];
+      if (minOfDay >= s.startMin && minOfDay < s.endMin) return s;
+    }
+    return routine[0] || { activity: 'promenade_walk', targetPoi: 'poi_morfanlage', transport: 'walk' };
+  }
+
+  function formatActivityLabel(activity) {
+    const map = {
+      home: 'At Home / Neighborhood Stroll',
+      commute_rail: 'Rail Commute (Bahnhof Kilchberg)',
+      commute_bus: 'ZVV Bus Commute',
+      work: 'Working in Kilchberg',
+      school: 'Attending School',
+      errand_lindt: 'Visiting Lindt Home of Chocolate',
+      errand_village: 'Village Errand',
+      seebad: 'Seebad Kilchberg',
+      promenade_walk: 'Lakeside Promenade Walk',
+      dog_walk: 'Walking the Dog',
+      church: 'Church Visit',
+      cafe: 'Village Café Pause',
+      sports: 'Sports & Recreation',
+    };
+    return map[activity] || String(activity || 'Walking').replace(/_/g, ' ');
+  }
+
+  function isOncomingVehicleUnsafeAt(u, v, radiusM = 16.0, nearOnly = false) {
+    if (!Array.isArray(lastVehiclePositions) || lastVehiclePositions.length === 0) return false;
+    const pm = uvToMeters(u, v);
+    for (let i = 0; i < lastVehiclePositions.length; i++) {
+      const veh = lastVehiclePositions[i];
+      const dx = pm.xM - veh.xM;
+      const dy = pm.yM - veh.yM;
+      const maxR = radiusM + 0.5 * veh.lengthM;
+      if (dx * dx + dy * dy > maxR * maxR) continue;
+      const fwd = dx * veh.txM + dy * veh.tyM;
+      const lat = Math.abs(-dx * veh.tyM + dy * veh.txM);
+      // Vehicle already occupying or right beside the crossing (even if stopped or creeping)
+      if (Math.abs(fwd) < 0.5 * veh.lengthM + 2.5 && lat < 2.5) return true;
+      // Any moving vehicle (including slow creeping cars, v > 0.05) heading toward the crossing
+      if (fwd > 0 && lat < 2.5 && veh.v > 0.05) {
+        const stopDist = (veh.v * veh.v) / (2.0 * 3.0) + veh.v * 0.6;
+        const unsafeRange = nearOnly
+          ? Math.max(4.5, stopDist + 2.5)
+          : Math.max(5.0, stopDist + 4.5);
+        if (fwd < 0.5 * veh.lengthM + Math.min(radiusM, unsafeRange)) return true;
+      }
+    }
+    return false;
+  }
+
+  function isVehicleOccupyingSpot(u, v) {
+    if (!Array.isArray(lastVehiclePositions) || lastVehiclePositions.length === 0) return false;
+    const pm = uvToMeters(u, v);
+    for (let i = 0; i < lastVehiclePositions.length; i++) {
+      const veh = lastVehiclePositions[i];
+      const dx = pm.xM - veh.xM;
+      const dy = pm.yM - veh.yM;
+      const maxR = 0.5 * veh.lengthM + 3.0;
+      if (dx * dx + dy * dy > maxR * maxR) continue;
+      const fwd = dx * veh.txM + dy * veh.tyM;
+      const lat = Math.abs(-dx * veh.tyM + dy * veh.txM);
+      const isStopped = (veh.v || 0) < 0.45;
+      if (isStopped) {
+        // Yielding/stopped vehicle: only block the physical body so pedestrians cross cleanly without deadlocking
+        if (fwd > -0.5 * veh.lengthM - 0.25 && fwd < 0.5 * veh.lengthM + 0.35 && lat < 1.05) {
+          return true;
+        }
+      } else if (fwd > -0.5 * veh.lengthM - 0.6 && fwd < 0.5 * veh.lengthM + 2.4 && lat < 1.35) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function findOverlappingVehicle(u, v, padFwd = 0.35, padLat = 1.35) {
+    if (!Array.isArray(lastVehiclePositions) || lastVehiclePositions.length === 0) return null;
+    const pm = uvToMeters(u, v);
+    let best = null;
+    let bestPen = -1;
+    for (let i = 0; i < lastVehiclePositions.length; i++) {
+      const veh = lastVehiclePositions[i];
+      const halfLen = 0.5 * veh.lengthM;
+      const dx = pm.xM - veh.xM;
+      const dy = pm.yM - veh.yM;
+      const maxR = halfLen + padFwd + 2.5;
+      if (dx * dx + dy * dy > maxR * maxR) continue;
+      const fwd = dx * veh.txM + dy * veh.tyM;
+      const signedLat = -dx * veh.tyM + dy * veh.txM;
+      const lat = Math.abs(signedLat);
+      if (Math.abs(fwd) < halfLen + padFwd && lat < padLat) {
+        const pen = (padLat - lat) + (halfLen + padFwd - Math.abs(fwd));
+        if (pen > bestPen) {
+          bestPen = pen;
+          best = { veh, xM: pm.xM, yM: pm.yM, fwd, signedLat, lat, halfLen };
+        }
+      }
+    }
+    return best;
+  }
+
+  function isGroundVehicleCheckable(ag) {
+    if (!ag || ag.onElevatedDeck) return false;
+    const st = ag.state;
+    return st !== 'in_transit' && st !== 'boarding' && st !== 'alighting'
+      && st !== 'queue_rail' && st !== 'walk_footbridge'
+      && st !== 'queue_pier' && st !== 'walk_pier_deck' && st !== 'walk_gangplank';
+  }
+
+  function escapeVehicleOverlap(ag) {
+    if (!isGroundVehicleCheckable(ag)) return false;
+    const hit = findOverlappingVehicle(ag.u, ag.v, 0.3, 1.35);
+    if (!hit) return false;
+    const { veh, xM, yM, fwd, signedLat, lat, halfLen } = hit;
+    const sideSign = signedLat >= 0 ? 1 : -1;
+    const nx = -veh.tyM;
+    const ny = veh.txM;
+    const targetLat = 1.85;
+    const shiftOut = Math.max(0.4, targetLat - lat);
+    const shiftOpp = targetLat + lat;
+    const fwdSign = fwd >= 0 ? 1 : -1;
+    const shiftLong = (halfLen + 1.5) - Math.abs(fwd);
+
+    const candidates = [
+      { x: xM + nx * sideSign * shiftOut, y: yM + ny * sideSign * shiftOut },
+      { x: xM - nx * sideSign * shiftOpp, y: yM - ny * sideSign * shiftOpp },
+      { x: xM + veh.txM * fwdSign * Math.max(0.5, shiftLong), y: yM + veh.tyM * fwdSign * Math.max(0.5, shiftLong) },
+      { x: xM + nx * sideSign * (shiftOut + 1.2), y: yM + ny * sideSign * (shiftOut + 1.2) },
+    ];
+    for (let ci = 0; ci < candidates.length; ci++) {
+      const uv = metersToUv(candidates[ci].x, candidates[ci].y);
+      const cu = clamp(uv.u, 0.002, 0.998);
+      const cv = clamp(uv.v, 0.002, 0.998);
+      if (!findOverlappingVehicle(cu, cv, 0.25, 1.25)) {
+        ag.u = cu;
+        ag.v = cv;
+        return true;
+      }
+    }
+    const fallbackUv = metersToUv(candidates[0].x, candidates[0].y);
+    ag.u = clamp(fallbackUv.u, 0.002, 0.998);
+    ag.v = clamp(fallbackUv.v, 0.002, 0.998);
+    return true;
+  }
+
+  function resolveAllVehicleOverlaps() {
+    if (!Array.isArray(lastVehiclePositions) || lastVehiclePositions.length === 0) return;
+    for (let pass = 0; pass < 2; pass++) {
+      let anyEscaped = false;
+      for (let i = 0; i < agents.length; i++) {
+        if (escapeVehicleOverlap(agents[i])) anyEscaped = true;
+      }
+      if (!anyEscaped) break;
+    }
+  }
+
+  function inhabitantSpecSignature(spec) {
+    if (!spec) return '';
+    return JSON.stringify({
+      id: spec.id || null,
+      name: spec.name || null,
+      role: spec.role || null,
+      home: spec.home || null,
+      workplace: spec.workplace || null,
+      appearance: spec.appearance || null,
+      routine: spec.routine || null,
+    });
+  }
+
+  function createInhabitantAgent(spec, idx, arng, forceVisible = false) {
+    const app = (spec && spec.appearance && typeof spec.appearance === 'object') ? spec.appearance : {};
+    const ag = makeBaseAgent(10000 + idx, 'inhabitant', arng);
+    ag.id = `inhab:${spec.id}`;
+    ag.inhabitantId = spec.id;
+    ag.inhabitantName = spec.name;
+    ag.inhabitantRole = spec.role || 'Kilchberg Resident';
+    ag.inhabitantSpec = spec;
+    ag.inhabitantSpecSig = inhabitantSpecSignature(spec);
+    ag.homeLabel = (spec.home && spec.home.label) || poiLabel(spec.home && spec.home.poiId);
+    if (app.coat) ag.coatCol = app.coat;
+    if (app.pants) ag.pantsCol = app.pants;
+    if (app.hair) ag.hairCol = app.hair;
+    if (app.bag) ag.bagCol = app.bag;
+    if (app.hat) ag.hatCol = app.hat;
+    if (app.dog) {
+      ag.hasDog = true;
+      ag.dogCol = app.dog;
+    }
+
+    const minOfDay = getCurrentMinOfDay();
+    const slot = resolveInhabitantSlot(spec, minOfDay);
+    ag.activity = slot.activity || 'promenade_walk';
+    ag.activityLabel = formatActivityLabel(ag.activity);
+
+    // During night / evening home hours, keep default residents indoors so night < sunset < day
+    if (!forceVisible && ag.activity === 'home' && (currentMode === 'night' || currentMode === 'sunset')) {
+      ag.state = 'in_transit';
+      ag.originName = ag.homeLabel;
+      ag.destName = ag.homeLabel;
+      ag.tripLabel = `${spec.name} · At Home`;
+      return ag;
+    }
+
+    const homeFp = resolvePoiToFp(spec.home && spec.home.poiId, spec.home && spec.home.uv);
+    let targetFp = resolvePoiToFp(slot.targetPoi, null);
+    if (!targetFp || targetFp === homeFp) {
+      const alt = fpNodeList.find((id) => id !== homeFp) || homeFp;
+      targetFp = alt;
+    }
+
+    if (homeFp && targetFp && homeFp !== targetFp && assignFootpathTrip(ag, homeFp, targetFp, spec.name)) {
+      ag.edgeDistM = arng.range(0, ag.edgeList[0].lengthM * 0.85);
+      const p = sampleEdgeAt(ag.edgeList[0], ag.edgeDistM);
+      if (p) {
+        ag.u = p.u; ag.v = p.v; ag.d16 = p.d16; ag.tx = p.tx; ag.ty = p.ty;
+      }
+      ag.originName = ag.homeLabel;
+      ag.tripLabel = `${spec.name} · ${ag.activityLabel}`;
+    } else if (sidewalkRoads.length > 0) {
+      const rIdx = idx % sidewalkRoads.length;
+      const rd = sidewalkRoads[rIdx];
+      ag.state = 'walk_sidewalk';
+      ag.roadIdx = rIdx;
+      ag.roadDir = 1;
+      ag.roadDistM = arng.range(15, Math.max(25, (rd.length_m || 200) - 15));
+      const p = sampleSidewalkAt(rd, ag.roadDistM, 1);
+      if (p) {
+        ag.u = p.u; ag.v = p.v; ag.d16 = p.d16; ag.tx = p.tx; ag.ty = p.ty;
+      }
+      ag.originName = ag.homeLabel;
+      ag.destName = formatRoadName(rd);
+      ag.tripLabel = `${spec.name} · ${ag.activityLabel}`;
+    }
+    return ag;
+  }
+
   function sampleEdgeAt(edge, distM) {
     const frac = clamp(distM / Math.max(1, edge.lengthM), 0.002, 0.998);
     const rawFrac = edge.forward ? frac : (1.0 - frac);
@@ -569,7 +852,7 @@ export function createPedestrianSim(animData) {
       rx = -gy / gm;
       ry = (gx / gm) * isoY;
     }
-    const latPx = (isMain ? 6.2 : 2.8) * resFactor;
+    const latPx = (isMain ? 6.2 : 4.8) * resFactor;
     const wx = pos.wx + rx * latPx;
     const wy = pos.wy + ry * latPx;
     const baseD16 = pos.d16 || 30000;
@@ -589,12 +872,27 @@ export function createPedestrianSim(animData) {
     const pos = samplePathAt(fd.pts, rawFrac, masterW, masterH, 2);
     if (!pos) return null;
     const movingInc = outbound ? fd.entryAtStart : !fd.entryAtStart;
+    const tx = movingInc ? pos.tx : -pos.tx;
+    const ty = movingInc ? pos.ty : -pos.ty;
+    // Offset walk_feeder pedestrians laterally to the roadside edge (±2.4 ref px)
+    // instead of walking on the exact vehicle centerline!
+    const isoY = 0.55;
+    const gx = tx;
+    const gy = ty / isoY;
+    const gm = Math.hypot(gx, gy) || 1;
+    const rx = -gy / gm;
+    const ry = (gx / gm) * isoY;
+    const latPx = 5.2 * resFactor;
+    const wx = pos.wx + rx * latPx;
+    const wy = pos.wy + ry * latPx;
+    const baseD16 = pos.d16 || 30000;
+    const swD16 = clamp(Math.round(baseD16 - (wy - pos.wy) * depthSlopeGround), 1, 65534);
     return {
-      u: clamp(pos.wx / masterW, 0.002, 0.998),
-      v: clamp(pos.wy / masterH, 0.002, 0.998),
-      d16: pos.d16 || 30000,
-      tx: movingInc ? pos.tx : -pos.tx,
-      ty: movingInc ? pos.ty : -pos.ty,
+      u: clamp(wx / masterW, 0.002, 0.998),
+      v: clamp(wy / masterH, 0.002, 0.998),
+      d16: swD16,
+      tx,
+      ty,
     };
   }
 
@@ -878,32 +1176,47 @@ export function createPedestrianSim(animData) {
     };
   }
 
-  function updateCrosswalkPosition(ag, cw) {
-    const p = ag.state === 'crossing_cw' ? ag.cwProgress : 0;
+  function sampleCrosswalkUVAt(cw, p, cwDir) {
     const isSeestrasse = typeof cw.road_id === 'string' && cw.road_id.startsWith('seestrasse');
     const baseWx = cw.u * masterW;
     const baseWy = cw.v * masterH;
     let wx;
     let wy;
+    let tx;
+    let ty;
     if (isSeestrasse) {
       const nMag = Math.hypot(cw.nx, cw.ny) || 1;
       const ux = cw.nx / nMag;
       const uy = cw.ny / nMag;
-      const spanPx = (p - 0.5) * 18.0 * resFactor * ag.cwDir;
+      const spanPx = (p - 0.5) * 18.0 * resFactor * cwDir;
       wx = baseWx + ux * spanPx;
       wy = baseWy + uy * spanPx;
-      ag.tx = ux * ag.cwDir;
-      ag.ty = uy * ag.cwDir;
+      tx = ux * cwDir;
+      ty = uy * cwDir;
     } else {
-      const spanPx = (p - 0.5) * 11.5 * resFactor * ag.cwDir;
+      const spanPx = (p - 0.5) * 11.5 * resFactor * cwDir;
       wx = baseWx + cw.nx * spanPx;
       wy = baseWy + cw.ny * spanPx * 0.55;
-      ag.tx = cw.nx * ag.cwDir;
-      ag.ty = cw.ny * 0.55 * ag.cwDir;
+      tx = cw.nx * cwDir;
+      ty = cw.ny * 0.55 * cwDir;
     }
-    ag.u = clamp(wx / masterW, 0.002, 0.998);
-    ag.v = clamp(wy / masterH, 0.002, 0.998);
-    ag.d16 = clamp(Math.round((cw.d16 || 30000) - (wy - baseWy) * depthSlopeGround), 1, 65534);
+    return {
+      u: clamp(wx / masterW, 0.002, 0.998),
+      v: clamp(wy / masterH, 0.002, 0.998),
+      d16: clamp(Math.round((cw.d16 || 30000) - (wy - baseWy) * depthSlopeGround), 1, 65534),
+      tx,
+      ty,
+    };
+  }
+
+  function updateCrosswalkPosition(ag, cw) {
+    const p = ag.state === 'crossing_cw' ? ag.cwProgress : 0;
+    const sp = sampleCrosswalkUVAt(cw, p, ag.cwDir);
+    ag.u = sp.u;
+    ag.v = sp.v;
+    ag.d16 = sp.d16;
+    ag.tx = sp.tx;
+    ag.ty = sp.ty;
   }
 
   function resetState(mode, tStart) {
@@ -1081,12 +1394,10 @@ export function createPedestrianSim(animData) {
         ag.targetCwId = cw.id;
         ag.cwDir = (i % 2 === 0) ? 1 : -1;
         const phaseSlot = i % 4;
-        if (phaseSlot === 0) {
-          ag.state = 'crossing_cw';
-          ag.cwProgress = arng.range(0.15, 0.72);
-        } else if (phaseSlot === 1) {
+        if (phaseSlot === 0 || phaseSlot === 1) {
           ag.state = 'curb_wait';
-          ag.stateTimer = arng.range(0.2, 0.75);
+          ag.stateTimer = arng.range(0.35, 1.1);
+          ag.cwProgress = 0;
         } else {
           ag.state = 'cw_stroll';
           ag.stateTimer = arng.range(1.2, 5.5);
@@ -1164,6 +1475,15 @@ export function createPedestrianSim(animData) {
       agents.push(ag);
     }
 
+    // 8. Spec-Driven Named Kilchberg Inhabitants
+    if (Array.isArray(inhabitantSpecs) && inhabitantSpecs.length > 0) {
+      for (let i = 0; i < inhabitantSpecs.length; i++) {
+        const spec = inhabitantSpecs[i];
+        const arng = rng.fork(`inhab:${spec.id}`);
+        agents.push(createInhabitantAgent(spec, i, arng, false));
+      }
+    }
+
     initialized = true;
   }
 
@@ -1215,6 +1535,9 @@ export function createPedestrianSim(animData) {
 
   function step(dt, transitSnapshot) {
     simTime += dt;
+    if (transitSnapshot && Array.isArray(transitSnapshot.vehiclePositions)) {
+      lastVehiclePositions = transitSnapshot.vehiclePositions;
+    }
     const tCtx = buildTransitContext(simTime, transitSnapshot);
     occupiedCrosswalks = new Set();
 
@@ -1343,14 +1666,21 @@ export function createPedestrianSim(animData) {
       }
 
       if (ag.state === 'walk_connector') {
-        ag.connProgress += (ag.speedMps / Math.max(0.5, ag.connLenM)) * dt;
+        const nextProg = ag.connProgress + (ag.speedMps / Math.max(0.5, ag.connLenM)) * dt;
+        const fNext = clamp(nextProg, 0, 1);
+        const nextU = ag.connStartU + (ag.connEndU - ag.connStartU) * fNext;
+        const nextV = ag.connStartV + (ag.connEndV - ag.connStartV) * fNext;
+        const curHit = findOverlappingVehicle(ag.u, ag.v, 0.3, 1.35);
+        if (!curHit && isVehicleOccupyingSpot(nextU, nextV)) {
+          continue;
+        }
+        ag.connProgress = nextProg;
         ag.stridePhase += dt * (ag.speedMps * 5.2);
-        const f = clamp(ag.connProgress, 0, 1);
-        ag.u = ag.connStartU + (ag.connEndU - ag.connStartU) * f;
-        ag.v = ag.connStartV + (ag.connEndV - ag.connStartV) * f;
-        ag.d16 = ag.connStartD16 + (ag.connEndD16 - ag.connStartD16) * f;
+        ag.u = nextU;
+        ag.v = nextV;
+        ag.d16 = ag.connStartD16 + (ag.connEndD16 - ag.connStartD16) * fNext;
         if (ag.connStartZGnd != null && ag.connEndZGnd != null) {
-          ag.zGnd = ag.connStartZGnd + (ag.connEndZGnd - ag.connStartZGnd) * f;
+          ag.zGnd = ag.connStartZGnd + (ag.connEndZGnd - ag.connStartZGnd) * fNext;
         } else {
           ag.zGnd = null;
         }
@@ -1603,27 +1933,56 @@ export function createPedestrianSim(animData) {
       if (ag.state === 'curb_wait') {
         const cw = cwById.get(ag.targetCwId);
         ag.stateTimer -= dt;
+        ag.curbWaitTotal = (ag.curbWaitTotal || 0) + dt;
         ag.stridePhase += dt * 1.4;
         if (cw) {
           updateCrosswalkPosition(ag, cw);
-          if (ag.stateTimer <= 0.52) occupiedCrosswalks.add(cw.id);
+          // Immediately announce waiting pedestrian to oncoming traffic on both lanes
+          occupiedCrosswalks.add(cw.id);
         }
         if (ag.stateTimer <= 0 && cw) {
-          ag.state = 'crossing_cw';
-          ag.cwProgress = 0;
-          ag.tripLabel = `Crossing Zebra · ${cw.name || cw.id}`;
-          occupiedCrosswalks.add(cw.id);
+          // Check across the full crosswalk span (near lane, center, far lane) for occupying or oncoming vehicles
+          const spanFracs = [0.2, 0.5, 0.8];
+          let blockedNow = false;
+          let nearUnsafe = false;
+          let farUnsafe = false;
+          for (let sf = 0; sf < spanFracs.length; sf++) {
+            const sp = sampleCrosswalkUVAt(cw, spanFracs[sf], ag.cwDir);
+            if (isVehicleOccupyingSpot(sp.u, sp.v)) blockedNow = true;
+            if (isOncomingVehicleUnsafeAt(sp.u, sp.v, 16.0, true)) nearUnsafe = true;
+            if (!farUnsafe && isOncomingVehicleUnsafeAt(sp.u, sp.v, 16.0, false)) farUnsafe = true;
+          }
+          if (blockedNow || nearUnsafe || (ag.curbWaitTotal < 7.5 && farUnsafe)) {
+            ag.stateTimer = 0.25;
+            if (!blockedNow) occupiedCrosswalks.add(cw.id);
+          } else {
+            ag.state = 'crossing_cw';
+            ag.cwProgress = 0;
+            ag.curbWaitTotal = 0;
+            ag.tripLabel = `Crossing Zebra · ${cw.name || cw.id}`;
+            occupiedCrosswalks.add(cw.id);
+          }
         }
         continue;
       }
 
       if (ag.state === 'crossing_cw') {
         const cw = cwById.get(ag.targetCwId);
-        ag.cwProgress += (ag.speedMps / 4.8) * dt;
-        ag.stridePhase += dt * 7.6;
+        const nextProg = ag.cwProgress + (ag.speedMps / 4.8) * dt;
         if (cw) {
           occupiedCrosswalks.add(cw.id);
+          const nextSp = sampleCrosswalkUVAt(cw, Math.min(nextProg, 1.0), ag.cwDir);
+          const curHit = findOverlappingVehicle(ag.u, ag.v, 0.3, 1.35);
+          if (!curHit && isVehicleOccupyingSpot(nextSp.u, nextSp.v)) {
+            // Pause cleanly outside the vehicle occupying the lane ahead until it clears
+            continue;
+          }
+          ag.cwProgress = nextProg;
+          ag.stridePhase += dt * 7.6;
           updateCrosswalkPosition(ag, cw);
+        } else {
+          ag.cwProgress = nextProg;
+          ag.stridePhase += dt * 7.6;
         }
         if (ag.cwProgress >= 1.0) {
           ag.cwDir = -ag.cwDir;
@@ -1640,9 +1999,19 @@ export function createPedestrianSim(animData) {
           ag.state = 'walk_edge';
           continue;
         }
-        ag.feederDistM += ag.speedMps * dt;
+        const nextDist = ag.feederDistM + ag.speedMps * dt;
+        const p = sampleFeederAt(fd, nextDist, ag.feederOutbound);
+        const curHit = findOverlappingVehicle(ag.u, ag.v, 0.3, 1.35);
+        if (curHit) {
+          // Never freeze inside a vehicle footprint — escape laterally onto sidewalk immediately
+          escapeVehicleOverlap(ag);
+          continue;
+        }
+        if (p && isVehicleOccupyingSpot(p.u, p.v)) {
+          continue;
+        }
+        ag.feederDistM = nextDist;
         ag.stridePhase += dt * (ag.speedMps * 5.2);
-        const p = sampleFeederAt(fd, ag.feederDistM, ag.feederOutbound);
         if (p) {
           ag.u = p.u; ag.v = p.v; ag.d16 = p.d16; ag.tx = p.tx; ag.ty = p.ty;
         }
@@ -1801,6 +2170,21 @@ export function createPedestrianSim(animData) {
             prefix = 'Seebad Bather';
           }
 
+          if (ag.role === 'inhabitant' && ag.inhabitantSpec) {
+            const slot = resolveInhabitantSlot(ag.inhabitantSpec, getCurrentMinOfDay());
+            ag.activity = slot.activity || ag.activity;
+            ag.activityLabel = formatActivityLabel(ag.activity);
+            const homeFp = resolvePoiToFp(ag.inhabitantSpec.home && ag.inhabitantSpec.home.poiId, ag.inhabitantSpec.home && ag.inhabitantSpec.home.uv);
+            const targetFp = resolvePoiToFp(slot.targetPoi, null);
+            const nextDst = (curPoi === targetFp && homeFp && homeFp !== curPoi)
+              ? homeFp
+              : ((targetFp && targetFp !== curPoi) ? targetFp : rng.pick(fpNodeList.filter((id) => id !== curPoi)));
+            if (nextDst && assignFootpathTrip(ag, curPoi, nextDst, ag.inhabitantName)) {
+              ag.tripLabel = `${ag.inhabitantName} · ${ag.activityLabel}`;
+            }
+            continue;
+          }
+
           const cands = nextPool.filter((id) => id !== curPoi);
           const nextDst = rng.pick(cands.length > 0 ? cands : fpNodeList.filter((id) => id !== curPoi));
           if (ag.role === 'bus_rider' && nextDst) ag.targetStopPoiId = nextDst;
@@ -1809,7 +2193,30 @@ export function createPedestrianSim(animData) {
         }
 
         const edge = ag.edgeList[ag.edgeIdx];
-        ag.edgeDistM += ag.speedMps * dt;
+        const nextDist = ag.edgeDistM + ag.speedMps * dt;
+        const previewP = sampleEdgeAt(edge, Math.min(nextDist, edge.lengthM));
+        const curHit = findOverlappingVehicle(ag.u, ag.v, 0.3, 1.35);
+        if (curHit) {
+          // Never freeze inside a vehicle footprint (prevents mutual ped-vehicle deadlock)
+          if (previewP) {
+            const nextPm = uvToMeters(previewP.u, previewP.v);
+            const curD2 = (curHit.xM - curHit.veh.xM) ** 2 + (curHit.yM - curHit.veh.yM) ** 2;
+            const nextD2 = (nextPm.xM - curHit.veh.xM) ** 2 + (nextPm.yM - curHit.veh.yM) ** 2;
+            if (nextD2 > curD2 && !findOverlappingVehicle(previewP.u, previewP.v, 0.3, 1.35)) {
+              ag.edgeDistM = nextDist;
+              ag.stridePhase += dt * (ag.role === 'jogger' ? 12.2 : ag.speedMps * 5.2);
+              ag.u = previewP.u; ag.v = previewP.v; ag.d16 = previewP.d16; ag.tx = previewP.tx; ag.ty = previewP.ty;
+              continue;
+            }
+          }
+          escapeVehicleOverlap(ag);
+          continue;
+        }
+        if (previewP && isVehicleOccupyingSpot(previewP.u, previewP.v)) {
+          // Pause briefly at road-footpath crossing until passing vehicle clears
+          continue;
+        }
+        ag.edgeDistM = nextDist;
         ag.stridePhase += dt * (ag.role === 'jogger' ? 12.2 : ag.speedMps * 5.2);
         if (ag.edgeDistM >= edge.lengthM) {
           ag.edgeDistM -= edge.lengthM;
@@ -1818,23 +2225,30 @@ export function createPedestrianSim(animData) {
             const p = sampleEdgeAt(ag.edgeList[ag.edgeIdx], ag.edgeDistM);
             if (p) { ag.u = p.u; ag.v = p.v; ag.d16 = p.d16; ag.tx = p.tx; ag.ty = p.ty; }
           }
-        } else {
-          const p = sampleEdgeAt(edge, ag.edgeDistM);
-          if (p) { ag.u = p.u; ag.v = p.v; ag.d16 = p.d16; ag.tx = p.tx; ag.ty = p.ty; }
+        } else if (previewP) {
+          ag.u = previewP.u; ag.v = previewP.v; ag.d16 = previewP.d16; ag.tx = previewP.tx; ag.ty = previewP.ty;
           maybeTriggerSocialPause(ag);
         }
       }
     }
+
+    // Final safety guarantee: ensure zero ground pedestrians remain inside any vehicle footprint
+    resolveAllVehicleOverlaps();
   }
 
-  function updateToTime(tSec, mode = 'day', transitSnapshot = null) {
+  function updateToTime(tSec, mode = 'day', transitSnapshot = null, liveMode = false) {
     const safeT = Number.isFinite(tSec) ? Math.max(0, Math.min(MAX_SIM_TIME, tSec)) : 0;
     const normMode = normModeName(mode);
 
+    if (transitSnapshot && Array.isArray(transitSnapshot.vehiclePositions)) {
+      lastVehiclePositions = transitSnapshot.vehiclePositions;
+    }
+
+    const canLiveCatchup = !!(liveMode && initialized && normMode === currentMode && safeT >= simTime - 1e-6);
     const needReset = !initialized
       || normMode !== currentMode
       || safeT < simTime - 1e-6
-      || (safeT - simTime) > 2.0;
+      || (!canLiveCatchup && (safeT - simTime) > 2.0);
 
     if (needReset) {
       const tStart = safeT <= 60 ? 0 : Math.floor(safeT - 60);
@@ -1843,6 +2257,16 @@ export function createPedestrianSim(animData) {
       while (simTime + PED_FIXED_DT <= safeT + 1e-9 && guard < 2400) {
         step(PED_FIXED_DT, null);
         guard++;
+      }
+      resolveAllVehicleOverlaps();
+    } else if (canLiveCatchup) {
+      let guard = 0;
+      while (simTime + PED_FIXED_DT <= safeT + 1e-9 && guard < 2) {
+        step(PED_FIXED_DT, transitSnapshot);
+        guard++;
+      }
+      if (safeT - simTime > 0.10) {
+        simTime = safeT;
       }
     } else {
       let guard = 0;
@@ -1941,6 +2365,7 @@ export function createPedestrianSim(animData) {
         pantsCol: ag.pantsCol,
         hairCol: ag.hairCol,
         bagCol: ag.bagCol,
+        hatCol: ag.hatCol || null,
         hasDog: ag.hasDog,
         dogCol: ag.dogCol,
         hasStroller: ag.hasStroller,
@@ -1950,6 +2375,12 @@ export function createPedestrianSim(animData) {
         tripLabel: ag.tripLabel,
         originName: ag.originName,
         destName: ag.destName,
+        inhabitantId: ag.inhabitantId || null,
+        inhabitantName: ag.inhabitantName || null,
+        inhabitantRole: ag.inhabitantRole || null,
+        activity: ag.activity || null,
+        activityLabel: ag.activityLabel || null,
+        homeLabel: ag.homeLabel || null,
       });
     }
     return out;
@@ -1982,9 +2413,73 @@ export function createPedestrianSim(animData) {
         tripLabel: ag.tripLabel,
         originName: ag.originName,
         destName: ag.destName,
+        inhabitantId: ag.inhabitantId || null,
+        inhabitantName: ag.inhabitantName || null,
+        inhabitantRole: ag.inhabitantRole || null,
+        activity: ag.activity || null,
+        activityLabel: ag.activityLabel || null,
+        homeLabel: ag.homeLabel || null,
       });
     }
     return out;
+  }
+
+  function getActivePedestrianPositions() {
+    const out = [];
+    for (let i = 0; i < agents.length; i++) {
+      const ag = agents[i];
+      if (ag.state === 'in_transit') continue;
+      out.push({
+        id: ag.id,
+        u: ag.u,
+        v: ag.v,
+        state: ag.state,
+        onElevatedDeck: !!ag.onElevatedDeck,
+      });
+    }
+    return out;
+  }
+
+  function setInhabitantSpecs(specs) {
+    inhabitantSpecs = Array.isArray(specs) ? specs.slice() : null;
+    if (!initialized) return;
+
+    const specSigById = new Map();
+    if (inhabitantSpecs) {
+      for (let i = 0; i < inhabitantSpecs.length; i++) {
+        const sp = inhabitantSpecs[i];
+        if (sp && sp.id) specSigById.set(sp.id, inhabitantSpecSignature(sp));
+      }
+    }
+
+    // Remove inhabitants that were removed OR overwritten in-place (changed spec signature)
+    for (let i = agents.length - 1; i >= 0; i--) {
+      const ag = agents[i];
+      if (!ag.inhabitantId) continue;
+      if (!specSigById.has(ag.inhabitantId) || ag.inhabitantSpecSig !== specSigById.get(ag.inhabitantId)) {
+        agents.splice(i, 1);
+      }
+    }
+
+    // Spawn newly registered or overwritten inhabitants immediately (visible right away!)
+    if (inhabitantSpecs) {
+      const existingIds = new Set();
+      for (let i = 0; i < agents.length; i++) {
+        if (agents[i].inhabitantId) existingIds.add(agents[i].inhabitantId);
+      }
+      for (let i = 0; i < inhabitantSpecs.length; i++) {
+        const spec = inhabitantSpecs[i];
+        if (!spec || !spec.id || existingIds.has(spec.id)) continue;
+        const arng = createRng(`inhab-hot:${spec.id}:${Math.round(simTime * 10)}`);
+        const newAg = createInhabitantAgent(spec, i, arng, true);
+        escapeVehicleOverlap(newAg);
+        agents.push(newAg);
+      }
+    }
+  }
+
+  function setClockSnapshot(snap) {
+    clockSnapshot = snap || null;
   }
 
   return {
@@ -1993,5 +2488,8 @@ export function createPedestrianSim(animData) {
     getStats,
     getDrawablePedestrians,
     getInspectablePedestrians,
+    getActivePedestrianPositions,
+    setInhabitantSpecs,
+    setClockSnapshot,
   };
 }

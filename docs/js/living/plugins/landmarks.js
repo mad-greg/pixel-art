@@ -115,7 +115,7 @@ export function createLandmarksPlugin() {
             const cy = ctx.toY(rkClock[1]);
             const rDial = 5.4 * s;
             if (rDial >= 2.2) {
-              drawSwissClockDial(targetCtx, cx, cy, rDial, tSec, { mode, style: 'church', s, detailAlpha });
+              drawSwissClockDial(targetCtx, cx, cy, rDial, tSec, { mode, style: 'church', s, detailAlpha, clock: ctx.clock });
             }
             if (!isNight) {
               const spX = ctx.toX(rkSpire[0]);
@@ -365,7 +365,7 @@ export function createLandmarksPlugin() {
               drawLanternGlow(targetCtx, ctx.toX(0.3738), ctx.toY(0.6710), 14.0 * s, isNight, '255,214,102', '#ffe89c', 0.35);
             }
             if (detailAlpha > 0.01) {
-              drawSwissClockDial(targetCtx, ctx.toX(0.3692), ctx.toY(0.6805), 2.4 * s, tSec, { mode, style: 'civic', s, detailAlpha });
+              drawSwissClockDial(targetCtx, ctx.toX(0.3692), ctx.toY(0.6805), 2.4 * s, tSec, { mode, style: 'civic', s, detailAlpha, clock: ctx.clock });
             }
           },
         });
@@ -376,12 +376,19 @@ export function createLandmarksPlugin() {
       if (ctx.boxInView(bpPax[0] - 0.006, bpPax[1] - 0.006, bpPax[0] + 0.007, bpPax[1] + 0.009)) {
         let shipDocked = false;
         let dwellProg = 0;
-        for (const sh of ((animData && animData.ships) || [])) {
-          if (sh.kind === 'zsg_steamer') {
-            const st = evalWithStationStop(tSec, sh.length_m, sh.speed_mps, sh.stop_frac, sh.dwell_sec, sh.phase || 0, 5.0, 6.0);
-            if (st.isDwelling) {
-              shipDocked = true;
-              dwellProg = st.dwellProgress;
+        const vesselSim = ctx.shared && ctx.shared.vesselSim;
+        if (vesselSim && typeof vesselSim.getPierDockState === 'function') {
+          const dockSt = vesselSim.getPierDockState('bendlikon');
+          shipDocked = !!(dockSt && dockSt.docked);
+          dwellProg = (dockSt && Number.isFinite(dockSt.dwellProg)) ? dockSt.dwellProg : 0;
+        } else {
+          for (const sh of ((animData && animData.ships) || [])) {
+            if (sh.kind === 'zsg_steamer') {
+              const st = evalWithStationStop(tSec, sh.length_m, sh.speed_mps, sh.stop_frac, sh.dwell_sec, sh.phase || 0, 5.0, 6.0);
+              if (st.isDwelling) {
+                shipDocked = true;
+                dwellProg = st.dwellProgress;
+              }
             }
           }
         }
@@ -755,7 +762,7 @@ export function createLandmarksPlugin() {
             }
             // Schulhaus Alte Landstrasse (120) Dachreiter cupola clock (Gemeindehaus 110 has NO clock)
             if (detailAlpha > 0.01) {
-              drawSwissClockDial(targetCtx, ctx.toX(ghSchul[0]), ctx.toY(ghSchul[1] - 0.0182), 2.2 * s, tSec, { mode, style: 'civic', s, detailAlpha });
+              drawSwissClockDial(targetCtx, ctx.toX(ghSchul[0]), ctx.toY(ghSchul[1] - 0.0182), 2.2 * s, tSec, { mode, style: 'civic', s, detailAlpha, clock: ctx.clock });
             }
           },
         });

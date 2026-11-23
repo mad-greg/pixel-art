@@ -24,9 +24,11 @@ import { drawMiniPerson } from '../draw.js';
 
 const CW_COATS = ['#c53030', '#2b6cb0', '#2f855a', '#d69e2e', '#6b46c1', '#dd6b20'];
 const CW_HAIRS = ['#2d241c', '#5c4028', '#8a6842', '#3a3430', '#b89458'];
+const LOD_CAR_COLS = ['#e2e8f0', '#cbd5e1', '#94a3b8', '#475569', '#dc2626', '#2563eb', '#1e293b', '#f59e0b'];
 
 export function createTrafficPlugin() {
   let trafficSim = null;
+  let unsubBusSpecs = null;
   let counts = { cars: 0, buses: 0, cyclists: 0 };
   let cachedInspectables = [];
 
@@ -39,7 +41,19 @@ export function createTrafficPlugin() {
     enabledByDefault: true,
 
     init(ctx) {
+      if (unsubBusSpecs) {
+        unsubBusSpecs();
+        unsubBusSpecs = null;
+      }
       trafficSim = ctx.animData ? createTrafficSim(ctx.animData) : null;
+      if (trafficSim && ctx.specs && typeof ctx.specs.getBusRoutes === 'function') {
+        trafficSim.setBusRouteSpecs(ctx.specs.getBusRoutes());
+        if (typeof ctx.specs.onChange === 'function') {
+          unsubBusSpecs = ctx.specs.onChange('bus', () => {
+            if (trafficSim) trafficSim.setBusRouteSpecs(ctx.specs.getBusRoutes());
+          });
+        }
+      }
       ctx.shared.trafficSim = trafficSim;
       counts = { cars: 0, buses: 0, cyclists: 0 };
       cachedInspectables = [];
@@ -52,11 +66,16 @@ export function createTrafficPlugin() {
         if (ctx.shared.pedStats) {
           trafficSim.setExternalPedestrianStats(ctx.shared.pedStats);
         }
+        if (typeof ctx.shared.pedSim.getActivePedestrianPositions === 'function') {
+          trafficSim.setExternalPedestrians(ctx.shared.pedSim.getActivePedestrianPositions());
+        }
       }
+      const isLiveMode = !!(ctx.clock && ctx.clock.clockMode !== 'deterministic');
       ctx.shared.lastSimSnapshot = trafficSim.updateToTime(
         ctx.tSec,
         ctx.mode,
         ctx.shared.occupiedCrosswalks || null,
+        isLiveMode,
       );
     },
 
@@ -98,53 +117,76 @@ export function createTrafficPlugin() {
           ],
         });
 
-        let bounds;
-        if (bItem.type === 'bus_artic') {
-          const hdx = Math.abs(bItem.pFront.wx - bItem.pRear.wx) * 0.5;
-          const hdy = Math.abs(bItem.pFront.wy - bItem.pRear.wy) * 0.5;
-          const nExtra = isNight ? 32 * wScale : (isSunset ? 18 * wScale : 6 * wScale);
-          const yExtra = isNight ? 20 * wScale : (isSunset ? 12 * wScale : 0);
-          bounds = {
-            ex: hdx + 16 * wScale + nExtra,
-            eyUp: hdy + 20 * wScale + yExtra,
-            eyDn: hdy + 10 * wScale + yExtra,
-          };
+        if (s < 0.35) {
+          // Lightweight Fit-zoom LOD marker (avoids ~90 offscreen depthMasked readbacks at s < 0.35)
+          const isArtic = bItem.type === 'bus_artic';
+          drawables.push({
+            layer: 'ground_y',
+            sortY: bItem.pos.wy,
+            depthMasked: false,
+            draw(targetCtx, drawCam) {
+              const sx = bItem.pos.wx * drawCam.scale + drawCam.offsetX;
+              const sy = bItem.pos.wy * drawCam.scale + drawCam.offsetY;
+              if (sx < -16 || sx > drawCam.width + 16 || sy < -16 || sy > drawCam.height + 16) return;
+              const w = Math.max(3, Math.round((isArtic ? 11 : 8) * s));
+              const h = Math.max(2, Math.round(4.5 * s));
+              const x0 = Math.round(sx - w * 0.5);
+              const y0 = Math.round(sy - h * 0.5);
+              targetCtx.fillStyle = isNight ? '#cbd5e1' : '#f8fafc';
+              targetCtx.fillRect(x0, y0, w, h);
+              targetCtx.fillStyle = '#005ca9';
+              targetCtx.fillRect(x0, y0 + h - Math.max(1, Math.round(h * 0.35)), w, Math.max(1, Math.round(h * 0.35)));
+            },
+          });
         } else {
-          const atx = Math.abs(bItem.pos.tx);
-          const aty = Math.abs(bItem.pos.ty);
-          const nExtra = isNight ? 32 * wScale : (isSunset ? 18 * wScale : 4 * wScale);
-          const yExtra = isNight ? 18 * wScale : (isSunset ? 12 * wScale : 0);
-          bounds = {
-            ex: (atx * 24 + 9) * wScale + nExtra,
-            eyUp: (aty * 24 + 16) * wScale + yExtra,
-            eyDn: (aty * 24 + 7) * wScale + yExtra,
-          };
-        }
+          let bounds;
+          if (bItem.type === 'bus_artic') {
+            const hdx = Math.abs(bItem.pFront.wx - bItem.pRear.wx) * 0.5;
+            const hdy = Math.abs(bItem.pFront.wy - bItem.pRear.wy) * 0.5;
+            const nExtra = isNight ? 32 * wScale : (isSunset ? 18 * wScale : 6 * wScale);
+            const yExtra = isNight ? 20 * wScale : (isSunset ? 12 * wScale : 0);
+            bounds = {
+              ex: hdx + 16 * wScale + nExtra,
+              eyUp: hdy + 20 * wScale + yExtra,
+              eyDn: hdy + 10 * wScale + yExtra,
+            };
+          } else {
+            const atx = Math.abs(bItem.pos.tx);
+            const aty = Math.abs(bItem.pos.ty);
+            const nExtra = isNight ? 32 * wScale : (isSunset ? 18 * wScale : 4 * wScale);
+            const yExtra = isNight ? 18 * wScale : (isSunset ? 12 * wScale : 0);
+            bounds = {
+              ex: (atx * 24 + 9) * wScale + nExtra,
+              eyUp: (aty * 24 + 16) * wScale + yExtra,
+              eyDn: (aty * 24 + 7) * wScale + yExtra,
+            };
+          }
 
-        drawables.push({
-          layer: 'ground_y',
-          sortY: bItem.pos.wy,
-          depthMasked: true,
-          wx: bItem.pos.wx,
-          wy: bItem.pos.wy,
-          bounds,
-          d16: bItem.pos.d16,
-          extraVertPx: 6.5,
-          draw(targetCtx, drawCam) {
-            if (bItem.type === 'bus_artic') {
-              draw3DArticulatedBus(
-                targetCtx, drawCam,
-                bItem.pRear, bItem.pMidRear, bItem.pMidFront, bItem.pFront,
-                wScale, mode, tSec, bItem.speedRatio, bItem.isDwelling, bItem.signals,
-              );
-            } else {
-              draw3DBus(
-                targetCtx, drawCam,
-                bItem.pos, wScale, mode, tSec, bItem.speedRatio, bItem.isDwelling, routeNum, bItem.signals,
-              );
-            }
-          },
-        });
+          drawables.push({
+            layer: 'ground_y',
+            sortY: bItem.pos.wy,
+            depthMasked: true,
+            wx: bItem.pos.wx,
+            wy: bItem.pos.wy,
+            bounds,
+            d16: bItem.pos.d16,
+            extraVertPx: 6.5,
+            draw(targetCtx, drawCam) {
+              if (bItem.type === 'bus_artic') {
+                draw3DArticulatedBus(
+                  targetCtx, drawCam,
+                  bItem.pRear, bItem.pMidRear, bItem.pMidFront, bItem.pFront,
+                  wScale, mode, tSec, bItem.speedRatio, bItem.isDwelling, bItem.signals,
+                );
+              } else {
+                draw3DBus(
+                  targetCtx, drawCam,
+                  bItem.pos, wScale, mode, tSec, bItem.speedRatio, bItem.isDwelling, routeNum, bItem.signals,
+                );
+              }
+            },
+          });
+        }
       }
 
       // 2. Passenger Cars & Swiss Delivery Vans (extraVertPx = 3.0)
@@ -173,29 +215,54 @@ export function createTrafficPlugin() {
           ],
         });
 
-        const atx = Math.abs(cItem.pos.tx);
-        const aty = Math.abs(cItem.pos.ty);
-        const nExtra = isNight ? 24 * wScale : (isSunset ? 16 * wScale : 4 * wScale);
-        const yExtra = isNight ? 14 * wScale : (isSunset ? 10 * wScale : 2 * wScale);
-        const bounds = {
-          ex: (atx * 12 + 7) * wScale + nExtra,
-          eyUp: (aty * 12 + 11) * wScale + yExtra,
-          eyDn: (aty * 12 + 6) * wScale + yExtra,
-        };
+        if (s < 0.35) {
+          // Lightweight Fit-zoom LOD marker (skips offscreen depthMasked readbacks at s < 0.35)
+          const col = LOD_CAR_COLS[Math.abs(cItem.colorIdx || 0) % LOD_CAR_COLS.length];
+          drawables.push({
+            layer: 'ground_y',
+            sortY: cItem.pos.wy,
+            depthMasked: false,
+            draw(targetCtx, drawCam) {
+              const sx = cItem.pos.wx * drawCam.scale + drawCam.offsetX;
+              const sy = cItem.pos.wy * drawCam.scale + drawCam.offsetY;
+              if (sx < -12 || sx > drawCam.width + 12 || sy < -12 || sy > drawCam.height + 12) return;
+              const w = Math.max(2, Math.round(5.0 * s));
+              const h = Math.max(2, Math.round(3.2 * s));
+              const x0 = Math.round(sx - w * 0.5);
+              const y0 = Math.round(sy - h * 0.5);
+              targetCtx.fillStyle = col;
+              targetCtx.fillRect(x0, y0, w, h);
+              if (isNight || isSunset) {
+                targetCtx.fillStyle = isNight ? '#fef08a' : '#fde68a';
+                targetCtx.fillRect(Math.round(sx + cItem.pos.tx * w * 0.5), Math.round(sy + cItem.pos.ty * h * 0.5), 1, 1);
+              }
+            },
+          });
+        } else {
+          const atx = Math.abs(cItem.pos.tx);
+          const aty = Math.abs(cItem.pos.ty);
+          const nExtra = isNight ? 24 * wScale : (isSunset ? 16 * wScale : 4 * wScale);
+          const yExtra = isNight ? 14 * wScale : (isSunset ? 10 * wScale : 2 * wScale);
+          const bounds = {
+            ex: (atx * 12 + 7) * wScale + nExtra,
+            eyUp: (aty * 12 + 11) * wScale + yExtra,
+            eyDn: (aty * 12 + 6) * wScale + yExtra,
+          };
 
-        drawables.push({
-          layer: 'ground_y',
-          sortY: cItem.pos.wy,
-          depthMasked: true,
-          wx: cItem.pos.wx,
-          wy: cItem.pos.wy,
-          bounds,
-          d16: cItem.pos.d16,
-          extraVertPx: 3.0,
-          draw(targetCtx, drawCam) {
-            draw3DCar(targetCtx, drawCam, cItem.pos, cItem.colorIdx, wScale, mode, tSec, cItem.signals);
-          },
-        });
+          drawables.push({
+            layer: 'ground_y',
+            sortY: cItem.pos.wy,
+            depthMasked: true,
+            wx: cItem.pos.wx,
+            wy: cItem.pos.wy,
+            bounds,
+            d16: cItem.pos.d16,
+            extraVertPx: 3.0,
+            draw(targetCtx, drawCam) {
+              draw3DCar(targetCtx, drawCam, cItem.pos, cItem.colorIdx, wScale, mode, tSec, cItem.signals);
+            },
+          });
+        }
       }
 
       // 3. Grade-aware Cyclists & Fallback Crosswalk Walkers (extraVertPx = 2.0)
@@ -341,6 +408,10 @@ export function createTrafficPlugin() {
     },
 
     destroy() {
+      if (unsubBusSpecs) {
+        unsubBusSpecs();
+        unsubBusSpecs = null;
+      }
       trafficSim = null;
       cachedInspectables = [];
     },

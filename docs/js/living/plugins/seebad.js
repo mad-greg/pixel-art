@@ -121,7 +121,8 @@ export function createSeebadPlugin() {
             draw(targetCtx) {
               const px = Math.max(1.2, 1.3 * s);
               for (let sw = 0; sw < 3; sw++) {
-                const prog = 0.5 + 0.5 * Math.sin(tSec * (0.28 + sw * 0.05) + sw * 2.1);
+                // Realistic 0.85–1.05 m/s pool lap swimming
+                const prog = 0.5 + 0.5 * Math.sin(tSec * (0.16 + sw * 0.024) + sw * 2.1);
                 const su = seebadPool[0] - 0.0019 + prog * 0.0028 + sw * 0.0005;
                 const sv = seebadPool[1] - 0.0023 + (1 - prog) * 0.0018 + sw * 0.0013;
                 const sx = ctx.toX(su);
@@ -169,8 +170,17 @@ export function createSeebadPlugin() {
 
         // Jetty bathers (ground_y, depth-masked, extraVertPx: 2.0)
         if (ctx.boxInView(seebadJetty[0][0] - 0.003, seebadJetty[0][1] - 0.003, seebadJetty[1][0] + 0.004, seebadJetty[1][1] + 0.004)) {
+          // Non-overlapping stroll zones along jetty so bathers maintain personal space
+          const batherBands = [
+            [0.10, 0.24],
+            [0.29, 0.43],
+            [0.48, 0.62],
+            [0.67, 0.80],
+          ];
           for (let jb = 0; jb < 4; jb++) {
-            const f = 0.14 + 0.68 * (0.5 + 0.5 * Math.sin(tSec * (0.11 + jb * 0.03) + jb * 1.7));
+            const [bMin, bMax] = batherBands[jb];
+            const phaseAng = tSec * (0.14 + jb * 0.025) + jb * 1.7;
+            const f = bMin + (bMax - bMin) * (0.5 + 0.5 * Math.sin(phaseAng));
             const ju = seebadJetty[0][0] + (seebadJetty[1][0] - seebadJetty[0][0]) * f;
             const jv = seebadJetty[0][1] + (seebadJetty[1][1] - seebadJetty[0][1]) * f;
             const wx = ju * worldW;
@@ -180,7 +190,7 @@ export function createSeebadPlugin() {
               : 0;
             const coat = shadeHex(COATS[(jb + 2) % COATS.length], 1.0, mode);
             const hair = HAIRS[jb % HAIRS.length];
-            const stride = tSec * 6.5 + jb;
+            const stride = Math.abs(Math.cos(phaseAng)) > 0.15 ? (tSec * 3.8 + jb) : 0;
 
             drawables.push({
               layer: 'ground_y',
@@ -376,7 +386,8 @@ export function createSeebadPlugin() {
         // ── 3. Open-Lake Swimmers (isWaterUV-strict) ──
         if (ctx.boxInView(0.421, 0.721, 0.432, 0.734)) {
           for (let ls = 0; ls < 2; ls++) {
-            const ang = tSec * (0.32 + ls * 0.08) + ls * 3.1;
+            // Realistic 0.75–0.90 m/s open-lake swimming
+            const ang = tSec * (0.115 + ls * 0.016) + ls * 3.1;
             const lsu = 0.4275 + Math.cos(ang) * 0.0022;
             const lsv = 0.7272 + Math.sin(ang) * 0.0024;
             if (!isStrictWater(lsu, lsv)) continue;

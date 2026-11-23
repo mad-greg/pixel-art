@@ -3,8 +3,7 @@ import { createCameraController } from './js/camera.js';
 import { createTileManager } from './js/tiles.js';
 import { createDepthManager } from './js/render/depth.js';
 import { evalBellState } from './js/sim/schedule.js';
-import { createLivingEngine } from './js/living/engine.js';
-import { registerDefaultPlugins } from './js/living/plugins/index.js';
+import { createKilchbergLivingRuntime } from './js/living/index.js';
 
   const canvas = document.getElementById('diorama-canvas');
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -22,8 +21,12 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
   const fixedAnimTime = Number.isFinite(rawFixedT)
     ? Math.max(0, Math.min(1e9, rawFixedT))
     : null;
+  const rawModeParam = urlParams.get('mode');
+  const explicitMode = urlParams.has('mode')
+    ? (['day', 'sunset', 'night'].includes(rawModeParam) ? rawModeParam : 'day')
+    : null;
 
-  const ASSET_VER = '13.0';
+  const ASSET_VER = '14.0';
   const MAX_CACHED_TILES = 128;
   const MODE_BACKDROPS = {
     day: '#1b2b42',
@@ -39,10 +42,37 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
   function formatMppCm(mpp) {
     return `${(mpp * 100).toFixed(1).replace(/\.0$/, '')} cm/px`;
   }
-  const livingEngine = registerDefaultPlugins(createLivingEngine());
+  const initialClockOpts = fixedAnimTime !== null
+    ? {
+      mode: 'deterministic',
+      tSec: fixedAnimTime,
+      preset: explicitMode || 'day',
+      presetOverride: 'auto',
+    }
+    : {
+      mode: 'live',
+      presetOverride: explicitMode || 'auto',
+    };
+  const livingRuntime = createKilchbergLivingRuntime({
+    clockOpts: initialClockOpts,
+    initialTSec: fixedAnimTime !== null ? fixedAnimTime : 0,
+  });
+  const livingEngine = livingRuntime.engine;
+  const kilchbergClock = livingRuntime.clock;
+  const specRegistry = livingRuntime.specs;
+  if (fixedAnimTime !== null) {
+    kilchbergClock.setDeterministic(fixedAnimTime, explicitMode || 'day');
+    if (livingEngine._ctx) {
+      livingEngine._ctx.clock = kilchbergClock.sample(Date.now(), fixedAnimTime);
+    }
+  }
+  const initClockSnap = livingRuntime.getClockSnapshot(fixedAnimTime !== null ? fixedAnimTime : 0);
   let livingInitialized = false;
+  let liveAnimSec = 0;
 
-  let currentMode = 'day';
+  let currentMode = fixedAnimTime !== null
+    ? (explicitMode || 'day')
+    : (explicitMode || initClockSnap.effectivePreset || 'day');
   let meta = null;
   let animData = null;
 
@@ -88,6 +118,7 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
   let lastScaleBarPx = -1;
   let lastScaleBarLabel = '';
   let lastMinimapKey = '';
+  let lastClockHudKey = '';
   let lastReplaceStateMs = 0;
 
   function safeReplaceState(url) {
@@ -1183,68 +1214,156 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
     });
   }
 
+  async function switchLightingMode(nextMode) {
+    if (!['day', 'sunset', 'night'].includes(nextMode)) return;
+    if (nextMode === currentMode) return;
+    const myGen = ++modeSwitchGen;
+    if (!modeSwitchAnchor) {
+      const prevWorld = getWorldSize();
+      const centerU = ((canvas.width / 2) - camState.offsetX) / (camState.scale * prevWorld.width);
+      const centerV = ((canvas.height / 2) - camState.offsetY) / (camState.scale * prevWorld.height);
+      const relZoom = camState.scale * prevWorld.width;
+      modeSwitchAnchor = { centerU, centerV, relZoom };
+    }
+    camCtrl.cancelMotion();
+
+    // Snapshot previous canvas for smooth 220 ms crossfade (bypassed when fixedAnimTime !== null).
+    // Preserve the original settled snapshot across overlapping rapid mode switches.
+    if (fixedAnimTime === null && canvas.width > 0 && canvas.height > 0) {
+      if (!modeFade || modeFade.ready) {
+        if (!modeFadeCanvas) modeFadeCanvas = document.createElement('canvas');
+        if (modeFadeCanvas.width !== canvas.width || modeFadeCanvas.height !== canvas.height) {
+          modeFadeCanvas.width = canvas.width;
+          modeFadeCanvas.height = canvas.height;
+        }
+        const fctx = modeFadeCanvas.getContext('2d');
+        fctx.drawImage(canvas, 0, 0);
+      }
+      modeFade = { startMs: 0, durationMs: 220, ready: false };
+    } else {
+      modeFade = null;
+    }
+
+    document.querySelectorAll('.seg-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.mode === nextMode);
+    });
+    currentMode = nextMode;
+    tileMgr.setMode(currentMode);
+    document.body.dataset.mode = currentMode;
+    if (animData && livingInitialized) {
+      livingEngine.update(getAnimTimeSec(), 0.016, currentMode);
+    }
+    // Recompute audio gain targets immediately (crickets/birds balance) rather than waiting for the throttle
+    audioEngine.forceUpdate();
+    viewport.classList.add('mode-switching');
+    await Promise.all([loadModeOverview(nextMode), loadTileManifest(nextMode)]);
+    if (myGen !== modeSwitchGen) return;
+    viewport.classList.remove('mode-switching');
+
+    const anchor = modeSwitchAnchor;
+    modeSwitchAnchor = null;
+    const nextWorld = getWorldSize();
+    if (anchor) {
+      const nextScale = anchor.relZoom / nextWorld.width;
+      camState.scale = nextScale;
+      camState.targetScale = nextScale;
+      camState.offsetX = (canvas.width / 2) - anchor.centerU * nextWorld.width * nextScale;
+      camState.offsetY = (canvas.height / 2) - anchor.centerV * nextWorld.height * nextScale;
+    }
+    if (modeFade) {
+      modeFade.startMs = performance.now();
+      modeFade.ready = true;
+    }
+    updateZoomReadout();
+    scheduleDraw();
+  }
+
+  const clockTimeEl = document.getElementById('clock-time');
+  const clockTzEl = document.getElementById('clock-tz');
+  const clockDotEl = document.getElementById('clock-dot');
+  const clockScrubEl = document.getElementById('clock-scrub');
+  const btnClockLiveEl = document.getElementById('btn-clock-live');
+  const clockToggleBtn = document.getElementById('clock-pill-toggle');
+  const clockScrubPanel = document.getElementById('clock-scrub-panel');
+
+  function updateClockHud(force = false, snapOverride = null) {
+    const snap = snapOverride || livingRuntime.getClockSnapshot(getAnimTimeSec());
+    if (!snap) return;
+    const hudKey = `${snap.formattedHHMM}|${snap.tzLabel}|${snap.clockMode}`;
+    if (!force && hudKey === lastClockHudKey) return;
+    lastClockHudKey = hudKey;
+    if (clockTimeEl) clockTimeEl.textContent = snap.formattedHHMM;
+    if (clockTzEl) clockTzEl.textContent = snap.tzLabel;
+    if (clockDotEl) {
+      clockDotEl.classList.toggle('live', snap.clockMode === 'live');
+      clockDotEl.classList.toggle('manual', snap.clockMode === 'manual');
+      clockDotEl.classList.toggle('deterministic', snap.clockMode === 'deterministic');
+    }
+    if (clockScrubEl && document.activeElement !== clockScrubEl) {
+      clockScrubEl.value = String((snap.hours * 60) + snap.minutes);
+    }
+    if (btnClockLiveEl) {
+      btnClockLiveEl.classList.toggle('active', snap.clockMode === 'live');
+    }
+  }
+
+  function syncClockMutation(triggerAutoPreset = true) {
+    const tNow = getAnimTimeSec();
+    const snap = kilchbergClock.sample(Date.now(), tNow);
+    if (livingEngine._ctx) {
+      livingEngine._ctx.clock = snap;
+    }
+    if (triggerAutoPreset && fixedAnimTime === null && snap.effectivePreset && snap.effectivePreset !== currentMode) {
+      switchLightingMode(snap.effectivePreset);
+    } else if (animData && livingInitialized) {
+      livingEngine.update(tNow, 0.016, currentMode);
+    }
+    updateClockHud(true, snap);
+    scheduleDraw();
+    return snap;
+  }
+
+  if (clockToggleBtn && clockScrubPanel) {
+    clockToggleBtn.addEventListener('click', () => {
+      const hidden = clockScrubPanel.classList.toggle('hidden');
+      clockToggleBtn.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+    });
+  }
+  if (clockScrubEl) {
+    clockScrubEl.addEventListener('input', () => {
+      kilchbergClock.setMode('manual');
+      kilchbergClock.setPresetOverride('auto');
+      kilchbergClock.setManualMinutes(Number(clockScrubEl.value));
+      syncClockMutation(true);
+    });
+  }
+  if (btnClockLiveEl) {
+    btnClockLiveEl.addEventListener('click', () => {
+      kilchbergClock.setMode('live');
+      kilchbergClock.setPresetOverride('auto');
+      syncClockMutation(true);
+    });
+  }
+
+  specRegistry.onChange('*', () => {
+    if (animData && livingInitialized) {
+      livingEngine.update(getAnimTimeSec(), 0.016, currentMode);
+    }
+    scheduleDraw();
+    if (showAnimations && animData && fixedAnimTime === null) {
+      startAnimLoop();
+    }
+  });
+
   document.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const nextMode = btn.dataset.mode;
-      if (nextMode === currentMode) return;
-      const myGen = ++modeSwitchGen;
-      if (!modeSwitchAnchor) {
-        const prevWorld = getWorldSize();
-        const centerU = ((canvas.width / 2) - camState.offsetX) / (camState.scale * prevWorld.width);
-        const centerV = ((canvas.height / 2) - camState.offsetY) / (camState.scale * prevWorld.height);
-        const relZoom = camState.scale * prevWorld.width;
-        modeSwitchAnchor = { centerU, centerV, relZoom };
-      }
-      camCtrl.cancelMotion();
-
-      // Snapshot previous canvas for smooth 220 ms crossfade (bypassed when fixedAnimTime !== null).
-      // Preserve the original settled snapshot across overlapping rapid mode switches.
-      if (fixedAnimTime === null && canvas.width > 0 && canvas.height > 0) {
-        if (!modeFade || modeFade.ready) {
-          if (!modeFadeCanvas) modeFadeCanvas = document.createElement('canvas');
-          if (modeFadeCanvas.width !== canvas.width || modeFadeCanvas.height !== canvas.height) {
-            modeFadeCanvas.width = canvas.width;
-            modeFadeCanvas.height = canvas.height;
-          }
-          const fctx = modeFadeCanvas.getContext('2d');
-          fctx.drawImage(canvas, 0, 0);
-        }
-        modeFade = { startMs: 0, durationMs: 220, ready: false };
-      } else {
-        modeFade = null;
-      }
-
-      document.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentMode = nextMode;
-      tileMgr.setMode(currentMode);
-      document.body.dataset.mode = currentMode;
-      if (animData && livingInitialized) {
-        livingEngine.update(getAnimTimeSec(), 0.016, currentMode);
-      }
-      // Recompute audio gain targets immediately (crickets/birds balance) rather than waiting for the throttle
-      audioEngine.forceUpdate();
-      viewport.classList.add('mode-switching');
-      await Promise.all([loadModeOverview(nextMode), loadTileManifest(nextMode)]);
-      if (myGen !== modeSwitchGen) return;
-      viewport.classList.remove('mode-switching');
-
-      const anchor = modeSwitchAnchor;
-      modeSwitchAnchor = null;
-      const nextWorld = getWorldSize();
-      if (anchor) {
-        const nextScale = anchor.relZoom / nextWorld.width;
-        camState.scale = nextScale;
-        camState.targetScale = nextScale;
-        camState.offsetX = (canvas.width / 2) - anchor.centerU * nextWorld.width * nextScale;
-        camState.offsetY = (canvas.height / 2) - anchor.centerV * nextWorld.height * nextScale;
-      }
-      if (modeFade) {
-        modeFade.startMs = performance.now();
-        modeFade.ready = true;
-      }
-      updateZoomReadout();
-      scheduleDraw();
+      if (!['day', 'sunset', 'night'].includes(nextMode)) return;
+      kilchbergClock.setPresetOverride(nextMode);
+      const snap = kilchbergClock.sample(Date.now(), getAnimTimeSec());
+      if (livingEngine._ctx) livingEngine._ctx.clock = snap;
+      updateClockHud(true, snap);
+      await switchLightingMode(nextMode);
     });
   });
 
@@ -1297,7 +1416,7 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
   };
 
   function getAnimTimeSec() {
-    return fixedAnimTime !== null ? fixedAnimTime : performance.now() * 0.001;
+    return fixedAnimTime !== null ? fixedAnimTime : liveAnimSec;
   }
 
   function showFollowInspector(kind) {
@@ -1445,8 +1564,16 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
     // Step modular LivingEngine ONCE per frame (pedestrians -> traffic -> remaining plugins)
     let animSec = null;
     if (animData && livingInitialized) {
+      if (fixedAnimTime === null && showAnimations) {
+        liveAnimSec += dt;
+      }
       animSec = getAnimTimeSec();
       livingEngine.update(animSec, dt, currentMode);
+      const clockSnap = livingRuntime.getClockSnapshot(animSec);
+      updateClockHud(false, clockSnap);
+      if (fixedAnimTime === null && clockSnap && clockSnap.effectivePreset && clockSnap.effectivePreset !== currentMode) {
+        switchLightingMode(clockSnap.effectivePreset);
+      }
       if (followTarget) {
         updateFollowCamera(animSec, false, dt, false);
       }
@@ -1551,12 +1678,15 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
   if (urlParams.get('cinema') === '1') {
     setCinemaMode(true);
   }
-  const initMode = ['day', 'sunset', 'night'].includes(urlParams.get('mode')) ? urlParams.get('mode') : 'day';
-  // Always normalise the preset (malformed ?mode= falls back to day) & expose it for atmospheric theming
+  const initMode = fixedAnimTime !== null
+    ? (explicitMode || 'day')
+    : (explicitMode || initClockSnap.effectivePreset || 'day');
+  // Always normalise the preset (malformed ?mode= falls back to live solar preset or day under ?t=)
   currentMode = initMode;
   tileMgr.setMode(currentMode);
   document.body.dataset.mode = currentMode;
   document.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === currentMode));
+  updateClockHud(true, initClockSnap);
   resizeViewport();
 
   // ---------------------------------------------------------------------------
@@ -1835,7 +1965,11 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
     if (animData) {
       livingEngine.init(animData, meta, depthMgr);
       livingInitialized = true;
-      livingEngine.update(getAnimTimeSec(), 0.016, currentMode);
+      if (fixedAnimTime !== null) {
+        livingRuntime.warmupToTime(fixedAnimTime, currentMode);
+      } else {
+        livingEngine.update(0, 0.016, currentMode);
+      }
     }
     populateSidebar();
     resizeViewport(true);
@@ -1897,11 +2031,13 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
           minBusGapM: 999,
           clippingCount: 0,
           overlapCount: 0,
+          pedVehicleOverlapCount: 0,
           cyclists: 0,
         };
       const tStats = tileMgr.getStats();
       const cssZoom = camState.scale / dpr;
       const lrStats = livingEngine.getEngineStats();
+      const clockSnap = livingRuntime.getClockSnapshot(tNow);
       return {
         mode: currentMode,
         zoom: cssZoom,
@@ -1929,6 +2065,33 @@ import { registerDefaultPlugins } from './js/living/plugins/index.js';
         depthStats: depthMgr.getDepthStats(),
         livingCounts: livingEngine.getLivingCounts(),
         simStats,
+        clock: {
+          ...clockSnap,
+          setMode(mode) {
+            const res = kilchbergClock.setMode(mode);
+            syncClockMutation(true);
+            return res;
+          },
+          setManualMinutes(minutesOfDay) {
+            const res = kilchbergClock.setManualMinutes(minutesOfDay);
+            syncClockMutation(true);
+            return res;
+          },
+          setPresetOverride(preset) {
+            const res = kilchbergClock.setPresetOverride(preset);
+            syncClockMutation(true);
+            return res;
+          },
+          setSpeedMultiplier(mult) {
+            const res = kilchbergClock.setSpeedMultiplier(mult);
+            syncClockMutation(false);
+            return res;
+          },
+        },
+        specs: specRegistry,
+        railTelemetry: livingRuntime.getRailTelemetry(),
+        sportsTelemetry: livingRuntime.getSportsTelemetry(),
+        vesselTelemetry: livingRuntime.getVesselTelemetry(),
         livingRegistry: {
           ...lrStats,
           register(plugin) {

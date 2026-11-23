@@ -5,6 +5,8 @@
 
 import { hashString, mulberry32 } from '../sim/rng.js';
 import { evalBellState, getWindVector } from '../sim/schedule.js';
+import { createSpatialGrid } from '../sim/spatial.js';
+import { createDefaultKilchbergRegistry } from '../specs/registry.js';
 import { getLivingDiurnalProfile } from './diurnal.js';
 
 const DEFAULT_CAM = {
@@ -16,7 +18,8 @@ const DEFAULT_CAM = {
   dpr: 1,
 };
 
-export function createLivingContext() {
+export function createLivingContext(opts = {}) {
+  const safeOpts = (opts && typeof opts === 'object') ? opts : {};
   const ctx = {
     animData: null,
     meta: null,
@@ -32,6 +35,9 @@ export function createLivingContext() {
     isNight: false,
     isSunset: false,
     fixedAnimTime: null,
+    clock: safeOpts.clock || null,
+    _clockSource: safeOpts.clockSource || null,
+    specs: safeOpts.specs || createDefaultKilchbergRegistry(),
     diurnal: getLivingDiurnalProfile('day'),
     wind: getWindVector(0),
     bell: evalBellState(0, 'day'),
@@ -51,6 +57,14 @@ export function createLivingContext() {
       dwellingStops: null,
       occupiedCrosswalks: null,
       pedStats: null,
+      spatialGrid: safeOpts.spatialGrid || createSpatialGrid(16),
+      vesselSim: null,
+      sportsSim: null,
+      railTelemetry: {
+        activeTrains: 0,
+        passingNow: false,
+        trackInterleaveViolations: 0,
+      },
     },
     toX(u) {
       return u * ctx.worldW * ctx.cam.scale + ctx.cam.offsetX;
@@ -72,7 +86,7 @@ export function createLivingContext() {
   return ctx;
 }
 
-export function updateContextTime(ctx, tSec, dt, mode) {
+export function updateContextTime(ctx, tSec, dt, mode, clockSnapshot = undefined) {
   const safeT = Number.isFinite(tSec) ? tSec : 0;
   const safeDt = Number.isFinite(dt) ? dt : 0.016;
   const normMode = (mode === 'night' || mode === 'sunset') ? mode : 'day';
@@ -81,6 +95,11 @@ export function updateContextTime(ctx, tSec, dt, mode) {
   ctx.mode = normMode;
   ctx.isNight = normMode === 'night';
   ctx.isSunset = normMode === 'sunset';
+  if (clockSnapshot !== undefined) {
+    ctx.clock = clockSnapshot;
+  } else if (ctx._clockSource && typeof ctx._clockSource.sample === 'function') {
+    ctx.clock = ctx._clockSource.sample(Date.now(), safeT);
+  }
   ctx.diurnal = getLivingDiurnalProfile(normMode);
   ctx.wind = getWindVector(safeT);
   ctx.bell = evalBellState(safeT, normMode);
@@ -98,11 +117,16 @@ export function updateContextFrame(ctx, params) {
     dt = ctx.dt,
     mode = ctx.mode,
     fixedAnimTime = ctx.fixedAnimTime,
+    clock = undefined,
+    specs = undefined,
   } = params;
 
   ctx.animData = animData;
   ctx.meta = meta;
   ctx.depthMgr = depthMgr;
+  if (specs !== undefined) {
+    ctx.specs = specs;
+  }
   ctx.worldW = worldW > 0 ? worldW : 27971;
   ctx.worldH = worldH > 0 ? worldH : 12294;
   ctx.mppMaster = (animData && typeof animData.mpp === 'number' && animData.mpp > 0) ? animData.mpp : 0.11;
@@ -111,7 +135,7 @@ export function updateContextFrame(ctx, params) {
   ctx.wScale = (ctx.worldW / Math.max(1, masterW)) * ctx.resFactor;
   ctx.fixedAnimTime = fixedAnimTime;
 
-  updateContextTime(ctx, tSec, dt, mode);
+  updateContextTime(ctx, tSec, dt, mode, clock);
 
   const safeCam = cam || DEFAULT_CAM;
   ctx.cam = safeCam;
@@ -133,3 +157,6 @@ export function updateContextFrame(ctx, params) {
 
   return ctx;
 }
+
+export { updateContextFrame as updateLivingContext };
+

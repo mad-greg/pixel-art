@@ -53,6 +53,7 @@ TIER_SUITES: dict[int, List[Tuple[str, List[str], Path]]] = {
         ("tier2_browser_bounds", ["node"], REPO_ROOT / "tests" / "tier2_browser_bounds.mjs"),
         ("tier2_smoothness", ["node"], REPO_ROOT / "tests" / "tier2_smoothness.mjs"),
         ("tier2_v13_living", ["node"], REPO_ROOT / "tests" / "tier2_v13_living.mjs"),
+        ("tier2_v14_simulation", ["node"], REPO_ROOT / "tests" / "tier2_v14_simulation.mjs"),
     ],
     3: [
         ("tier3_combinations", ["node"], REPO_ROOT / "tests" / "tier3_combinations.mjs"),

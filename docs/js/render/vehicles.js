@@ -1217,20 +1217,28 @@ export function draw3DTrainUnit(targetCtx, cam, pRear, pFront, kind, variant, wS
   ].map(([x, y]) => [x + shOff[0], y + shOff[1]]), isNight ? 'rgba(6,10,20,0.68)' : 'rgba(20,24,32,0.48)');
 
   if (nextRear && nextFront) {
-    const bNext = makeTwoPointIsoBasis(cam, nextRear, nextFront, hl, wScale);
-    const gw = hw * 0.78;
-    fillPoly(targetCtx, [
-      b.proj(-hl, sideSign * gw, zSkirt),
-      bNext.proj(hl, sideSign * gw, zSkirt),
-      bNext.proj(hl, sideSign * gw, zEave - 0.4),
-      b.proj(-hl, sideSign * gw, zEave - 0.4),
-    ], shadeHex('#2c323b', 0.85, mode), outlineCol, lw * 0.8);
-    fillPoly(targetCtx, [
-      b.proj(-hl, -gw, zEave - 0.4),
-      bNext.proj(hl, -gw, zEave - 0.4),
-      bNext.proj(hl, gw, zEave - 0.4),
-      b.proj(-hl, gw, zEave - 0.4),
-    ], shadeHex('#3e4652', 0.95, mode), outlineCol, lw * 0.8);
+    const myMidWy = (pRear.wy + pFront.wy) * 0.5;
+    const adjMidWy = (nextRear.wy + nextFront.wy) * 0.5;
+    if (adjMidWy <= myMidWy + 0.01) {
+      const bNext = makeTwoPointIsoBasis(cam, nextRear, nextFront, hl, wScale);
+      const gw = hw * 0.78;
+      const dRearToFront = Math.hypot(pRear.wx - nextFront.wx, pRear.wy - nextFront.wy);
+      const dFrontToRear = Math.hypot(pFront.wx - nextRear.wx, pFront.wy - nextRear.wy);
+      const myEnd = dRearToFront <= dFrontToRear ? -hl : hl;
+      const adjEnd = dRearToFront <= dFrontToRear ? hl : -hl;
+      fillPoly(targetCtx, [
+        b.proj(myEnd, sideSign * gw, zSkirt),
+        bNext.proj(adjEnd, sideSign * gw, zSkirt),
+        bNext.proj(adjEnd, sideSign * gw, zEave - 0.4),
+        b.proj(myEnd, sideSign * gw, zEave - 0.4),
+      ], shadeHex('#2c323b', 0.85, mode), outlineCol, lw * 0.8);
+      fillPoly(targetCtx, [
+        b.proj(myEnd, -gw, zEave - 0.4),
+        bNext.proj(adjEnd, -gw, zEave - 0.4),
+        bNext.proj(adjEnd, gw, zEave - 0.4),
+        b.proj(myEnd, gw, zEave - 0.4),
+      ], shadeHex('#3e4652', 0.95, mode), outlineCol, lw * 0.8);
+    }
   }
 
   const sideShade = b.dirShade(0, sideSign);

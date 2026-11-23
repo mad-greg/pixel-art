@@ -18,20 +18,23 @@
  */
 
 import { drawPixelRectWorld, shadeHex } from '../../render/vehicles.js';
+import { metersToUv, uvToMeters } from '../../sim/spatial.js';
 import { drawWaterRipples } from '../draw.js';
 
+// Calibrated realistic mute swan cruising speed (0.65–0.85 m/s)
 const SWAN_LOOPS = [
-  { id: 'swan:bendlikon_1', cu: 0.5960, cv: 0.5915, ru: 0.0042, rv: 0.0036, spd: 0.14, ph: 0.0, cygnets: 2 },
-  { id: 'swan:bendlikon_2', cu: 0.6005, cv: 0.5955, ru: 0.0038, rv: 0.0033, spd: 0.14, ph: 0.35, cygnets: 0 },
-  { id: 'swan:seebad_1', cu: 0.4400, cv: 0.7285, ru: 0.0036, rv: 0.0032, spd: 0.16, ph: 1.4, cygnets: 1 },
-  { id: 'swan:seebad_2', cu: 0.4440, cv: 0.7315, ru: 0.0034, rv: 0.0030, spd: 0.16, ph: 1.85, cygnets: 0 },
-  { id: 'swan:sulzergut', cu: 0.6960, cv: 0.5370, ru: 0.0040, rv: 0.0034, spd: 0.13, ph: 3.1, cygnets: 1 },
+  { id: 'swan:bendlikon_1', cu: 0.5960, cv: 0.5915, ru: 0.0042, rv: 0.0036, spd: 0.058, ph: 0.0, cygnets: 2 },
+  { id: 'swan:bendlikon_2', cu: 0.6005, cv: 0.5955, ru: 0.0038, rv: 0.0033, spd: 0.060, ph: 0.35, cygnets: 0 },
+  { id: 'swan:seebad_1', cu: 0.4400, cv: 0.7285, ru: 0.0036, rv: 0.0032, spd: 0.062, ph: 1.4, cygnets: 1 },
+  { id: 'swan:seebad_2', cu: 0.4440, cv: 0.7315, ru: 0.0034, rv: 0.0030, spd: 0.064, ph: 1.85, cygnets: 0 },
+  { id: 'swan:sulzergut', cu: 0.6960, cv: 0.5370, ru: 0.0040, rv: 0.0034, spd: 0.054, ph: 3.1, cygnets: 1 },
 ];
 
+// Calibrated realistic mallard duck cruising speed (0.55–0.75 m/s)
 const DUCK_PAIRS = [
-  { id: 'duck:schooren', cu: 0.5160, cv: 0.6540, ru: 0.0028, rv: 0.0024, spd: 0.18, ph: 0.4 },
-  { id: 'duck:bendlikon', cu: 0.6380, cv: 0.5650, ru: 0.0026, rv: 0.0022, spd: 0.16, ph: 2.2 },
-  { id: 'duck:morfanlage', cu: 0.7700, cv: 0.4700, ru: 0.0030, rv: 0.0025, spd: 0.15, ph: 4.1 },
+  { id: 'duck:schooren', cu: 0.5160, cv: 0.6540, ru: 0.0028, rv: 0.0024, spd: 0.072, ph: 0.4 },
+  { id: 'duck:bendlikon', cu: 0.6380, cv: 0.5650, ru: 0.0026, rv: 0.0022, spd: 0.068, ph: 2.2 },
+  { id: 'duck:morfanlage', cu: 0.7700, cv: 0.4700, ru: 0.0030, rv: 0.0025, spd: 0.064, ph: 4.1 },
 ];
 
 const HERON_SPOT = {
@@ -61,12 +64,43 @@ const RED_KITES = [
   { id: 'kite:ridge_west', cu: 0.315, cv: 0.305, ru: 0.022, rv: 0.013, spd: 0.14, ph: 3.6 },
 ];
 
+// Calibrated realistic foraging barn swallow speed (~11 m/s)
 const SWALLOW_LOOPS = [
-  { id: 'swallow:meadow_1', cu: 0.528, cv: 0.215, ru: 0.014, rv: 0.009, spd: 0.62, ph: 0.4 },
-  { id: 'swallow:meadow_2', cu: 0.534, cv: 0.222, ru: 0.012, rv: 0.008, spd: 0.70, ph: 2.3 },
-  { id: 'swallow:shore_1', cu: 0.585, cv: 0.562, ru: 0.015, rv: 0.008, spd: 0.66, ph: 1.1 },
-  { id: 'swallow:shore_2', cu: 0.452, cv: 0.695, ru: 0.013, rv: 0.009, spd: 0.58, ph: 4.0 },
+  { id: 'swallow:meadow_1', cu: 0.528, cv: 0.215, ru: 0.014, rv: 0.009, spd: 0.24, ph: 0.4 },
+  { id: 'swallow:meadow_2', cu: 0.534, cv: 0.222, ru: 0.012, rv: 0.008, spd: 0.26, ph: 2.3 },
+  { id: 'swallow:shore_1', cu: 0.585, cv: 0.562, ru: 0.015, rv: 0.008, spd: 0.24, ph: 1.1 },
+  { id: 'swallow:shore_2', cu: 0.452, cv: 0.695, ru: 0.013, rv: 0.009, spd: 0.22, ph: 4.0 },
 ];
+
+function avoidVesselsUV(u, v, vessels, isWater) {
+  if (!vessels || vessels.length === 0) return { u, v };
+  const p = uvToMeters(u, v);
+  let pushX = 0;
+  let pushY = 0;
+  for (let i = 0; i < vessels.length; i++) {
+    const ves = vessels[i];
+    if (!ves || !ves.visible) continue;
+    const vx = ves.xM != null ? ves.xM : uvToMeters(ves.u, ves.v).xM;
+    const vy = ves.yM != null ? ves.yM : uvToMeters(ves.u, ves.v).yM;
+    const dx = p.xM - vx;
+    const dy = p.yM - vy;
+    const dist = Math.hypot(dx, dy);
+    const safeR = (ves.hullRadiusM || 3.0) + 12.0;
+    if (dist > 1e-4 && dist < safeR) {
+      const mag = (safeR - dist) * 0.9;
+      pushX += (dx / dist) * mag;
+      pushY += (dy / dist) * mag;
+    }
+  }
+  if (pushX === 0 && pushY === 0) return { u, v };
+  const pushLen = Math.hypot(pushX, pushY);
+  if (pushLen > 14.0) {
+    pushX = (pushX / pushLen) * 14.0;
+    pushY = (pushY / pushLen) * 14.0;
+  }
+  const cand = metersToUv(p.xM + pushX, p.yM + pushY);
+  return isWater(cand.u, cand.v) ? cand : { u, v };
+}
 
 function drawWaterfowlWake(ctx, sx, sy, vx, vy, px, isNight, scaleMul = 1.0) {
   const vm = Math.hypot(vx, vy) || 1;
@@ -123,12 +157,19 @@ export function createWildlifePlugin() {
       const inspectables = [];
       counts = { swans: 0, ducks: 0, gulls: 0, redKites: 0, herons: 0, swallows: 0, pigeons: 0, cattle: 0 };
 
+      const activeVessels = (ctx.shared && ctx.shared.vesselSim && typeof ctx.shared.vesselSim.getVessels === 'function')
+        ? ctx.shared.vesselSim.getVessels()
+        : [];
+
       // 1. WATER: Mute Swans (Höckerschwan) + trailing fluffy cygnets + foraging head-dip
       for (let i = 0; i < SWAN_LOOPS.length; i++) {
         const sw = SWAN_LOOPS[i];
         const ang = tSec * sw.spd + sw.ph;
-        const su = sw.cu + Math.cos(ang) * sw.ru;
-        const sv = sw.cv + Math.sin(ang) * sw.rv;
+        const rawSu = sw.cu + Math.cos(ang) * sw.ru;
+        const rawSv = sw.cv + Math.sin(ang) * sw.rv;
+        const adj = avoidVesselsUV(rawSu, rawSv, activeVessels, isWater);
+        const su = adj.u;
+        const sv = adj.v;
         if (!isWater(su, sv)) continue;
         counts.swans++;
 
@@ -217,8 +258,11 @@ export function createWildlifePlugin() {
           const dp = DUCK_PAIRS[di];
           for (let mate = 0; mate < 2; mate++) {
             const ang = tSec * dp.spd + dp.ph - mate * 0.28;
-            const du = dp.cu + Math.cos(ang) * dp.ru;
-            const dv = dp.cv + Math.sin(ang) * dp.rv;
+            const rawDu = dp.cu + Math.cos(ang) * dp.ru;
+            const rawDv = dp.cv + Math.sin(ang) * dp.rv;
+            const adjD = avoidVesselsUV(rawDu, rawDv, activeVessels, isWater);
+            const du = adjD.u;
+            const dv = adjD.v;
             if (!isWater(du, dv)) continue;
             counts.ducks++;
 
