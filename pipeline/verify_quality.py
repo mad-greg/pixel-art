@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-from .config import DOCS_DIR, RENDERS_DIR
+from .config import DOCS_DIR, RAW_CACHE_DIR, RENDERS_DIR
 
 
 def _load_canvas_strip_v(tdir: "Path", mf: dict, x_seam: int, y0: int, y1: int) -> np.ndarray:
@@ -284,9 +284,132 @@ MIN_BOTANICAL_FOLIAGE_IQR = 22.0
 MAX_WAFFLE_SCORE = 0.090
 MAX_PEAK_SPECKLE = 0.115
 MAX_GLOBAL_SPECKLE = 0.012
+MAX_BRIDGE_SEAM_PX = 40
+MAX_BRIDGE_SEAM_CC = 18
 
 
-def verify_all(skip_stipple: bool = False, skip_grid_guard: bool = False) -> None:
+def measure_parapet_white_seam(roi_rgb: np.ndarray) -> tuple[int, int, int]:
+    """Measure jagged near-white inner-parapet seam streaks adjacent to grey bridge stone.
+
+    Returns (seam_px, max_cc, total_near_white):
+      - seam_px: count of neutral near-white pixels (lum > 210, sat < 20) within 2px of grey parapet stone
+      - max_cc: largest 8-connected component size of seam_px
+      - total_near_white: total neutral near-white pixels in the ROI
+    """
+    f = roi_rgb.astype(np.float32)
+    lum = 0.299 * f[:, :, 0] + 0.587 * f[:, :, 1] + 0.114 * f[:, :, 2]
+    sat = f.max(axis=2) - f.min(axis=2)
+    nw = (lum > 210.0) & (sat < 20.0)
+    stone = (lum >= 110.0) & (lum <= 195.0) & (sat < 20.0)
+    adj_stone = ndimage.binary_dilation(stone, iterations=2)
+    seam_px = nw & adj_stone
+    lbl, n = ndimage.label(seam_px, structure=np.ones((3, 3), dtype=np.int32))
+    max_cc = int(max(((lbl == i).sum() for i in range(1, n + 1)), default=0))
+    return int(seam_px.sum()), max_cc, int(nw.sum())
+
+
+def measure_road_centerline_barriers(
+    tile_rgb: np.ndarray,
+    tx: int,
+    ty: int,
+    tile_size: int,
+    master_w: int,
+    master_h: int,
+    road_paths: dict[str, list],
+    path_names: tuple[str, ...] = ("dorfstrasse_viaduct_up", "dorfstrasse_viaduct_dn"),
+    idx_window: dict[str, tuple[int, int]] | None = None,
+) -> list[tuple[str, int, int, int, float, float, float]]:
+    """Detect transverse grey stone barricades / steep cliffs cutting across animated road centerlines.
+
+    Samples 5x5 patches along unobstructed (occ==0) road centerline points falling on tile (tx, ty).
+    A transverse grey barricade/cliff produces high luma (>130), high local contrast (std>35),
+    and low saturation (<20) right across the asphalt roadway.
+    """
+    hits: list[tuple[str, int, int, int, float, float, float]] = []
+    th, tw = tile_rgb.shape[:2]
+    for pname in path_names:
+        pts = road_paths.get(pname, [])
+        lo, hi = idx_window.get(pname, (0, len(pts))) if idx_window else (0, len(pts))
+        for i in range(max(0, lo), min(len(pts), hi)):
+            pt = pts[i]
+            u, v = float(pt[0]), float(pt[1])
+            occ = int(pt[2]) if len(pt) > 2 else 0
+            if occ:
+                continue
+            gx = int(round(u * master_w))
+            gy = int(round(v * master_h))
+            if (gx // tile_size) != tx or (gy // tile_size) != ty:
+                continue
+            lx = gx - tx * tile_size
+            ly = gy - ty * tile_size
+            if lx < 3 or lx >= (tw - 3) or ly < 3 or ly >= (th - 3):
+                continue
+            patch = tile_rgb[ly - 2 : ly + 3, lx - 2 : lx + 3].astype(np.float32)
+            lum = 0.299 * patch[:, :, 0] + 0.587 * patch[:, :, 1] + 0.114 * patch[:, :, 2]
+            sat = patch.max(axis=2) - patch.min(axis=2)
+            lm, ls, sm = float(lum.mean()), float(lum.std()), float(sat.mean())
+            if lm > 130.0 and ls > 35.0 and sm < 20.0:
+                hits.append((pname, i, lx, ly, round(lm, 1), round(ls, 1), round(sm, 1)))
+    return hits
+
+
+def check_bridge_junctions_and_parapets(
+    day_tdir: Path | None = None,
+    anim_path: Path | None = None,
+    check_scene_cache: bool = True,
+) -> str:
+    """10th quality guard (v13.1): Verify zero blocking walls across bridge/road junctions,
+    zero jagged white inner-parapet streaks, and zero <20-cell detached bridge fragments."""
+    day_tdir = day_tdir or (DOCS_DIR / "assets" / "tiles" / "day")
+    anim_path = anim_path or (DOCS_DIR / "data" / "kilchberg_animations.json")
+    mf = json.loads((day_tdir / "manifest.json").read_text())
+    W, H, ts = int(mf["width"]), int(mf["height"]), int(mf["tileSize"])
+    anim = json.loads(anim_path.read_text())
+    roads_by_id = {r["id"]: r["pts"] for r in anim.get("roads", [])}
+
+    # 10a: Centerline barrier guard on Dorfstrasse viaduct upper T-junction (tile 12_6, idx 785..805 & 575..595)
+    t12_6_p = day_tdir / "12_6.webp"
+    assert t12_6_p.exists(), f"Missing bridge junction tile {t12_6_p}"
+    t12_6 = np.asarray(Image.open(t12_6_p).convert("RGB"))
+    barriers = measure_road_centerline_barriers(
+        t12_6,
+        tx=12,
+        ty=6,
+        tile_size=ts,
+        master_w=W,
+        master_h=H,
+        road_paths=roads_by_id,
+        path_names=("dorfstrasse_viaduct_up", "dorfstrasse_viaduct_dn"),
+        idx_window={"dorfstrasse_viaduct_dn": (785, 805), "dorfstrasse_viaduct_up": (575, 595)},
+    )
+    assert len(barriers) == 0, (
+        f"Transverse blocking wall/cliff detected across Dorfstrasse viaduct T-junction (day/12_6.webp): {barriers}"
+    )
+
+    # 10b: Parapet white-seam ribbon guard on Dorfstrasse T-junction ROI (y=390..470, x=690..790)
+    roi_12_6 = t12_6[390:470, 690:790]
+    seam_px, max_cc, total_nw = measure_parapet_white_seam(roi_12_6)
+    assert seam_px < MAX_BRIDGE_SEAM_PX and max_cc < MAX_BRIDGE_SEAM_CC, (
+        f"Jagged white inner-parapet seam detected on day/12_6.webp T-junction ROI: "
+        f"seam_px={seam_px} (limit <{MAX_BRIDGE_SEAM_PX}), max_cc={max_cc} (limit <{MAX_BRIDGE_SEAM_CC}), nw={total_nw}"
+    )
+
+    # 10c: Optional scene-level detached fragment check when scene_kilchberg_05m.npz is available
+    scene_note = ""
+    scene_npz = RAW_CACHE_DIR / "scene_kilchberg_05m.npz"
+    if check_scene_cache and scene_npz.exists():
+        from .pixel_shader import SceneData
+
+        sc = SceneData(RAW_CACHE_DIR)
+        lbl, ncomp = ndimage.label(sc.bridge_cls > 0, structure=np.ones((3, 3), dtype=np.int32))
+        n_small = sum(1 for i in range(1, ncomp + 1) if int((lbl == i).sum()) < 20)
+        assert n_small == 0, f"SceneData left {n_small} detached <20-cell bridge fragments (expected 0)"
+        scene_note = f", scene_br_comps={ncomp}(small=0)"
+
+    return f"12_6(barriers=0, seam_px={seam_px}, max_cc={max_cc}{scene_note})"
+
+
+def verify_all(skip_stipple: bool = False, skip_grid_guard: bool = False, skip_bridge_guard: bool = False) -> None:
     mf_day = None
     for mode in ("day", "sunset", "night"):
         p = RENDERS_DIR / f"kilchberg_diorama_{mode}.png"
@@ -479,9 +602,16 @@ def verify_all(skip_stipple: bool = False, skip_grid_guard: bool = False) -> Non
         print(f"[ok] grid-hole & speckle guard: {', '.join(guard_checked)}")
 
 
+    # v13.1: 10th guard — Bridge/road junction continuity, zero blocking walls & zero white inner-parapet seams
+    if not skip_bridge_guard:
+        br_summary = check_bridge_junctions_and_parapets(day_tdir=day_tdir)
+        print(f"[ok] bridge junctions & parapets guard: {br_summary}")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Verify Kilchberg 0.11 m/px diorama quality, tile sizes, seams, and anti-stipple smoothness.")
     ap.add_argument("--skip-stipple", action="store_true", help="Skip anti-stipple check on legacy tiles before full render.")
     ap.add_argument("--skip-grid-guard", action="store_true", help="Skip wire-cage grid-hole & speckle guard on pre-M3B legacy tiles.")
+    ap.add_argument("--skip-bridge-guard", action="store_true", help="Skip v13.1 bridge junction & parapet guard on pre-v13.1 legacy tiles.")
     args = ap.parse_args()
-    verify_all(skip_stipple=args.skip_stipple, skip_grid_guard=args.skip_grid_guard)
+    verify_all(skip_stipple=args.skip_stipple, skip_grid_guard=args.skip_grid_guard, skip_bridge_guard=args.skip_bridge_guard)

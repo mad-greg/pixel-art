@@ -49,6 +49,7 @@ TIER_SUITES: dict[int, List[Tuple[str, List[str], Path]]] = {
         ("tier2_landmarks_v11", [sys.executable], REPO_ROOT / "tests" / "tier2_landmarks_v11.py"),
         ("tier2_v12_visuals", [sys.executable], REPO_ROOT / "tests" / "tier2_v12_visuals.py"),
         ("tier2_v13_vegetation", [sys.executable], REPO_ROOT / "tests" / "tier2_v13_vegetation.py"),
+        ("tier2_v13_1_bridges", [sys.executable], REPO_ROOT / "tests" / "tier2_v13_1_bridges.py"),
         ("tier2_browser_bounds", ["node"], REPO_ROOT / "tests" / "tier2_browser_bounds.mjs"),
         ("tier2_smoothness", ["node"], REPO_ROOT / "tests" / "tier2_smoothness.mjs"),
         ("tier2_v13_living", ["node"], REPO_ROOT / "tests" / "tier2_v13_living.mjs"),

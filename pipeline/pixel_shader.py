@@ -480,6 +480,36 @@ class SceneData:
         self.bridge_hw = s["bridge_hw"].astype(np.float16)
         self.bridge_ang = s["bridge_ang"].astype(np.float16)
         self.bridge_id = s["bridge_id"]
+        # v13.1 Fix 1: Filter detached <20-cell stray bridge fragments (eliminates all 12 floating concrete blocks!)
+        _br_lbl, _br_n = ndimage.label(self.bridge_cls > 0, structure=np.ones((3, 3), dtype=np.int32))
+        if _br_n > 0:
+            _br_counts = np.bincount(_br_lbl.ravel())
+            _small_ids = np.nonzero(_br_counts < 20)[0]
+            _small_ids = _small_ids[_small_ids > 0]
+            if len(_small_ids) > 0:
+                _drop_br = np.isin(_br_lbl, _small_ids)
+                self.bridge_cls = self.bridge_cls.copy()
+                self.bridge_id = self.bridge_id.copy()
+                self.bridge_cls[_drop_br] = 0
+                self.bridge_id[_drop_br] = 0
+        del _br_lbl
+        # v13.1 Fixes 2 & 3: Global 0.5m bridge-proximity flags (100% macro-tile seam-consistent)
+        # bit 1: <=3.0m of any bridge; bit 2: <=4.0m of any bridge; bit 4: <=4.5m of BR_MOTORWAY
+        _br_any = self.bridge_cls > 0
+        _br_mw = self.bridge_cls == BR_MOTORWAY
+        _br_flags = np.zeros((GRID_H, GRID_W), dtype=np.uint8)
+        if _br_any.any():
+            _near3 = ndimage.binary_dilation(_br_any, iterations=6)
+            _near4 = ndimage.binary_dilation(_near3, iterations=2)
+            _br_flags[_near3] |= np.uint8(1)
+            _br_flags[_near4] |= np.uint8(2)
+            del _near3, _near4
+        if _br_mw.any():
+            _near_mw = ndimage.binary_dilation(_br_mw, iterations=14)
+            _br_flags[_near_mw] |= np.uint8(4)
+            del _near_mw
+        self.bridge_near_flags_05m = _br_flags
+        del _br_any, _br_mw
         self.hedge_mask = s["hedge_mask"] > 0
 
         # F14: Surface hillside stone staircases (M1 additive keys)
@@ -2352,6 +2382,10 @@ def _shade_drawn_ground_90s(
     is_mw_smooth = ((gsem == G_MOTORWAY) & (rd_dist <= (rd_hw + 0.25))) | (can_road & (rd_hw >= 4.85) & (rd_dist <= rd_hw))
     is_main_smooth = can_road & (~is_mw_smooth) & (rd_hw >= 3.85) & (rd_hw < 4.85) & (rd_dist <= rd_hw)
     is_min_smooth = can_road & (~is_mw_smooth) & (~is_main_smooth) & (rd_hw >= 1.50) & (rd_hw < 3.85) & (rd_dist <= rd_hw)
+    # v13.1 Fix 3: Bridge abutment proximity masks (suppress rounded road/motorway end-cap U-curbs & guardrail barricades!)
+    br_flags_g = scene.bridge_near_flags_05m[r05, c05]
+    near_br_road = (br_flags_g & 1) != 0
+    near_br_mw = (br_flags_g & 4) != 0
 
     # 7. Minor Village Streets (G_STREET_MINOR): smooth cool-slate asphalt + warm cream curb/sidewalk + crisp dark curb!
     if is_min_smooth.any():
@@ -2362,9 +2396,10 @@ def _shade_drawn_ground_90s(
         m_hw = np.maximum(1.85, rd_hw[mi])
         mcol = np.full((len(mi), 3), [108.0, 118.0, 130.0], dtype=np.float32)
         has_sw_m = m_hw >= 2.25
-        curb_outer = m_d >= (m_hw - 0.20)
-        on_sw_m = has_sw_m & (m_d >= (m_hw - 0.72)) & (~curb_outer)
-        on_curb_m = np.where(has_sw_m, (m_d >= (m_hw - 0.96)) & (m_d < (m_hw - 0.72)), (m_d >= (m_hw - 0.44)) & (~curb_outer))
+        no_br_cap_m = ~near_br_road[mi]
+        curb_outer = (m_d >= (m_hw - 0.20)) & no_br_cap_m
+        on_sw_m = has_sw_m & (m_d >= (m_hw - 0.72)) & (m_d < (m_hw - 0.20)) & no_br_cap_m
+        on_curb_m = np.where(has_sw_m, (m_d >= (m_hw - 0.96)) & (m_d < (m_hw - 0.72)), (m_d >= (m_hw - 0.44)) & (m_d < (m_hw - 0.20))) & no_br_cap_m
         mcol[on_sw_m] = [218.0, 204.0, 178.0]
         mcol[on_curb_m] = [52.0, 60.0, 72.0]
         mcol[curb_outer] = [66.0, 74.0, 84.0]
@@ -2380,15 +2415,16 @@ def _shade_drawn_ground_90s(
         a_s = rd_along[ai]
         a_hw = np.maximum(3.85, rd_hw[ai])
         sw_start = a_hw - 1.32
+        no_br_cap_a = ~near_br_road[ai]
 
         acol = np.full((len(ai), 3), [100.0, 110.0, 124.0], dtype=np.float32)
-        edge_line = np.abs(a_d - (sw_start - 0.44)) < 0.14
+        edge_line = (np.abs(a_d - (sw_start - 0.44)) < 0.14) & no_br_cap_a
         dash_c = (a_d < 0.24) & ((a_s % 5.6) < 2.5)
         acol[edge_line | dash_c] = [242.0, 244.0, 246.0]
 
-        on_curb = (a_d >= (sw_start - 0.26)) & (a_d < sw_start)
-        on_sw = (a_d >= sw_start) & (a_d < (a_hw - 0.18))
-        sw_outer = a_d >= (a_hw - 0.18)
+        on_curb = (a_d >= (sw_start - 0.26)) & (a_d < sw_start) & no_br_cap_a
+        on_sw = (a_d >= sw_start) & (a_d < (a_hw - 0.18)) & no_br_cap_a
+        sw_outer = (a_d >= (a_hw - 0.18)) & no_br_cap_a
         acol[on_curb] = [44.0, 52.0, 64.0]
         sw_joint = on_sw & ((a_s % 2.2) < 0.18)
         acol[on_sw] = [224.0, 210.0, 182.0]
@@ -2412,10 +2448,11 @@ def _shade_drawn_ground_90s(
         w_d = rd_dist[wi]
         w_s = rd_along[wi]
         w_hw = np.maximum(3.4, rd_hw[wi])
+        no_br_cap_w = ~near_br_mw[wi]
         wcol = np.full((len(wi), 3), [84.0, 94.0, 108.0], dtype=np.float32)
-        w_dash = (np.abs(w_d - 1.8) < 0.24) & ((w_s % 6.5) < 2.8)
-        w_edge = np.abs(w_d - (w_hw - 0.85)) < 0.24
-        w_guard = w_d >= (w_hw - 0.42)
+        w_dash = (np.abs(w_d - 1.8) < 0.24) & ((w_s % 6.5) < 2.8) & no_br_cap_w
+        w_edge = (np.abs(w_d - (w_hw - 0.85)) < 0.24) & no_br_cap_w
+        w_guard = (w_d >= (w_hw - 0.42)) & no_br_cap_w
         wcol[w_dash | w_edge] = [240.0, 242.0, 246.0]
         wcol[w_guard] = [164.0, 170.0, 178.0]
         gz[wi[w_guard]] += 0.72
@@ -2920,46 +2957,78 @@ def _render_elevated_bridges_and_rail_portals(
         bid = sub_bid[br, bc].astype(np.int32)
         bsh = sub_shadow[br, bc]
 
+        # v13.1 Fix 4: Smooth abutment clearance factor & twin-span/underpass suppression
+        if camera.mpp <= 0.16:
+            dem_at_br = _sample_bilinear_05m(sub_dem, be, bn, r0=r0, c0=c0)
+        else:
+            dem_at_br = sub_dem[br, bc]
+        br_raw_h = bz - dem_at_br
+        br_t = np.clip((br_raw_h - 0.25) / 1.15, 0.0, 1.0)
+        br_clear = br_t * br_t * (3.0 - 2.0 * br_t)
+
+        def _is_twin_span_inner(e_arr, n_arr, sd_arr, ang_arr, cls_arr, id_arr):
+            sgn_o = np.where(sd_arr >= 0.0, 1.0, -1.0)
+            onx = np.sin(ang_arr) * sgn_o
+            ony = -np.cos(ang_arr) * sgn_o
+            inner = np.zeros(len(e_arr), dtype=np.bool_)
+            for step_m in (1.5, 2.4):
+                oc = np.clip(((e_arr + step_m * onx - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
+                or_ = np.clip(((N_MAX - (n_arr + step_m * ony)) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
+                inner |= (scene.bridge_cls[or_, oc] == cls_arr) & (scene.bridge_id[or_, oc] != id_arr)
+            return inner
+
         abs_sd = np.abs(bsdist)
         b_tex_s = 1.0 / max(0.08, float(camera.mpp))
         ix25 = np.floor((be - E_MIN) * b_tex_s).astype(np.int32)
         iy25 = np.floor((bn - N_MIN) * b_tex_s).astype(np.int32)
         ph = ((ix25 * 73856093) ^ (iy25 * 19349663)) & 0xFF
 
-        bcol = np.full((len(be), 3), [90.0, 94.0, 102.0], dtype=np.float32)
+        bcol = np.full((len(be), 3), [98.0, 106.0, 118.0], dtype=np.float32)
         bnx = np.zeros(len(be), dtype=np.float32)
         bny = np.zeros(len(be), dtype=np.float32)
         bnz = np.ones(len(be), dtype=np.float32)
 
-        # Road Viaducts & Motorway Bridges: clean asphalt + dashed centerline + raised concrete sidewalks + steel railings!
+        # Road Viaducts & Motorway Bridges: smooth slate asphalt + dashed centerline + tapered concrete parapets!
         is_rd_br = (bcls == BR_ROAD_VIADUCT) | (bcls == BR_MOTORWAY)
         if is_rd_br.any():
             ri = np.nonzero(is_rd_br)[0]
             sd_r = abs_sd[ri]
             al_r = balong[ri]
             hw_r = bhw[ri]
+            clr_r = br_clear[ri]
+            raw_h_r = br_raw_h[ri]
+            is_mw_r = bcls[ri] == BR_MOTORWAY
             sw_in = np.where(hw_r >= 5.0, hw_r - 1.55, hw_r - 1.05)
             rail_in = hw_r - 0.52
 
-            col_r = np.where((ph[ri] < 64)[:, None], [92.0, 96.0, 104.0], [84.0, 88.0, 96.0]).astype(np.float32)
-            # Crisp white dashed centerline (only on 2-lane main viaducts/motorways!) & solid white edge lines
+            # Match surface road slate ([98,106,118] viaduct; [86,94,106] motorway) for seamless abutment blend
+            col_r = np.where(is_mw_r[:, None], [86.0, 94.0, 106.0], [98.0, 106.0, 118.0]).astype(np.float32)
+            col_r[ph[ri] < 64] += 3.0
+            # Crisp white dashed centerline (only on 2-lane main viaducts/motorways); NO white edge_l on narrow viaducts (<5.2m)!
             dash = (hw_r >= 4.4) & (sd_r < 0.25) & ((al_r % 5.6) < 2.6)
-            edge_l = (hw_r >= 4.4) & (np.abs(sd_r - (sw_in - 0.35)) < 0.22)
-            col_r[dash | edge_l] = [230.0, 232.0, 236.0]
+            edge_l = (hw_r >= 5.2) & (np.abs(sd_r - (sw_in - 0.55)) < 0.14)
+            col_r[dash] = [232.0, 234.0, 238.0]
+            col_r[edge_l] = [198.0, 202.0, 210.0]
 
-            # Raised concrete sidewalks with expansion joints every 2.0m
-            on_sw = (sd_r >= sw_in) & (sd_r < rail_in)
-            sw_j = on_sw & ((al_r % 2.0) < 0.22)
-            col_r[on_sw] = [174.0, 172.0, 166.0]
-            col_r[sw_j] = [148.0, 146.0, 140.0]
-            bz[ri[on_sw]] += 0.22
+            # Raised concrete sidewalks with expansion joints every 2.0m (only on viaducts, not motorway underpass, tapered at abutment)
+            on_sw = (~is_mw_r) & (sd_r >= sw_in) & (sd_r < rail_in) & (clr_r >= 0.15)
+            sw_j = on_sw & ((al_r % 2.0) < 0.20)
+            col_r[on_sw] = [184.0, 180.0, 172.0]
+            col_r[sw_j] = [164.0, 160.0, 154.0]
+            bz[ri[on_sw]] += 0.18 * clr_r[on_sw]
 
-            # Outer concrete parapet curb + galvanized steel safety railing!
-            on_rail = sd_r >= rail_in
-            post = on_rail & ((al_r % 2.2) < 0.45)
-            col_r[on_rail] = [194.0, 196.0, 198.0]
-            col_r[post] = [132.0, 138.0, 146.0]
-            bz[ri[on_rail]] += 1.02
+            # Clean TinyRJ-grade smooth concrete parapet (tapered at abutments, suppressed on twin-span inner edges & low motorway underpasses)
+            cand_rail_r = (sd_r >= rail_in) & (clr_r >= 0.15) & (~(is_mw_r & (raw_h_r < 1.20)))
+            on_rail = np.zeros(len(ri), dtype=np.bool_)
+            if cand_rail_r.any():
+                cr_idx = np.nonzero(cand_rail_r)[0]
+                g_cr = ri[cr_idx]
+                inner_cr = _is_twin_span_inner(be[g_cr], bn[g_cr], bsdist[g_cr], bang[g_cr], bcls[g_cr], bid[g_cr])
+                on_rail[cr_idx[~inner_cr]] = True
+            joint_r = on_rail & ((al_r % 2.4) < 0.18)
+            col_r[on_rail] = [182.0, 184.0, 186.0]
+            col_r[joint_r] = [164.0, 166.0, 170.0]
+            bz[ri[on_rail]] += 0.58 * clr_r[on_rail]
             bcol[ri] = col_r
 
         # Footbridges & Spiral Viaduct Stairs (BR_FOOTBRIDGE, BR_STEPS)
@@ -2969,12 +3038,13 @@ def _render_elevated_bridges_and_rail_portals(
             sd_s = abs_sd[si]
             al_s = balong[si]
             hw_s = bhw[si]
+            clr_s = br_clear[si]
             col_s = np.full((len(si), 3), [182.0, 180.0, 174.0], dtype=np.float32)
             tread = (bcls[si] == BR_STEPS) & ((al_s % 0.72) < 0.32)
             col_s[tread] = [152.0, 150.0, 146.0]
-            s_rail = sd_s >= (hw_s - 0.42)
-            col_s[s_rail] = [118.0, 126.0, 136.0]
-            bz[si[s_rail]] += 0.92
+            s_rail = (sd_s >= (hw_s - 0.42)) & (clr_s >= 0.15)
+            col_s[s_rail] = [142.0, 148.0, 156.0]
+            bz[si[s_rail]] += 0.82 * clr_s[s_rail]
             bcol[si] = col_s
 
         # SBB Elevated Rail Bridges over street underpasses (BR_RAIL_BRIDGE)
@@ -2984,14 +3054,21 @@ def _render_elevated_bridges_and_rail_portals(
             sd_rb = abs_sd[rbi]
             al_rb = balong[rbi]
             hw_rb = bhw[rbi]
+            clr_rb = br_clear[rbi]
             col_rb = np.where((ph[rbi] < 110)[:, None], [116.0, 108.0, 98.0], [96.0, 88.0, 80.0]).astype(np.float32)
             slp = (sd_rb <= 1.25) & ((al_rb % 0.85) < 0.30)
             col_rb[slp] = [64.0, 52.0, 44.0]
             steel_r = np.abs(sd_rb - 0.72) <= 0.22
             col_rb[steel_r] = [196.0, 202.0, 210.0]
-            girder_r = sd_rb >= (hw_rb - 0.50)
+            cand_g = (sd_rb >= (hw_rb - 0.50)) & (clr_rb >= 0.15)
+            girder_r = np.zeros(len(rbi), dtype=np.bool_)
+            if cand_g.any():
+                cg_idx = np.nonzero(cand_g)[0]
+                g_cg = rbi[cg_idx]
+                inner_cg = _is_twin_span_inner(be[g_cg], bn[g_cg], bsdist[g_cg], bang[g_cg], bcls[g_cg], bid[g_cg])
+                girder_r[cg_idx[~inner_cg]] = True
             col_rb[girder_r] = [132.0, 138.0, 146.0]
-            bz[rbi[girder_r]] += 0.85
+            bz[rbi[girder_r]] += 0.75 * clr_rb[girder_r]
             bcol[rbi] = col_rb
 
         # Project & write bridge deck surface
@@ -3019,22 +3096,41 @@ def _render_elevated_bridges_and_rail_portals(
                 norm_buf[ty[win], tx[win], 1] = 0.0
                 norm_buf[ty[win], tx[win], 2] = 1.0
 
-        # Vertical Concrete Box-Girder Side Fascia along outer bridge edges (resolution-aware tangent sub-sampling -> zero gaps!)
+        # Vertical Concrete Box-Girder Side Fascia along outer bridge edges (abutment-tapered, twin-span-aware, smooth normals!)
         er_b, ec_b = np.nonzero(bmask & (np.abs(sub_bsdist) >= (sub_bhw - 0.65)))
         if len(er_b) > 0:
             fe_b0 = E_MIN + (ec_b + c0 + 0.5) * GRID_RES
             fn_b0 = N_MAX - (er_b + r0 + 0.5) * GRID_RES
-            fz_top0 = sub_bz[er_b, ec_b] + 0.92
-            girder_d0 = np.where(sub_bcls[er_b, ec_b] == BR_STEPS, 0.95, 1.45)
-            fz_bot0 = np.maximum(sub_dem[er_b, ec_b], sub_bz[er_b, ec_b] - girder_d0)
+            f_bcls0 = sub_bcls[er_b, ec_b]
             f_bid0 = sub_bid[er_b, ec_b].astype(np.int32)
+            f_raw_h0 = sub_bz[er_b, ec_b] - sub_dem[er_b, ec_b]
+            f_t0 = np.clip((f_raw_h0 - 0.25) / 1.15, 0.0, 1.0)
+            f_clr0 = f_t0 * f_t0 * (3.0 - 2.0 * f_t0)
+            f_inner0 = _is_twin_span_inner(fe_b0, fn_b0, sub_bsdist[er_b, ec_b], sub_bang[er_b, ec_b], f_bcls0, f_bid0)
+            f_underpass0 = (f_bcls0 == BR_MOTORWAY) & (f_raw_h0 < 1.20)
+            f_keep = (f_clr0 >= 0.15) & (~f_inner0) & (~f_underpass0)
+            er_b, ec_b = er_b[f_keep], ec_b[f_keep]
+            fe_b0, fn_b0 = fe_b0[f_keep], fn_b0[f_keep]
+            f_bcls0, f_bid0, f_clr0 = f_bcls0[f_keep], f_bid0[f_keep], f_clr0[f_keep]
+        if len(er_b) > 0:
+            f_is_rail_br0 = f_bcls0 == BR_RAIL_BRIDGE
+            f_is_foot_br0 = (f_bcls0 == BR_FOOTBRIDGE) | (f_bcls0 == BR_STEPS)
+            f_parapet_h0 = np.where(f_is_rail_br0, 0.75, np.where(f_is_foot_br0, 0.82, 0.58)) * f_clr0
+            fz_top0 = sub_bz[er_b, ec_b] + f_parapet_h0
+            girder_d0 = np.where(f_bcls0 == BR_STEPS, 0.95, 1.45)
+            fz_bot0 = np.maximum(sub_dem[er_b, ec_b], sub_bz[er_b, ec_b] - girder_d0)
             sgn_sd0 = np.where(sub_bsdist[er_b, ec_b] >= 0.0, 1.0, -1.0)
+            # Smooth tangent/normal along curved viaducts (3x3 masked circular average on cos/sin of bridge_ang)
+            _bm_f = bmask.astype(np.float32)
+            _w_ang = np.maximum(1e-4, ndimage.uniform_filter(_bm_f, size=3))
+            _cos_sm = ndimage.uniform_filter(np.cos(sub_bang) * _bm_f, size=3) / _w_ang
+            _sin_sm = ndimage.uniform_filter(np.sin(sub_bang) * _bm_f, size=3) / _w_ang
+            f_ang_sm = np.arctan2(_sin_sm[er_b, ec_b], _cos_sm[er_b, ec_b])
             f_ang0 = sub_bang[er_b, ec_b]
             ftx0 = np.cos(f_ang0)
             fty0 = np.sin(f_ang0)
-            fnx_b0 = (np.sin(f_ang0) * sgn_sd0).astype(np.float32)
-            fny_b0 = (-np.cos(f_ang0) * sgn_sd0).astype(np.float32)
-            f_is_rail_br0 = sub_bcls[er_b, ec_b] == BR_RAIL_BRIDGE
+            fnx_b0 = (np.sin(f_ang_sm) * sgn_sd0).astype(np.float32)
+            fny_b0 = (-np.cos(f_ang_sm) * sgn_sd0).astype(np.float32)
 
             n_sub_f = max(2, int(math.ceil(GRID_RES / max(0.06, camera.mpp * 0.70))))
             sub_offs = np.linspace(-0.25, 0.25, n_sub_f, dtype=np.float64)
@@ -3047,6 +3143,7 @@ def _render_elevated_bridges_and_rail_portals(
             fnx_b = np.repeat(fnx_b0, n_sub_f)
             fny_b = np.repeat(fny_b0, n_sub_f)
             f_is_rail_br = np.repeat(f_is_rail_br0, n_sub_f)
+            f_parapet_h = np.repeat(f_parapet_h0, n_sub_f)
 
             dz_g = max(0.06, camera.mpp * 0.55)
             max_gh = float((fz_top - fz_bot).max())
@@ -3066,10 +3163,10 @@ def _render_elevated_bridges_and_rail_portals(
                 ix_g, iy_g, pd_g = ix_g[vg], iy_g[vg], pd_g[vg]
                 ia = np.nonzero(act)[0][vg]
                 h_down = fz_top[ia] - zc_a[vg]
-                g_col = np.full((len(ia), 3), [172.0, 170.0, 164.0], dtype=np.float32)
+                g_col = np.full((len(ia), 3), [164.0, 164.0, 160.0], dtype=np.float32)
                 g_col[f_is_rail_br[ia]] = [118.0, 124.0, 134.0]
-                g_col[h_down < 0.72] = [196.0, 198.0, 200.0]   # Bright concrete/steel parapet rail
-                g_col[h_down > (girder_d[ia] + 0.55)] *= 0.80  # Lower girder shadow lip
+                g_col[(~f_is_rail_br[ia]) & (h_down < f_parapet_h[ia])] = [182.0, 184.0, 186.0]   # Smooth concrete parapet rail
+                g_col[h_down > (girder_d[ia] + 0.55)] *= 0.82  # Lower girder shadow lip
 
                 for ox in (0, 1):
                     tx = ix_g + ox
@@ -3082,7 +3179,7 @@ def _render_elevated_bridges_and_rail_portals(
                         obj_buf[wy, wx] = 300000 + f_bid[ia[win]]
                         norm_buf[wy, wx, 0] = fnx_b[ia[win]]
                         norm_buf[wy, wx, 1] = fny_b[ia[win]]
-                        norm_buf[wy, wx, 2] = 0.18
+                        norm_buf[wy, wx, 2] = 0.24
                         shadow_buf[wy, wx] = False
 
     # 3. 3D SBB Steel Overhead Catenary Portals along the Seebahn Railway!
@@ -6409,6 +6506,7 @@ def render_diorama(
                 gharbor = sub_harbor[gr, gc]
                 gsh = sub_shadow[gr, gc]
                 gcliff = scene.steep_cliff_05m[r0:r1, c0:c1][gr, gc]
+                g_near_br3 = (scene.bridge_near_flags_05m[r0:r1, c0:c1][gr, gc] & 1) != 0
                 xwalk = scene.crosswalk_mask[r0:r1, c0:c1][gr, gc]
 
                 if ground_sub_res == 0.125:
@@ -6447,6 +6545,15 @@ def render_diorama(
                     pier_sdf_v = None
                     pier_h_v = None
 
+                g_paved_road = (
+                    (~glake)
+                    & (rd_hw >= 1.50)
+                    & (rd_dist <= (rd_hw + 0.25))
+                    & (gsem != G_POOL)
+                    & (gsem != G_STREAM)
+                    & (gsem != G_PITCH)
+                )
+
                 raw_ortho = sample_ortho_25cm(scene, ge, gn)
                 gcol, gmat, gz, g_seebad_pool = _shade_drawn_ground_90s(
                     scene, ge, gn, gz, gsem, glake, gbathy, gharbor, raw_ortho,
@@ -6475,6 +6582,8 @@ def render_diorama(
                     gix, giy, gdepth = gix[gv], giy[gv], gdepth[gv]
                     gcol, gmat, gsh, glake_v = gcol[gv], gmat[gv], gsh[gv], glake[gv]
                     gcliff_v = gcliff[gv]
+                    g_near_br3_v = g_near_br3[gv]
+                    g_paved_road_v = g_paved_road[gv]
                     g_sb_v = g_seebad_pool[gv]
                     gnx, gny, gnz = gnx[gv], gny[gv], gnz[gv]
                     gz_v = gz[gv]
@@ -6485,12 +6594,30 @@ def render_diorama(
                     gix, giy, gdepth = gix[order], giy[order], gdepth[order]
                     gcol, gmat, gsh, glake_v = gcol[order], gmat[order], gsh[order], glake_v[order]
                     gcliff_v = gcliff_v[order]
+                    g_near_br3_v = g_near_br3_v[order]
+                    g_paved_road_v = g_paved_road_v[order]
                     g_sb_v = g_sb_v[order]
                     gnx, gny, gnz = gnx[order], gny[order], gnz[order]
                     gz_v = gz_v[order]
                     gsem_v = gsem_v[order]
                     if lake_sdf_gv is not None:
                         lake_sdf_gv = lake_sdf_gv[order]
+
+                    # v13.1 Fix 2: Flatten terrain normals on paved corridors & exclude them from steep/is_rwall cliffs!
+                    is_paved_corr = (
+                        np.isin(gsem_v, [G_STREET_MAIN, G_STREET_MINOR, G_MOTORWAY, G_RAILWAY])
+                        | g_paved_road_v
+                        | ((gsem_v == G_FOOTPATH) & ((gnz < 0.72) | g_near_br3_v))
+                    )
+                    if is_paved_corr.any():
+                        gnx = gnx.copy()
+                        gny = gny.copy()
+                        gnz = gnz.copy()
+                        gnx[is_paved_corr] *= 0.15
+                        gny[is_paved_corr] *= 0.15
+                        gnz[is_paved_corr] = np.sqrt(
+                            np.maximum(0.01, 1.0 - gnx[is_paved_corr] ** 2 - gny[is_paved_corr] ** 2)
+                        )
 
                     for ox, oy in ((0, 0), (1, 0), (0, 1), (1, 1)):
                         tx = np.clip(gix + ox, 0, W - 1)
@@ -6588,9 +6715,9 @@ def render_diorama(
                                     norm_buf[wy_sk, wx_sk, 1] = 0.0
                                     norm_buf[wy_sk, wx_sk, 2] = 0.92
 
-                    # F14c + v12: Ashlar Jura-Stone Retaining Walls ONLY on sustained cliffs (gcliff_v & s_nz < 0.64),
-                    # eliminating jagged white/grey retaining-wall streaks on grassy roadside embankments!
-                    steep = (gnz < 0.88) & (~glake_v) & (~is_shore_lip)
+                    # F14c + v12 + v13.1: Ashlar Jura-Stone Retaining Walls ONLY on sustained cliffs (gcliff_v & s_nz < 0.64),
+                    # excluding all paved roads, footpaths & railways!
+                    steep = (gnz < 0.88) & (~glake_v) & (~is_shore_lip) & (~is_paved_corr)
                     if steep.any():
                         si = np.nonzero(steep)[0]
                         s_ix = gix[si]
@@ -9519,11 +9646,22 @@ def _apply_pixel_art_outlines_float(
     is_bldg_or_br = ((mat_buf == M_WALL) | (mat_buf == M_ROOF) | (mat_buf == M_BRIDGE) | (mat_buf == M_HARBOR_OBJ)) & (~is_thin_pole)
     is_tree_m = mat_buf == M_TREE
 
+    # v13.1 Fix 5: Suppress transverse M_BRIDGE <-> M_GROUND/M_RAIL road-seam ink outline at abutments (|dz| < 1.1m)
+    is_gnd_or_rl = (mat_buf == M_GROUND) | (mat_buf == M_RAIL)
+    br_gnd_r = (
+        ((mat_buf[:, :-1] == M_BRIDGE) & is_gnd_or_rl[:, 1:])
+        | ((mat_buf[:, 1:] == M_BRIDGE) & is_gnd_or_rl[:, :-1])
+    ) & (np.abs(dz_r) < 1.1)
+    br_gnd_d = (
+        ((mat_buf[:-1, :] == M_BRIDGE) & is_gnd_or_rl[1:, :])
+        | ((mat_buf[1:, :] == M_BRIDGE) & is_gnd_or_rl[:-1, :])
+    ) & (np.abs(dz_d) < 1.1)
+
     bldg_edge = np.zeros(zbuf.shape, dtype=np.bool_)
-    bldg_edge[:, :-1] |= diff_r & (dz_r > 0.65) & is_bldg_or_br[:, :-1]
-    bldg_edge[:, 1:] |= diff_r & (dz_r < -0.65) & is_bldg_or_br[:, 1:]
-    bldg_edge[:-1, :] |= diff_d & (dz_d > 0.65) & is_bldg_or_br[:-1, :]
-    bldg_edge[1:, :] |= diff_d & (dz_d < -0.65) & is_bldg_or_br[1:, :]
+    bldg_edge[:, :-1] |= diff_r & (dz_r > 0.65) & is_bldg_or_br[:, :-1] & (~br_gnd_r)
+    bldg_edge[:, 1:] |= diff_r & (dz_r < -0.65) & is_bldg_or_br[:, 1:] & (~br_gnd_r)
+    bldg_edge[:-1, :] |= diff_d & (dz_d > 0.65) & is_bldg_or_br[:-1, :] & (~br_gnd_d)
+    bldg_edge[1:, :] |= diff_d & (dz_d < -0.65) & is_bldg_or_br[1:, :] & (~br_gnd_d)
 
     eave_d = (obj_buf[:-1, :] == obj_buf[1:, :]) & (mat_buf[:-1, :] == M_ROOF) & (mat_buf[1:, :] == M_WALL)
     bldg_edge[:-1, :] |= eave_d
