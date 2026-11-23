@@ -2,31 +2,9 @@ import { createAudioEngine } from './js/audio.js';
 import { createCameraController } from './js/camera.js';
 import { createTileManager } from './js/tiles.js';
 import { createDepthManager } from './js/render/depth.js';
-import {
-  shadeHex,
-  draw3DCar,
-  draw3DBus,
-  draw3DArticulatedBus,
-  draw3DTrainUnit,
-  draw3DCyclist,
-  drawShipEntity,
-} from './js/render/vehicles.js';
-import {
-  drawAmbientEffects,
-  drawAtmosphereAndLife,
-  drawKilchbergDetails,
-  drawMiniPerson,
-  drawPreTrainVignettes,
-  drawShorelineWaves,
-} from './js/render/vignettes.js';
-import {
-  evalBellState,
-  evalShipState,
-  evalTrainState,
-  samplePathAt,
-} from './js/sim/schedule.js';
-import { createPedestrianSim, drawPedestrianEntity } from './js/sim/pedestrians.js';
-import { createTrafficSim } from './js/sim/traffic.js';
+import { evalBellState } from './js/sim/schedule.js';
+import { createLivingEngine } from './js/living/engine.js';
+import { registerDefaultPlugins } from './js/living/plugins/index.js';
 
   const canvas = document.getElementById('diorama-canvas');
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -45,7 +23,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
     ? Math.max(0, Math.min(1e9, rawFixedT))
     : null;
 
-  const ASSET_VER = '12.0';
+  const ASSET_VER = '13.0';
   const MAX_CACHED_TILES = 128;
   const MODE_BACKDROPS = {
     day: '#1b2b42',
@@ -61,9 +39,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
   function formatMppCm(mpp) {
     return `${(mpp * 100).toFixed(1).replace(/\.0$/, '')} cm/px`;
   }
-  let trafficSim = null;
-  let pedSim = null;
-  let lastSimSnapshot = null;
+  const livingEngine = registerDefaultPlugins(createLivingEngine());
+  let livingInitialized = false;
 
   let currentMode = 'day';
   let meta = null;
@@ -83,7 +60,6 @@ import { createTrafficSim } from './js/sim/traffic.js';
   let activeLandmarkId = null;
   let selectedBuilding = null;
   let selectedEntity = null;
-  let lastHitTestEntities = [];
   let pointerDownFollow = null;
   let searchResultCount = 0;
 
@@ -477,14 +453,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
     if (animData) {
       const animSec = simTimeSec !== null ? simTimeSec : getAnimTimeSec();
       // If draw() was called synchronously outside frameTick (e.g. boot/resize), ensure sim is up to date
-      if (simTimeSec === null) {
-        const liveSnap = (lastSimSnapshot && lastSimSnapshot.mode === currentMode) ? lastSimSnapshot : null;
-        if (pedSim) pedSim.updateToTime(animSec, currentMode, liveSnap);
-        if (trafficSim) {
-          const cwOcc = pedSim ? pedSim.getOccupiedCrosswalks() : null;
-          if (pedSim) trafficSim.setExternalPedestrianStats(pedSim.getStats());
-          lastSimSnapshot = trafficSim.updateToTime(animSec, currentMode, cwOcc);
-        }
+      if (simTimeSec === null && livingInitialized) {
+        livingEngine.update(animSec, 0.016, currentMode);
       }
       if (showAnimations) {
         drawAnimations(width, height, animSec);
@@ -544,7 +514,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
       return;
     }
     if (selectedEntity && showAnimations) {
-      const live = lastHitTestEntities.find((e) => e.id === selectedEntity.id) || selectedEntity;
+      const liveList = livingEngine._inspectables || [];
+      const live = liveList.find((e) => e.id === selectedEntity.id) || selectedEntity;
       if (!live || !Number.isFinite(live.wx) || !Number.isFinite(live.wy)) return;
       const sx = Math.round(offsetX + live.wx * scale);
       const sy = Math.round(offsetY + live.wy * scale);
@@ -901,26 +872,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
   }
 
   function hitTestEntity(clientX, clientY, wasFollowing) {
-    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.11;
-    const refScale = 0.25 / mppMaster;
-    if (!showAnimations || (!wasFollowing && (cssScale() * refScale) < 0.85) || lastHitTestEntities.length === 0) return false;
+    if (!showAnimations || !livingInitialized) return false;
     const rect = viewport.getBoundingClientRect();
-    const clickX = clientX - rect.left;
-    const clickY = clientY - rect.top;
-    let best = null;
-    let bestDist = Infinity;
-    for (let i = 0; i < lastHitTestEntities.length; i++) {
-      const ent = lastHitTestEntities[i];
-      const sx = (camState.offsetX + ent.wx * camState.scale) / dpr;
-      const sy = (camState.offsetY + ent.wy * camState.scale) / dpr;
-      const dist = Math.hypot(sx - clickX, sy - clickY);
-      const isFollowedKind = wasFollowing && ent.kind === wasFollowing;
-      const maxR = isFollowedKind ? Math.max(ent.radiusCss, 32) : ent.radiusCss;
-      if (dist <= maxR && dist < bestDist) {
-        bestDist = dist;
-        best = ent;
-      }
-    }
+    const best = livingEngine.hitTest(clientX, clientY, rect, getCamState(), wasFollowing);
     if (!best) return false;
     selectEntity(best);
     return true;
@@ -1265,6 +1219,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
       currentMode = nextMode;
       tileMgr.setMode(currentMode);
       document.body.dataset.mode = currentMode;
+      if (animData && livingInitialized) {
+        livingEngine.update(getAnimTimeSec(), 0.016, currentMode);
+      }
       // Recompute audio gain targets immediately (crickets/birds balance) rather than waiting for the throttle
       audioEngine.forceUpdate();
       viewport.classList.add('mode-switching');
@@ -1312,368 +1269,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
     };
   }
 
-  function drawDepthMasked(wx, wy, boundsOrPadW, vehD16, worldW, worldH, drawFn, extraVertPx = 4.0) {
-    depthMgr.drawDepthMasked(ctx, getCamState(), wx, wy, boundsOrPadW, vehD16, worldW, worldH, drawFn, extraVertPx);
-  }
-
-  const livingFrameCounts = {
-    ships: 0, cars: 0, buses: 0, cyclists: 0, roadPeds: 0,
-    busStopCommuters: 0, trains: 0, gulls: 0, swans: 0, sups: 0, ducks: 0, redKites: 0,
-  };
-
   function drawAnimations(worldW, worldH, tSec) {
-    const mppMaster = (animData && typeof animData.mpp === 'number') ? animData.mpp : 0.11;
-    const wScale = (worldW / (animData.canvas_width || 28024)) * (0.25 / mppMaster);
-    const isNight = currentMode === 'night';
-    const isSunset = currentMode === 'sunset';
-    const cam = getCamState();
-    const hasDepth = depthMgr.hasDepthMap();
-
-    depthMgr.resetDepthStats();
-    lastHitTestEntities.length = 0;
-    livingFrameCounts.ships = 0;
-    livingFrameCounts.cars = 0;
-    livingFrameCounts.buses = 0;
-    livingFrameCounts.cyclists = 0;
-    livingFrameCounts.roadPeds = 0;
-    livingFrameCounts.busStopCommuters = 0;
-    livingFrameCounts.trains = 0;
-    livingFrameCounts.gulls = 0;
-    livingFrameCounts.swans = 0;
-    livingFrameCounts.sups = 0;
-    livingFrameCounts.ducks = 0;
-    livingFrameCounts.redKites = 0;
-
-    // 1. Shoreline Waves (waterMask-strict)
-    if (animData.ambient && animData.ambient.shoreline) {
-      drawShorelineWaves(ctx, cam, depthMgr, animData.ambient.shoreline, worldW, worldH, wScale, tSec, currentMode);
-    }
-
-    // 2. Lake Zurich ZSG Paddle Steamer, Sailboats & Boesch Runabout
-    for (let sIdx = 0; sIdx < (animData.ships || []).length; sIdx++) {
-      const ship = animData.ships[sIdx];
-      const st = evalShipState(ship, tSec, currentMode);
-      if (drawShipEntity(ctx, depthMgr, cam, ship, st, sIdx, worldW, worldH, wScale, currentMode, tSec)) {
-        livingFrameCounts.ships++;
-        if (st.frac >= 0 && st.frac <= 1) {
-          const spPos = samplePathAt(ship.pts, st.frac, worldW, worldH, 2);
-          if (spPos) {
-            const isSteamer = ship.kind === 'zsg_steamer';
-            lastHitTestEntities.push({
-              kind: 'boat',
-              id: ship.id || `ship:${sIdx}`,
-              wx: spPos.wx,
-              wy: spPos.wy,
-              radiusCss: isSteamer ? 18 : 13,
-              title: isSteamer ? 'ZSG MS Helvetia → Bendlikon Pier' : (ship.name || 'Lake Zurich Vessel'),
-              sub: isSteamer
-                ? (st.isDocked ? 'Docked at Bendlikon Pier (gangplank deployed)' : 'Cruising Lake Zurich shoreline')
-                : 'Lake Zurich recreational vessel',
-              specs: [
-                ['Service', isSteamer ? 'ZSG Zürichsee' : 'Private Craft'],
-                ['Status', st.isDocked ? 'Docked · Boarding' : 'Underway'],
-                ['Route', isSteamer ? 'Zürich Bürkliplatz – Bendlikon – Thalwil' : 'Lake Zurich'],
-                ['Speed', `${Math.round((ship.speed_mps || 5) * st.speedRatio * 3.6)} km/h`],
-              ],
-            });
-          }
-        }
-      }
-    }
-
-    // 3. Unified Y-Sorted Depth-Masked Road Vehicles, Cyclists & Purposeful O-D Pedestrians
-    const roadDrawList = [];
-    const drawables = trafficSim ? trafficSim.getDrawableVehicles(worldW, worldH, wScale) : null;
-
-    if (drawables) {
-      for (const bItem of drawables.buses) {
-        if (!hasDepth && bItem.pos.occ) continue;
-        livingFrameCounts.buses++;
-        roadDrawList.push(bItem);
-        const routeNum = bItem.routeNum || '161';
-        lastHitTestEntities.push({
-          kind: 'bus',
-          id: bItem.id,
-          wx: bItem.pos.wx,
-          wy: bItem.pos.wy,
-          radiusCss: 14,
-          title: bItem.tripLabel || `ZVV Bus ${routeNum} · Kilchberg`,
-          sub: bItem.isDwelling ? 'Dwelling at bus stop (boarding & alighting)' : 'In service along Kilchberg corridor',
-          specs: [
-            ['Line', `ZVV ${routeNum}`],
-            ['Status', bItem.isDwelling ? 'Stop Dwell' : (bItem.signals && bItem.signals.braking ? 'Braking' : 'Cruising')],
-            ['Vehicle', bItem.type === 'bus_artic' ? 'Articulated 19 m' : 'Standard 12 m'],
-            ['Speed', `${Math.round((bItem.speedRatio || 0) * 42)} km/h`],
-          ],
-        });
-      }
-      for (const cItem of drawables.cars) {
-        if (!hasDepth && cItem.pos.occ) continue;
-        livingFrameCounts.cars++;
-        roadDrawList.push(cItem);
-        const sig = cItem.signals || {};
-        lastHitTestEntities.push({
-          kind: 'car',
-          id: cItem.id,
-          wx: cItem.pos.wx,
-          wy: cItem.pos.wy,
-          radiusCss: 10,
-          title: cItem.tripLabel || 'Local Traffic · Kilchberg',
-          sub: sig.isDeliveryStop
-            ? 'Curbside delivery pause (hazard flashers)'
-            : (sig.braking ? 'Braking / yielding to traffic or zebra crossing' : 'En route along Kilchberg road network'),
-          specs: [
-            ['Type', sig.isDeliveryStop ? 'Delivery Van' : 'Passenger Vehicle'],
-            ['Status', sig.isDeliveryStop ? 'Delivery Stop' : (sig.braking ? 'Yielding / Braking' : 'Cruising')],
-            ['Speed', `${Math.round((sig.speedRatio || 0) * 50)} km/h`],
-            ['Corridor', cItem.id && cItem.id.includes('motorway') ? 'A3 Motorway' : 'Kilchberg Local'],
-          ],
-        });
-      }
-      if ((camState.scale * wScale) >= 0.35) {
-        for (const cycItem of drawables.cyclists) {
-          if (!hasDepth && cycItem.pos.occ) continue;
-          livingFrameCounts.cyclists++;
-          roadDrawList.push(cycItem);
-          lastHitTestEntities.push({
-            kind: 'cyclist',
-            id: cycItem.id,
-            wx: cycItem.pos.wx,
-            wy: cycItem.pos.wy,
-            radiusCss: 9,
-            title: 'Cyclist · Kilchberg Corridor',
-            sub: 'Grade-aware pace rider on Kilchberg road network',
-            specs: [
-              ['Mode', 'Bicycle'],
-              ['Status', 'Active Ride'],
-              ['Route', 'Seestrasse / Dorfstrasse'],
-              ['Priority', 'Yields at stops & crossings'],
-            ],
-          });
-        }
-        const cwCoats = ['#c53030', '#2b6cb0', '#2f855a', '#d69e2e', '#6b46c1', '#dd6b20'];
-        const cwHairs = ['#2d241c', '#5c4028', '#8a6842', '#3a3430', '#b89458'];
-        for (const cwW of drawables.crosswalkWalkers) {
-          livingFrameCounts.roadPeds++;
-          roadDrawList.push({
-            type: 'stop_commuter',
-            pos: cwW.pos,
-            coat: shadeHex(cwCoats[cwW.colorIdx % cwCoats.length], 1.0, currentMode),
-            pants: shadeHex('#243040', 1.0, currentMode),
-            hair: cwHairs[cwW.colorIdx % cwHairs.length],
-            stride: cwW.stride,
-            bag: null,
-          });
-        }
-      }
-    }
-
-    // M4 Purposeful O-D Pedestrians (Bahnhof, Bus Stops, Bendlikon Pier, Lindt, Crosswalks, Micro-Archetypes)
-    if (pedSim && (camState.scale * wScale) >= 0.35) {
-      const pedItems = pedSim.getDrawablePedestrians(worldW, worldH, wScale, cam, depthMgr);
-      for (let i = 0; i < pedItems.length; i++) {
-        const pItem = pedItems[i];
-        if (pItem.role === 'bus_rider' && (pItem.state === 'queue_bus' || pItem.state === 'boarding' || pItem.state === 'alighting')) {
-          livingFrameCounts.busStopCommuters++;
-        } else {
-          livingFrameCounts.roadPeds++;
-        }
-        roadDrawList.push(pItem);
-        lastHitTestEntities.push({
-          kind: 'pedestrian',
-          id: pItem.id,
-          wx: pItem.pos.wx,
-          wy: pItem.pos.wy,
-          radiusCss: 8,
-          title: pItem.tripLabel || 'Villager · Kilchberg',
-          sub: `Purposeful Footpath Trip · ${pItem.state.replace(/_/g, ' ')}`,
-          specs: [
-            ['Origin', pItem.originName || 'Kilchberg'],
-            ['Destination', pItem.destName || 'Kilchberg'],
-            ['Role', pItem.role.replace(/_/g, ' ')],
-            ['Status', pItem.state.replace(/_/g, ' ')],
-          ],
-        });
-      }
-    }
-
-    roadDrawList.sort((a, b) => a.pos.wy - b.pos.wy);
-    for (const v of roadDrawList) {
-      let bounds;
-      let extraVertPx = 3.0;
-      if (v.type === 'bus_artic') {
-        const hdx = Math.abs(v.pFront.wx - v.pRear.wx) * 0.5;
-        const hdy = Math.abs(v.pFront.wy - v.pRear.wy) * 0.5;
-        const nExtra = isNight ? 32 * wScale : (isSunset ? 18 * wScale : 6 * wScale);
-        const yExtra = isNight ? 20 * wScale : (isSunset ? 12 * wScale : 0);
-        bounds = {
-          ex: hdx + 16 * wScale + nExtra,
-          eyUp: hdy + 20 * wScale + yExtra,
-          eyDn: hdy + 10 * wScale + yExtra,
-        };
-        extraVertPx = 6.5;
-      } else if (v.type === 'bus') {
-        const atx = Math.abs(v.pos.tx);
-        const aty = Math.abs(v.pos.ty);
-        const nExtra = isNight ? 32 * wScale : (isSunset ? 18 * wScale : 4 * wScale);
-        const yExtra = isNight ? 18 * wScale : (isSunset ? 12 * wScale : 0);
-        bounds = {
-          ex: (atx * 24 + 9) * wScale + nExtra,
-          eyUp: (aty * 24 + 16) * wScale + yExtra,
-          eyDn: (aty * 24 + 7) * wScale + yExtra,
-        };
-        extraVertPx = 6.5;
-      } else if (v.type === 'car') {
-        const atx = Math.abs(v.pos.tx);
-        const aty = Math.abs(v.pos.ty);
-        const nExtra = isNight ? 24 * wScale : (isSunset ? 16 * wScale : 4 * wScale);
-        const yExtra = isNight ? 14 * wScale : (isSunset ? 10 * wScale : 2 * wScale);
-        bounds = {
-          ex: (atx * 12 + 7) * wScale + nExtra,
-          eyUp: (aty * 12 + 11) * wScale + yExtra,
-          eyDn: (aty * 12 + 6) * wScale + yExtra,
-        };
-        extraVertPx = 3.0;
-      } else if (v.type === 'cyclist') {
-        bounds = {
-          ex: (isNight ? 14 : 7) * wScale,
-          eyUp: 11 * wScale,
-          eyDn: (isNight ? 9 : 4) * wScale,
-        };
-        extraVertPx = 2.0;
-      } else if (v.type === 'ped_sim') {
-        bounds = v.bounds || { ex: 4.5 * wScale, eyUp: 9.5 * wScale, eyDn: 3.5 * wScale };
-        extraVertPx = 2.0;
-      } else {
-        bounds = { ex: 4.5 * wScale, eyUp: 9.5 * wScale, eyDn: 3.5 * wScale };
-        extraVertPx = 2.0;
-      }
-
-      drawDepthMasked(v.pos.wx, v.pos.wy, bounds, v.pos.d16, worldW, worldH, (targetCtx) => {
-        if (v.type === 'bus_artic') {
-          draw3DArticulatedBus(targetCtx, cam, v.pRear, v.pMidRear, v.pMidFront, v.pFront, wScale, currentMode, tSec, v.speedRatio, v.isDwelling, v.signals);
-        } else if (v.type === 'bus') {
-          draw3DBus(targetCtx, cam, v.pos, wScale, currentMode, tSec, v.speedRatio, v.isDwelling, v.routeNum, v.signals);
-        } else if (v.type === 'car') {
-          draw3DCar(targetCtx, cam, v.pos, v.colorIdx, wScale, currentMode, tSec, v.signals);
-        } else if (v.type === 'cyclist') {
-          draw3DCyclist(targetCtx, cam, v.pos, v.colorIdx, wScale, currentMode, tSec);
-        } else if (v.type === 'ped_sim') {
-          drawPedestrianEntity(targetCtx, cam, v, wScale, currentMode, tSec);
-        } else if (v.type === 'stop_commuter') {
-          drawMiniPerson(
-            targetCtx,
-            camState.offsetX + v.pos.wx * camState.scale,
-            camState.offsetY + v.pos.wy * camState.scale,
-            camState.scale * wScale * 0.90,
-            v.coat, v.pants, v.hair, isNight, v.stride, v.bag,
-            canvas.width, canvas.height,
-          );
-        }
-      }, extraVertPx);
-    }
-
-    // 3b. NW-platform Bahnhof board & clock drawn before SBB trains so passing trains cleanly pass in front
-    drawPreTrainVignettes(ctx, cam, animData, worldW, worldH, wScale, tSec, currentMode);
-
-    // 4. SBB Seebahn Multi-Carriage Trains
-    for (const tr of (animData.trains || [])) {
-      const trSt = evalTrainState(tr, tSec);
-      const headFrac = trSt.headFrac;
-      if (headFrac < 0 || headFrac > 1.12) continue;
-      const coachPitchFrac = 19.5 / tr.length_m;
-      const bodyLenFrac = 18.1 / tr.length_m;
-      const nCars = tr.carriages || 4;
-      const carSamples = [];
-      for (let cIdx = 0; cIdx < nCars; cIdx++) {
-        const fFront = headFrac - cIdx * coachPitchFrac;
-        const fRear = fFront - bodyLenFrac;
-        if (fRear < 0.004 || fFront > 0.996) {
-          carSamples.push(null);
-          continue;
-        }
-        const pFront = samplePathAt(tr.pts, fFront, worldW, worldH, 2);
-        const pRear = samplePathAt(tr.pts, fRear, worldW, worldH, 2);
-        if (pFront && pRear && (hasDepth || (!pFront.occ && !pRear.occ))) {
-          carSamples.push({
-            cIdx,
-            variant: cIdx === 0 ? 0 : (cIdx === nCars - 1 ? 2 : 1),
-            pFront,
-            pRear,
-            midWx: (pFront.wx + pRear.wx) * 0.5,
-            midWy: (pFront.wy + pRear.wy) * 0.5,
-            midD16: Math.round((pFront.d16 + pRear.d16) * 0.5),
-          });
-        } else {
-          carSamples.push(null);
-        }
-      }
-      const units = [];
-      for (let cIdx = 0; cIdx < nCars; cIdx++) {
-        const u = carSamples[cIdx];
-        if (!u) continue;
-        const nxt = (cIdx < nCars - 1) ? carSamples[cIdx + 1] : null;
-        units.push({
-          ...u,
-          nextRear: nxt ? nxt.pRear : null,
-          nextFront: nxt ? nxt.pFront : null,
-        });
-      }
-      if (units.length > 0) {
-        livingFrameCounts.trains++;
-        const isS8 = tr.id === 'sbb_s8_south';
-        const trainMeta = {
-          kind: 'train',
-          id: tr.id,
-          radiusCss: 18,
-          title: isS8 ? 'SBB S8 · Seebahn Southbound' : 'SBB S24 / IC · Seebahn Northbound',
-          sub: trSt.isDwelling ? 'Boarding at Bahnhof Kilchberg' : (isS8 ? 'Zürich HB → Kilchberg → Pfäffikon SZ' : 'Thalwil → Kilchberg → Zürich HB'),
-          specs: [
-            ['Service', isS8 ? 'SBB S8 Double-Decker' : 'SBB S24 / IC'],
-            ['Status', trSt.isDwelling ? 'Station Dwell · Doors Open' : 'Cruising'],
-            ['Speed', `${Math.round((tr.speed_mps || 20) * trSt.speedRatio * 3.6)} km/h`],
-            ['Track', isS8 ? 'Gleis 2 (Seebahn)' : 'Gleis 1 (Seebahn)'],
-          ],
-        };
-        if (trSt.midFrac >= 0 && trSt.midFrac <= 1) {
-          const midPos = samplePathAt(tr.pts, trSt.midFrac, worldW, worldH, 2);
-          if (midPos) {
-            lastHitTestEntities.push({ ...trainMeta, wx: midPos.wx, wy: midPos.wy });
-          }
-        }
-        for (const u of units) {
-          lastHitTestEntities.push({ ...trainMeta, wx: u.midWx, wy: u.midWy });
-        }
-      }
-      units.sort((a, b) => a.midWy - b.midWy);
-      for (const u of units) {
-        const hdx = Math.abs(u.pFront.wx - u.pRear.wx) * 0.5;
-        const hdy = Math.abs(u.pFront.wy - u.pRear.wy) * 0.5;
-        const isLeadCar = u.variant === 0;
-        const isTailCar = u.variant === 2;
-        const beamX = (isNight && isLeadCar) ? 54 * wScale : ((isNight && isTailCar) ? 20 * wScale : 0);
-        const beamY = (isNight && isLeadCar) ? 32 * wScale : ((isNight && isTailCar) ? 14 * wScale : 0);
-        const trainBounds = {
-          ex: hdx + 16 * wScale + beamX,
-          eyUp: hdy + 26 * wScale + beamY,
-          eyDn: hdy + 12 * wScale + beamY,
-        };
-        drawDepthMasked(u.midWx, u.midWy, trainBounds, u.midD16, worldW, worldH, (targetCtx) => {
-          draw3DTrainUnit(
-            targetCtx, cam,
-            u.pRear, u.pFront, tr.kind, u.variant, wScale, currentMode,
-            u.nextRear, u.nextFront, tSec, trSt.isDwelling, trSt.dwellProgress,
-          );
-        }, 7.5);
-      }
-    }
-
-    // 5. Wind-Coherent Ambient Effects, Landmark Vignettes, Sports Fields, Lake Micro-Life & Atmosphere
-    drawAmbientEffects(ctx, cam, animData, livingFrameCounts, worldW, worldH, wScale, tSec, currentMode);
-    drawKilchbergDetails(ctx, cam, depthMgr, animData, livingFrameCounts, worldW, worldH, wScale, tSec, currentMode, fixedAnimTime, {
-      hasDynamicPeds: !!pedSim,
-    });
-    drawAtmosphereAndLife(ctx, cam, depthMgr, animData, meta, livingFrameCounts, worldW, worldH, wScale, tSec, currentMode);
+    if (!livingInitialized) return;
+    livingEngine.draw(ctx, getCamState(), worldW, worldH, tSec, currentMode, fixedAnimTime);
   }
 
   const audioEngine = createAudioEngine({
@@ -1682,7 +1280,10 @@ import { createTrafficSim } from './js/sim/traffic.js';
     getMode: () => currentMode,
     getWorldSize: () => getWorldSize(),
     getAnimData: () => animData,
-    getTrafficSim: () => trafficSim,
+    getTrafficSim: () => (livingEngine._ctx && livingEngine._ctx.shared ? livingEngine._ctx.shared.trafficSim : null),
+    getLivingAudioSignals: (worldW, worldH, tSec, mode) => (
+      livingInitialized ? livingEngine.getAudioSignals(worldW, worldH, tSec, mode) : []
+    ),
     getAnimTimeSec: () => getAnimTimeSec(),
   });
 
@@ -1769,13 +1370,12 @@ import { createTrafficSim } from './js/sim/traffic.js';
   }
 
   function updateFollowCamera(tSec, snap, dt = 0.016, stepSimIfNeeded = false) {
-    if (!followTarget || !animData || !trafficSim) return;
+    if (!followTarget || !animData || !livingInitialized) return;
     const { width: worldW, height: worldH } = getWorldSize();
     if (stepSimIfNeeded) {
-      const cwOcc = pedSim ? pedSim.getOccupiedCrosswalks() : null;
-      lastSimSnapshot = trafficSim.updateToTime(tSec, currentMode, cwOcc);
+      livingEngine.update(tSec, dt, currentMode);
     }
-    const targetPos = trafficSim.getFollowTarget(followTarget, worldW, worldH);
+    const targetPos = livingEngine.getFollowTarget(followTarget, worldW, worldH);
     if (!targetPos) return;
     const desiredX = canvas.width * 0.5 - targetPos.wx * camState.scale;
     const desiredY = canvas.height * 0.5 - targetPos.wy * camState.scale;
@@ -1842,19 +1442,11 @@ import { createTrafficSim } from './js/sim/traffic.js';
       updateZoomReadout();
     }
 
-    // Step living-world simulation ONCE per frame (no duplicate trafficSim.updateToTime()!)
+    // Step modular LivingEngine ONCE per frame (pedestrians -> traffic -> remaining plugins)
     let animSec = null;
-    if (animData) {
+    if (animData && livingInitialized) {
       animSec = getAnimTimeSec();
-      const liveSnap = (lastSimSnapshot && lastSimSnapshot.mode === currentMode) ? lastSimSnapshot : null;
-      if (pedSim) {
-        pedSim.updateToTime(animSec, currentMode, liveSnap);
-      }
-      if (trafficSim) {
-        const cwOcc = pedSim ? pedSim.getOccupiedCrosswalks() : null;
-        if (pedSim) trafficSim.setExternalPedestrianStats(pedSim.getStats());
-        lastSimSnapshot = trafficSim.updateToTime(animSec, currentMode, cwOcc);
-      }
+      livingEngine.update(animSec, dt, currentMode);
       if (followTarget) {
         updateFollowCamera(animSec, false, dt, false);
       }
@@ -2241,13 +1833,9 @@ import { createTrafficSim } from './js/sim/traffic.js';
     depthMgr.setAnimData(animData);
     depthMgr.buildWaterMask(overviewImages.day);
     if (animData) {
-      trafficSim = createTrafficSim(animData);
-      trafficSim.setCrosswalkOverrideMode(true);
-      pedSim = createPedestrianSim(animData);
-      const t0 = getAnimTimeSec();
-      const ped0 = pedSim.updateToTime(t0, currentMode, null);
-      trafficSim.setExternalPedestrianStats(ped0.stats);
-      lastSimSnapshot = trafficSim.updateToTime(t0, currentMode, ped0.occupiedCrosswalks);
+      livingEngine.init(animData, meta, depthMgr);
+      livingInitialized = true;
+      livingEngine.update(getAnimTimeSec(), 0.016, currentMode);
     }
     populateSidebar();
     resizeViewport(true);
@@ -2296,8 +1884,8 @@ import { createTrafficSim } from './js/sim/traffic.js';
       const { u: cu, v: cv } = getCenterUV();
       const tNow = getAnimTimeSec();
       const fallbackBell = evalBellState(tNow, currentMode).bellPhase;
-      const simStats = trafficSim
-        ? trafficSim.getStats()
+      const simStats = livingInitialized
+        ? livingEngine.getSimStats()
         : {
           vehicles: 0,
           brakingCount: 0,
@@ -2313,6 +1901,7 @@ import { createTrafficSim } from './js/sim/traffic.js';
         };
       const tStats = tileMgr.getStats();
       const cssZoom = camState.scale / dpr;
+      const lrStats = livingEngine.getEngineStats();
       return {
         mode: currentMode,
         zoom: cssZoom,
@@ -2338,8 +1927,30 @@ import { createTrafficSim } from './js/sim/traffic.js';
         showAnimations,
         waterMaskReady: depthMgr.isWaterMaskReady(),
         depthStats: depthMgr.getDepthStats(),
-        livingCounts: { ...livingFrameCounts },
+        livingCounts: livingEngine.getLivingCounts(),
         simStats,
+        livingRegistry: {
+          ...lrStats,
+          register(plugin) {
+            livingEngine.register(plugin);
+            if (animData && livingInitialized) {
+              livingEngine.update(getAnimTimeSec(), 0.016, currentMode);
+            }
+            scheduleDraw();
+            if (showAnimations && animData) startAnimLoop();
+            return true;
+          },
+          unregister(id) {
+            const removed = livingEngine.unregister(id);
+            scheduleDraw();
+            return removed;
+          },
+          setEnabled(id, enabled) {
+            const ok = livingEngine.setEnabled(id, enabled);
+            scheduleDraw();
+            return ok;
+          },
+        },
         frameStats: {
           fps: renderStamps.length,
           p95FrameMs: Number(p95FrameMs.toFixed(2)),

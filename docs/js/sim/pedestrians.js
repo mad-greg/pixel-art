@@ -14,7 +14,7 @@
  *  - Diurnal density curve (night < sunset < day) & zoom-independent simStats telemetry
  */
 
-import { createRng } from './rng.js';
+import { createRng, hashString } from './rng.js';
 import {
   evalBusScheduleState,
   evalShipState,
@@ -24,7 +24,7 @@ import {
   samplePathAt,
 } from './schedule.js';
 import { shadeHex } from '../render/vehicles.js';
-import { drawMiniPerson } from '../render/vignettes.js';
+import { drawMiniPersonV2 } from '../living/draw.js';
 
 export const PED_FIXED_DT = 0.05;
 const MAX_SIM_TIME = 1e9;
@@ -114,7 +114,7 @@ function getActiveBusCountForMode(rd, mode) {
  * Render a single pedestrian entity (including micro-archetype details: dog on leash,
  * stroller, walking partner, Lindt bag, backpack, jogger stride) onto targetCtx.
  */
-export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, _tSec) {
+export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, tSec = 0) {
   const { scale, offsetX, offsetY, width: canvasW, height: canvasH } = cam;
   const isNight = mode === 'night';
   const sBase = scale * wScale * (item.role === 'schoolkid' ? 0.82 : 0.92);
@@ -132,6 +132,50 @@ export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, _tSec) 
 
   const coat = shadeHex(item.coatCol, 1.0, mode);
   const pants = shadeHex(item.pantsCol, 1.0, mode);
+  const idHash = hashString(item.id || 'ped');
+  const isJogger = item.role === 'jogger';
+  const isChatting = item.state === 'social_pause' || item.state === 'plaza_admire';
+  const facing = ux >= 0 ? 1 : -1;
+
+  // Deterministic role-authentic accessories (hats, scarves, sun parasols, Lindt gold bags, jogger sweatbands)
+  let hatCol = null;
+  let scarfCol = null;
+  let umbrellaCol = null;
+  let sweatbandCol = null;
+  let bagCol = item.bagCol || null;
+
+  if (isJogger) {
+    sweatbandCol = '#f8fafc';
+  } else if (item.role === 'lindt_visitor' && !bagCol && (idHash % 3 === 0)) {
+    bagCol = shadeHex('#e5b94c', 1.05, mode);
+  } else if (!isNight && (item.role === 'seebad_bather' || item.role === 'village_walker') && (idHash % 9 === 0)) {
+    const parasolPalette = ['#f43f5e', '#38bdf8', '#fbbf24', '#10b981'];
+    umbrellaCol = shadeHex(parasolPalette[idHash % parasolPalette.length], 1.0, mode);
+  } else if ((idHash % 5) === 1 && item.role !== 'schoolkid') {
+    const hatPalette = ['#475569', '#78350f', '#1e293b', '#92400e'];
+    hatCol = shadeHex(hatPalette[(idHash >>> 3) % hatPalette.length], 1.0, mode);
+  } else if ((isNight || mode === 'sunset') && (idHash % 4) === 2) {
+    const scarfPalette = ['#dc2626', '#f59e0b', '#e2e8f0', '#0284c7'];
+    scarfCol = shadeHex(scarfPalette[(idHash >>> 4) % scarfPalette.length], 1.0, mode);
+  }
+
+  const baseOpts = {
+    coatCol: coat,
+    pantsCol: pants,
+    hairCol: item.hairCol,
+    isNight,
+    phase: isChatting ? (tSec * 2.2 + (idHash % 7)) : item.stridePhase,
+    bagCol,
+    hatCol,
+    scarfCol,
+    umbrellaCol,
+    sweatbandCol,
+    isJogger,
+    isChatting,
+    facing,
+    canvasW,
+    canvasH,
+  };
 
   // Walking couple: draw back partner first for clean depth ordering
   if (item.partnerCoat) {
@@ -139,26 +183,38 @@ export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, _tSec) 
     const latY = ux * 1.45 * px;
     const pSx = sx + latX;
     const pSy = sy + latY;
-    const partnerCoat = shadeHex(item.partnerCoat, 1.0, mode);
+    const partnerOpts = {
+      coatCol: shadeHex(item.partnerCoat, 1.0, mode),
+      pantsCol: pants,
+      hairCol: item.partnerHair || item.hairCol,
+      isNight,
+      phase: isChatting ? (tSec * 2.2 + (idHash % 7) + 1.1) : (item.stridePhase + 0.35),
+      bagCol: null,
+      scarfCol: (idHash % 3 === 0) ? shadeHex('#f59e0b', 1.0, mode) : null,
+      isChatting,
+      facing,
+      canvasW,
+      canvasH,
+    };
     if (latY < 0) {
-      drawMiniPerson(targetCtx, pSx, pSy, sBase * 0.96, partnerCoat, pants, item.partnerHair || item.hairCol, isNight, item.stridePhase + 0.35, null, canvasW, canvasH);
-      drawMiniPerson(targetCtx, sx, sy, sBase, coat, pants, item.hairCol, isNight, item.stridePhase, item.bagCol, canvasW, canvasH);
+      drawMiniPersonV2(targetCtx, pSx, pSy, sBase * 0.96, partnerOpts);
+      drawMiniPersonV2(targetCtx, sx, sy, sBase, baseOpts);
     } else {
-      drawMiniPerson(targetCtx, sx, sy, sBase, coat, pants, item.hairCol, isNight, item.stridePhase, item.bagCol, canvasW, canvasH);
-      drawMiniPerson(targetCtx, pSx, pSy, sBase * 0.96, partnerCoat, pants, item.partnerHair || item.hairCol, isNight, item.stridePhase + 0.35, null, canvasW, canvasH);
+      drawMiniPersonV2(targetCtx, sx, sy, sBase, baseOpts);
+      drawMiniPersonV2(targetCtx, pSx, pSy, sBase * 0.96, partnerOpts);
     }
     return;
   }
 
   // Primary person
-  drawMiniPerson(targetCtx, sx, sy, sBase, coat, pants, item.hairCol, isNight, item.stridePhase, item.bagCol, canvasW, canvasH);
+  drawMiniPersonV2(targetCtx, sx, sy, sBase, baseOpts);
 
-  // Dog walker: subtle leash + tiny animated trotting dog ahead
+  // Dog walker: subtle leash + expressive trotting dog with wagging tail ahead
   if (item.hasDog) {
-    const dogX = sx + ux * 3.1 * px;
+    const dogX = sx + ux * 3.2 * px;
     const dogY = sy + uy * 2.0 * px;
-    const trot = Math.abs(Math.sin(item.stridePhase * 1.45)) * 0.65 * px;
-    const tailWag = Math.sin(item.stridePhase * 2.8) * 0.7 * px;
+    const trot = Math.abs(Math.sin(item.stridePhase * 1.5)) * 0.7 * px;
+    const tailWag = Math.sin(item.stridePhase * 3.2 + tSec * 2.0) * 0.85 * px;
     targetCtx.strokeStyle = isNight ? 'rgba(180,192,210,0.45)' : 'rgba(60,52,44,0.55)';
     targetCtx.lineWidth = Math.max(0.7, 0.65 * px);
     targetCtx.beginPath();
@@ -167,17 +223,29 @@ export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, _tSec) 
     targetCtx.stroke();
 
     const dogCol = shadeHex(item.dogCol || '#9c6b3b', 1.0, mode);
+    const dogShade = shadeHex(item.dogCol || '#9c6b3b', 0.76, mode);
     targetCtx.fillStyle = isNight ? 'rgba(6,10,20,0.38)' : 'rgba(18,24,32,0.24)';
-    targetCtx.fillRect(Math.round(dogX - 1.2 * px), Math.round(dogY + 0.2 * px), Math.max(2, Math.round(2.4 * px)), Math.max(1, Math.round(0.9 * px)));
+    targetCtx.beginPath();
+    targetCtx.ellipse(dogX, dogY + 0.4 * px, Math.max(1.2, 1.3 * px), Math.max(0.6, 0.55 * px), 0, 0, Math.PI * 2);
+    targetCtx.fill();
+    // Legs
+    targetCtx.fillStyle = dogShade;
+    const legStep = Math.round(Math.sin(item.stridePhase * 1.5) * 0.45 * px);
+    targetCtx.fillRect(Math.round(dogX - 0.8 * px + legStep), Math.round(dogY - 0.6 * px), Math.max(1, Math.round(0.55 * px)), Math.max(1, Math.round(0.8 * px)));
+    targetCtx.fillRect(Math.round(dogX + 0.4 * px - legStep), Math.round(dogY - 0.6 * px), Math.max(1, Math.round(0.55 * px)), Math.max(1, Math.round(0.8 * px)));
+    // Body, head, ear & wagging tail
     targetCtx.fillStyle = dogCol;
-    targetCtx.fillRect(Math.round(dogX - 1.1 * px), Math.round(dogY - 1.4 * px - trot), Math.max(2, Math.round(2.3 * px)), Math.max(1.2, Math.round(1.3 * px)));
-    targetCtx.fillRect(Math.round(dogX + ux * 1.0 * px - 0.5 * px), Math.round(dogY - 2.0 * px - trot), Math.max(1, Math.round(1.0 * px)), Math.max(1, Math.round(1.0 * px)));
-    targetCtx.fillRect(Math.round(dogX - ux * 1.2 * px), Math.round(dogY - 1.9 * px - trot + tailWag * 0.4), Math.max(1, Math.round(0.8 * px)), Math.max(1, Math.round(0.8 * px)));
+    targetCtx.fillRect(Math.round(dogX - 1.15 * px), Math.round(dogY - 1.5 * px - trot), Math.max(2, Math.round(2.4 * px)), Math.max(1.2, Math.round(1.3 * px)));
+    targetCtx.fillRect(Math.round(dogX + ux * 1.05 * px - 0.5 * px), Math.round(dogY - 2.15 * px - trot), Math.max(1, Math.round(1.05 * px)), Math.max(1, Math.round(1.05 * px)));
+    targetCtx.fillStyle = dogShade;
+    targetCtx.fillRect(Math.round(dogX + ux * 0.75 * px - 0.3 * px), Math.round(dogY - 2.3 * px - trot), Math.max(1, Math.round(0.55 * px)), Math.max(1, Math.round(0.6 * px)));
+    targetCtx.fillStyle = dogCol;
+    targetCtx.fillRect(Math.round(dogX - ux * 1.3 * px), Math.round(dogY - 2.0 * px - trot + tailWag * 0.5), Math.max(1, Math.round(0.85 * px)), Math.max(1, Math.round(0.8 * px)));
   }
 
-  // Parent with stroller: compact pixel stroller pushed ahead
+  // Parent with stroller: detailed canopy + chassis + wheels pushed ahead
   if (item.hasStroller) {
-    const stX = sx + ux * 2.5 * px;
+    const stX = sx + ux * 2.6 * px;
     const stY = sy + uy * 1.6 * px;
     targetCtx.strokeStyle = isNight ? '#64748b' : '#334155';
     targetCtx.lineWidth = Math.max(0.8, 0.7 * px);
@@ -185,14 +253,19 @@ export function drawPedestrianEntity(targetCtx, cam, item, wScale, mode, _tSec) 
     targetCtx.moveTo(sx + ux * 0.7 * px, sy - 3.2 * px);
     targetCtx.lineTo(stX, stY - 2.2 * px);
     targetCtx.stroke();
+    // Stroller basket & rounded sun canopy
     targetCtx.fillStyle = shadeHex('#1e3a5f', 1.0, mode);
-    targetCtx.fillRect(Math.round(stX - 1.2 * px), Math.round(stY - 3.0 * px), Math.max(2, Math.round(2.6 * px)), Math.max(2, Math.round(2.0 * px)));
+    targetCtx.fillRect(Math.round(stX - 1.25 * px), Math.round(stY - 2.7 * px), Math.max(2, Math.round(2.6 * px)), Math.max(2, Math.round(1.8 * px)));
+    targetCtx.fillStyle = shadeHex('#3b82f6', 0.92, mode);
+    targetCtx.beginPath();
+    targetCtx.arc(stX - ux * 0.35 * px, stY - 2.7 * px, Math.max(1.2, 1.35 * px), Math.PI, 0);
+    targetCtx.fill();
     targetCtx.fillStyle = shadeHex('#cbd5e1', 1.0, mode);
-    targetCtx.fillRect(Math.round(stX - 0.9 * px), Math.round(stY - 2.6 * px), Math.max(1.5, Math.round(1.6 * px)), Math.max(1, Math.round(0.9 * px)));
+    targetCtx.fillRect(Math.round(stX - 0.85 * px), Math.round(stY - 2.3 * px), Math.max(1.5, Math.round(1.6 * px)), Math.max(1, Math.round(0.8 * px)));
     targetCtx.fillStyle = '#0f172a';
-    const wSz = Math.max(1, Math.round(0.85 * px));
-    targetCtx.fillRect(Math.round(stX - 1.1 * px), Math.round(stY - 0.6 * px), wSz, wSz);
-    targetCtx.fillRect(Math.round(stX + 0.5 * px), Math.round(stY - 0.6 * px), wSz, wSz);
+    const wSz = Math.max(1, Math.round(0.9 * px));
+    targetCtx.fillRect(Math.round(stX - 1.15 * px), Math.round(stY - 0.6 * px), wSz, wSz);
+    targetCtx.fillRect(Math.round(stX + 0.55 * px), Math.round(stY - 0.6 * px), wSz, wSz);
   }
 }
 

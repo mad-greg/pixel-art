@@ -496,13 +496,133 @@ class SceneData:
         s.close()
         del s
 
-        # F14a + v10: Per-tree lake distance & true in-lake shoreline distance (stored as float16 ~50 MB)
+        # F14a + v10 + v13 M1B Iter2: Per-tree lake distance, strict dry-land guardrail & smooth shoreline SDF
         dist_lake_05m = ndimage.distance_transform_edt(~self.lake_mask).astype(np.float32) * GRID_RES
         tc_t = np.clip(((self.tree_e - E_MIN) / GRID_RES).astype(np.int32), 0, GRID_W - 1)
         tr_t = np.clip(((N_MAX - self.tree_n) / GRID_RES).astype(np.int32), 0, GRID_H - 1)
         self.tree_dist_lake = dist_lake_05m[tr_t, tc_t].astype(np.float32)
         del dist_lake_05m
+        # v13 M1B Iter2: Strict global-LV95 dry-land guardrail (ZERO trees half-submerged in Lake Zurich!)
+        dry_land_ok = (~self.lake_mask[tr_t, tc_t]) & (self.tree_dist_lake >= 1.50)
+        self.tree_e = self.tree_e[dry_land_ok]
+        self.tree_n = self.tree_n[dry_land_ok]
+        self.tree_z = self.tree_z[dry_land_ok]
+        self.tree_h = self.tree_h[dry_land_ok]
+        self.tree_rad = self.tree_rad[dry_land_ok]
+        self.tree_species = self.tree_species[dry_land_ok]
+        self.tree_dist_lake = self.tree_dist_lake[dry_land_ok]
+        tr_t = tr_t[dry_land_ok]
+        tc_t = tc_t[dry_land_ok]
+        del dry_land_ok
         self.dist_shore_05m = (ndimage.distance_transform_edt(self.lake_mask).astype(np.float32) * GRID_RES).astype(np.float16)
+        # v13 M1B Iter2: Smooth world-space shoreline SDF (eliminates 0.5m staircase shore edge globally, 0 seams!)
+        self.lake_sdf_05m = ndimage.gaussian_filter(
+            self.lake_mask.astype(np.float32), sigma=0.95
+        ).astype(np.float16)
+
+        # v13.0: Deterministic geographic 8-species Swiss/Zürichsee botanical assignment (ZERO cache rebuild!)
+        # 0: Swiss Oak/Beech, 1: Alpine Spruce/Fir, 2: Silver Birch, 3: Lakeside Weeping Willow,
+        # 4: Lombardy Poplar/Cypress, 5: Blossoming Orchard/Cherry, 6: Copper Beech, 7: Swiss Linden/Maple
+        self.tree_sem = self.sem[tr_t, tc_t]
+        self.tree_road_dist = self.road_dist[tr_t, tc_t].astype(np.float32)
+        n_trees_v13 = len(self.tree_e)
+        tid_arr = np.arange(n_trees_v13, dtype=np.uint32)
+        gx15 = np.floor(self.tree_e / 15.0).astype(np.int64).astype(np.uint32)
+        gy15 = np.floor(self.tree_n / 15.0).astype(np.int64).astype(np.uint32)
+        h_grove = ((gx15 * np.uint32(73856093)) ^ (gy15 * np.uint32(19349663)) ^ np.uint32(0x9E3779B9)) & np.uint32(0xFFFF)
+        h_tree = ((tid_arr * np.uint32(2654435761)) ^ (gx15 * np.uint32(83492791)) ^ np.uint32(0x5A3C)) & np.uint32(0xFFFF)
+        u_grove = (h_grove % 1000).astype(np.float32) / 1000.0
+        u_tree = (h_tree % 1000).astype(np.float32) / 1000.0
+        u_mix = (0.65 * u_grove + 0.35 * u_tree) % 1.0
+
+        sp_orig = self.tree_species
+        is_forest_t = self.tree_sem == G_FOREST
+        is_park_t = self.tree_sem == G_PARK_CEMETERY
+        in_morfanlage_t = (
+            (self.tree_e >= 2683870.0) & (self.tree_e <= 2683920.0)
+            & (self.tree_n >= 1242334.0) & (self.tree_n <= 1242402.0)
+        )
+        in_stockengut_t = (
+            (self.tree_e >= 2683150.0) & (self.tree_e <= 2683520.0)
+            & (self.tree_n >= 1241930.0) & (self.tree_n <= 1242140.0)
+        )
+        in_kirche_cem_t = (
+            (self.tree_e >= 2683375.0) & (self.tree_e <= 2683500.0)
+            & (self.tree_n >= 1241053.0) & (self.tree_n <= 1241314.0)
+        )
+
+        # Base broadleaf split: 0 (Swiss Oak/Beech) vs 7 (Swiss Linden/Maple)
+        sp13 = np.where(
+            is_forest_t | (self.tree_rad >= 2.55) | (self.tree_h >= 9.0) | (u_mix < 0.56),
+            0,
+            7,
+        ).astype(np.uint8)
+        is_linden_cand = (~is_forest_t) & (sp_orig <= 1) & (self.tree_road_dist < 9.0) & (u_mix >= 0.42)
+        sp13[is_linden_cand] = 7
+
+        # 1: Alpine Spruce / Silver Fir (all sp==2 + forest enrichment + upper ridge)
+        is_spruce_t = (
+            (sp_orig == 2)
+            | (is_forest_t & (u_mix < 0.38))
+            | ((self.tree_z >= 492.0) & (self.tree_h >= 7.0) & ((h_tree % 5) == 0))
+        )
+        sp13[is_spruce_t] = 1
+
+        # 2: Silver Birch (lakeside, parks, and medium residential sp==1)
+        is_birch_t = (
+            (~is_spruce_t)
+            & (~is_forest_t)
+            & (
+                ((self.tree_dist_lake < 65.0) & (u_mix < 0.32))
+                | (is_park_t & (u_mix >= 0.55) & (u_mix < 0.76))
+                | ((sp_orig == 1) & (self.tree_h >= 4.0) & (self.tree_h <= 13.5) & (u_mix < 0.36))
+            )
+        )
+        sp13[is_birch_t] = 2
+
+        # 3: Lakeside Weeping Willow (dry lakeside park embankment: 2.2m <= dist_lake < 32m, broadleaf, h >= 4.5m)
+        is_willow_t = (
+            (self.tree_dist_lake >= 2.20)
+            & (self.tree_dist_lake < 32.0)
+            & (sp_orig <= 1)
+            & (self.tree_h >= 4.5)
+            & (((h_grove ^ h_tree) % 100) < 32)
+        )
+        sp13[is_willow_t] = 3
+
+        # 4: Lombardy Poplar / Mediterranean Cypress
+        is_cypress_t = (
+            (sp_orig == 3)
+            | (in_kirche_cem_t & (sp_orig <= 1) & ((h_tree % 6) == 0))
+            | ((~is_forest_t) & (self.tree_road_dist < 8.0) & (self.tree_h >= 8.0) & ((h_tree % 18) == 0))
+        )
+        sp13[is_cypress_t] = 4
+
+        # 5: Blossoming Orchard / Cherry / Magnolia (NEVER in Morfanlage or forest; enriched at Stockengut)
+        is_blossom_t = (
+            (~is_forest_t)
+            & (~in_morfanlage_t)
+            & (self.tree_h >= 3.0)
+            & (self.tree_h <= 9.5)
+            & (
+                (sp_orig == 5)
+                | (in_stockengut_t & (sp_orig <= 1) & ((h_tree % 100) < 28))
+                | ((~in_stockengut_t) & (sp_orig <= 1) & (self.tree_dist_lake >= 32.0) & ((h_tree % 100) < 5))
+            )
+        )
+        sp13[is_blossom_t] = 5
+
+        # 6: Copper Beech (Blutbuche) — stately estate/park specimens, never Morfanlage
+        is_copper_t = (
+            (~is_forest_t)
+            & (~in_morfanlage_t)
+            & (
+                (sp_orig == 4)
+                | ((is_park_t | (self.tree_h >= 13.0)) & (sp_orig <= 1) & ((h_tree % 140) == 0))
+            )
+        )
+        sp13[is_copper_t] = 6
+        self.tree_species_v13 = sp13
 
         ortho10_p = cache_dir / "ortho_10cm.npy"
         if ortho10_p.exists():
@@ -593,8 +713,7 @@ class SceneData:
             self.ortho_roof_smooth_05m[:, :, _ch] = np.clip(np.round(_sm_c), 0.0, 255.0).astype(np.uint8)
             del _sm_c
 
-        # v12: Euclidean distance-to-edge field (m) for smooth rounded pillow hedges
-        self.hedge_edt_05m = (ndimage.distance_transform_edt(self.hedge_mask).astype(np.float32) * GRID_RES).astype(np.float16)
+        # (v13 M1B Iter2: self.hedge_edt_05m is computed below after systemic bush/path clearance)
 
         # V6.0/v12: Multi-scale smooth organic alpine meadow variation field (bilinear zoom -> zero 2x2m square steps!)
         rng_m = np.random.default_rng(1350135)
@@ -647,6 +766,14 @@ class SceneData:
         self.park_gravel_sdf_05m = ndimage.gaussian_filter(clean_pg.astype(np.float32), sigma=1.1).astype(np.float16)
         del raw_pg, clean_pg
 
+        # v13 M1B Iter2: Bendlikon Pier shore abutment — convert land G_PLATFORM_PIER into G_FOOTPATH (kills grey concrete blob!)
+        _e05_row = E_MIN + (np.arange(GRID_W, dtype=np.float32) + 0.5) * GRID_RES
+        _n05_col = N_MAX - (np.arange(GRID_H, dtype=np.float32) + 0.5) * GRID_RES
+        _bend_gang_r = (_n05_col >= 1242064.0) & (_n05_col <= 1242076.0)
+        _bend_gang_c = (_e05_row >= 2684034.0) & (_e05_row <= 2684056.5)
+        _bend_gang_box = np.outer(_bend_gang_r, _bend_gang_c)
+        self.sem[_bend_gang_box & (~self.lake_mask) & (self.sem == G_PLATFORM_PIER)] = G_FOOTPATH
+
         self.crosswalk_sdf_05m = ndimage.gaussian_filter(self.crosswalk_mask.astype(np.float32), sigma=0.85).astype(np.float16)
         self.footpath_sdf_05m = ndimage.gaussian_filter((self.sem == G_FOOTPATH).astype(np.float32), sigma=1.1).astype(np.float16)
         self.parking_sdf_05m = ndimage.gaussian_filter((self.sem == G_PARKING).astype(np.float32), sigma=1.2).astype(np.float16)
@@ -675,10 +802,9 @@ class SceneData:
             self.pv_clean_05m = np.zeros((GRID_H, GRID_W), dtype=np.bool_)
         del raw_rmask, raw_pv05, opened_pv, lbl_pv
 
-        # Clean 0.5m mask of REAL moored boats, piers & Seebad jetties (100% bit-identical to v6.2!)
+        # Clean 0.5m mask of REAL piers & Seebad jetties (v13 M1B: remove noisy point-splat LiDAR moored boats!)
         near_shore = ndimage.binary_dilation(~self.lake_mask, iterations=190)
         open_water = ndimage.binary_erosion(self.lake_mask, iterations=1, border_value=0)
-        deep_harbor = ndimage.binary_erosion(self.lake_mask, iterations=4, border_value=0) & (self.bathy_z <= (LAKE_SURFACE_Z - 1.5))
         is_pier = (self.sem == G_PLATFORM_PIER) & self.lake_mask
         rb_diff05 = o_r - o_b
         is_lidar_pier = (
@@ -693,43 +819,86 @@ class SceneData:
             & (rb_diff05 <= 10.0)
             & ((o_g - o_r) < 6.0)
         )
-        is_moored_boat = (
-            deep_harbor
-            & near_shore
-            & (~self.bldg_roof_mask)
-            & (self.chm >= 0.45)
-            & (self.chm <= 3.6)
-            & (lum05 > 152.0)
-            & (chroma05 < 18.0)
-            & (rb_diff05 <= 10.0)
-        )
-        del o_r, o_g, o_b, lum05, chroma05, rb_diff05, near_shore, open_water, deep_harbor
+        del o_r, o_g, o_b, lum05, chroma05, rb_diff05, near_shore, open_water
         clean_pier = np.zeros_like(is_lidar_pier)
         lbl_p, n_p = ndimage.label(is_lidar_pier & (~is_pier))
         if n_p > 0:
             cnt_p = np.bincount(lbl_p.ravel())
-            keep_p = (cnt_p >= 6) & (cnt_p <= 1200)
+            keep_p = (cnt_p >= 24) & (cnt_p <= 1200)
             keep_p[0] = False
-            clean_pier = keep_p[lbl_p]
+            clean_pier = ndimage.binary_closing(
+                keep_p[lbl_p], structure=np.ones((3, 3), dtype=bool)
+            ) & self.lake_mask & (~self.bldg_roof_mask)
         del is_lidar_pier, lbl_p
-        clean_boat = np.zeros_like(is_moored_boat)
-        lbl_b, n_b = ndimage.label(is_moored_boat & (~is_pier) & (~clean_pier))
-        if n_b > 0:
-            cnt_b = np.bincount(lbl_b.ravel())
-            keep_b = (cnt_b >= 4) & (cnt_b <= 180)
-            keep_b[0] = False
-            clean_boat = keep_b[lbl_b]
-        del is_moored_boat, lbl_b
-        self.harbor_obj_mask = is_pier | clean_pier | clean_boat
-        self.pier_only_mask_05m = is_pier | clean_pier
-        del is_pier, clean_pier, clean_boat
+        self.pier_only_mask_05m = (is_pier | clean_pier) & (~_bend_gang_box)
+        self.harbor_obj_mask = self.pier_only_mask_05m
+        del is_pier, clean_pier, _bend_gang_box, _bend_gang_r, _bend_gang_c, _e05_row, _n05_col
 
-        # F9: Crisp 1-2px organic shore & pier foam rings (0 extra float arrays!)
-        foam_base = (~self.lake_mask) | self.harbor_obj_mask
-        self.foam_ring1_05m = self.lake_mask & (~self.harbor_obj_mask) & ndimage.binary_dilation(foam_base, iterations=1)
+        # v13 M1B Iter2: Systemic bush/hedge clearance from paved paths, roads, plazas, parking & pier approaches
+        _paved_clear_base = (
+            np.isin(
+                self.sem,
+                [
+                    G_FOOTPATH, G_STREET_MINOR, G_STREET_MAIN, G_MOTORWAY,
+                    G_PARKING, G_PLATFORM_PIER, G_RAILWAY, G_POOL, G_PITCH,
+                ],
+            )
+            | (self.road_dist <= (self.road_hw + np.float16(0.5)))
+            | self.lake_mask
+            | self.pier_only_mask_05m
+        )
+        _paved_buf_05m = ndimage.binary_dilation(_paved_clear_base, iterations=1)
+        _path_pier_buf = ndimage.binary_dilation(
+            np.isin(self.sem, [G_FOOTPATH, G_PLATFORM_PIER]) | self.pier_only_mask_05m,
+            iterations=2,  # 1.0 m clearance around footpaths & pier/gangway entrances
+        )
+        _pier_entry_buf = ndimage.binary_dilation(
+            (self.sem == G_PLATFORM_PIER) | self.pier_only_mask_05m,
+            iterations=3,  # 1.5 m clearance right at pier/gangway approaches
+        )
+        self.hedge_mask = (
+            self.hedge_mask
+            & (~_paved_buf_05m)
+            & (~_path_pier_buf)
+            & (~_pier_entry_buf)
+            & (~self.yard_pave_mask_05m)
+        )
+        # Remove tiny orphan 1-3 cell fragments clipped at path edges so borders stay clean & sculpted
+        _lbl_h, _n_h = ndimage.label(self.hedge_mask)
+        if _n_h > 0:
+            _cnt_h = np.bincount(_lbl_h.ravel())
+            _keep_h = _cnt_h >= 4
+            _keep_h[0] = False
+            self.hedge_mask = _keep_h[_lbl_h]
+        del _paved_clear_base, _paved_buf_05m, _path_pier_buf, _pier_entry_buf, _lbl_h
+        self.hedge_edt_05m = (
+            ndimage.distance_transform_edt(self.hedge_mask).astype(np.float32) * GRID_RES
+        ).astype(np.float16)
+
+        # World-space smooth pier SDF & flat per-pier deck height (100% macro-tile seam-safe!)
+        self.pier_sdf_05m = ndimage.gaussian_filter(
+            self.pier_only_mask_05m.astype(np.float32), sigma=0.75
+        ).astype(np.float16)
+        pier_h = np.full((GRID_H, GRID_W), 0.88, dtype=np.float32)
+        lbl_ph, n_ph = ndimage.label(self.pier_only_mask_05m)
+        if n_ph > 0:
+            for k_ph in range(1, n_ph + 1):
+                mk_ph = lbl_ph == k_ph
+                med_h = float(np.clip(np.median(self.chm[mk_ph]), 0.78, 1.12))
+                pier_h[mk_ph] = med_h
+        # Propagate flat deck height 1 cell into SDF fringe so bilinearly expanded pier edges stay flat
+        pier_h_dil = ndimage.maximum_filter(np.where(self.pier_only_mask_05m, pier_h, 0.0), size=3)
+        fringe_ph = (~self.pier_only_mask_05m) & (self.pier_sdf_05m >= 0.35) & (pier_h_dil > 0.1)
+        pier_h[fringe_ph] = pier_h_dil[fringe_ph]
+        self.pier_deck_h_05m = pier_h.astype(np.float16)
+        del pier_h, pier_h_dil, fringe_ph, lbl_ph
+
+        # F9: Crisp 1-2px organic shore & pier foam rings (strictly shoreline + real piers, zero removed boats!)
+        foam_base = (~self.lake_mask) | self.pier_only_mask_05m
+        self.foam_ring1_05m = self.lake_mask & (~self.pier_only_mask_05m) & ndimage.binary_dilation(foam_base, iterations=1)
         self.foam_ring2_05m = (
             self.lake_mask
-            & (~self.harbor_obj_mask)
+            & (~self.pier_only_mask_05m)
             & (~self.foam_ring1_05m)
             & ndimage.binary_dilation(foam_base, iterations=3)
         )
@@ -1194,7 +1363,11 @@ def compute_shadow_grid(
     cmax = min(GRID_W, int(dm_c.max()) + 240)
 
     dem_sub = scene.dem[rmin:rmax, cmin:cmax]
-    h_sub = np.maximum(dem_sub + scene.chm[rmin:rmax, cmin:cmax], scene.bridge_z[rmin:rmax, cmin:cmax])
+    lake_sub = scene.lake_mask[rmin:rmax, cmin:cmax]
+    pier_sub = scene.pier_only_mask_05m[rmin:rmax, cmin:cmax]
+    roof_sub = scene.bldg_roof_mask[rmin:rmax, cmin:cmax]
+    chm_sub = np.where(lake_sub & (~pier_sub) & (~roof_sub), 0.0, scene.chm[rmin:rmax, cmin:cmax])
+    h_sub = np.maximum(dem_sub + chm_sub, scene.bridge_z[rmin:rmax, cmin:cmax])
     H_s, W_s = h_sub.shape
 
     az = math.radians(sun_az_deg)
@@ -1639,6 +1812,9 @@ def _shade_drawn_ground_90s(
     mpp: float = 0.25,
     dist_lake: np.ndarray | None = None,
     gz_smooth: np.ndarray | None = None,
+    pier_sdf: np.ndarray | None = None,
+    pier_h_val: np.ndarray | None = None,
+    lake_sdf: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """V6.0/v10 Museum-Grade 90s Pixel-Art Ground Shader:
     - Organic wildflower Swiss alpine meadows & lush manicured residential garden lawns (ZERO fake mowing stripes,
@@ -1864,28 +2040,30 @@ def _shade_drawn_ground_90s(
         u_perp = np.where(is_gm_v, ve_v * 0.995 + vn_v * 0.10, ve_v * 0.955 + vn_v * 0.296)
         v_along = np.where(is_gm_v, -ve_v * 0.10 + vn_v * 0.995, -ve_v * 0.296 + vn_v * 0.955)
         u_row = u_perp % pitch_v
+        row_id = np.floor(u_perp / pitch_v)
         on_vine = u_row < 0.85
         vine_sh = (u_row >= 0.85) & (u_row < 1.25)
-        # Tilled dark-loam furrows + narrow green cover-crop strip between rows
-        vcol = np.where((p_hash[vi] < 110)[:, None], [102.0, 82.0, 60.0], [118.0, 96.0, 70.0]).astype(np.float32)
-        cover_crop = (u_row >= 1.35) & (u_row <= (pitch_v - 0.30)) & (p_hash[vi] < 145)
-        vcol[cover_crop] = [84.0, 114.0, 58.0]
+        # v13.0: Clean cel-shaded tilled-earth furrow + neat mowed-grass alley (ZERO p_hash per-pixel noise!)
+        vcol = np.full((len(vi), 3), [112.0, 92.0, 68.0], dtype=np.float32)
+        cover_crop = (u_row >= 1.32) & (u_row <= (pitch_v - 0.28))
+        vcol[cover_crop] = [86.0, 122.0, 58.0]
         vcol[vine_sh] *= 0.72
-        # 3-tone leafy grapevine trellis rows
-        ph_v = p_hash[vi]
+        # Smooth deterministic world-space trellised grapevine leaf clusters (3-step cel-shaded)
+        clump_v = 0.5 + 0.5 * np.sin(v_along * 2.2 + row_id * 1.7) * np.cos(u_row * 3.2 - 0.6)
         vine_leaf = np.where(
-            (ph_v < 78)[:, None],
-            [78.0, 138.0, 48.0],
-            np.where((ph_v < 180)[:, None], [56.0, 110.0, 42.0], [40.0, 82.0, 34.0]),
+            ((u_row < 0.44) & (clump_v > 0.46))[:, None],
+            [86.0, 146.0, 50.0],
+            np.where(((u_row < 0.68) & (clump_v > 0.28))[:, None], [58.0, 114.0, 44.0], [36.0, 78.0, 34.0]),
         ).astype(np.float32)
         vcol[on_vine] = vine_leaf[on_vine]
-        # Wooden trellis end-posts every 11m
-        on_post = ((v_along % 11.0) < 0.35) & (u_row >= 0.22) & (u_row <= 0.62)
+        # Crisp wooden trellis end-posts every 11m
+        on_post = ((v_along % 11.0) < 0.38) & (u_row >= 0.22) & (u_row <= 0.62)
         vcol[on_post] = [118.0, 86.0, 56.0]
-        # Jura dry-stone terrace retaining walls on sloped vineyard contours
+        # Jura dry-stone terrace retaining walls on sloped vineyard contours (smooth world-space blocks, zero noise)
         on_terrace = ((gnz[vi] < 0.975) & ((gz[vi] % 2.8) < 0.38)) | (is_gm_v & (np.abs(vn_v - 1242258.0) < 0.65))
         if on_terrace.any():
-            vcol[on_terrace] = np.where((ph_v[on_terrace] < 95)[:, None], [142.0, 134.0, 120.0], [170.0, 162.0, 146.0])
+            stone_hi = np.sin(v_along[on_terrace] * 1.4) >= 0.0
+            vcol[on_terrace] = np.where(stone_hi[:, None], [168.0, 160.0, 144.0], [146.0, 138.0, 124.0]).astype(np.float32)
         gcol[vi] = vcol
         gz[vi[on_vine & (~on_terrace)]] += 0.95
         gz[vi[on_post & (~on_terrace)]] += 0.30
@@ -2311,7 +2489,7 @@ def _shade_drawn_ground_90s(
         gcol[p_i] = pcol
         gnx[p_i], gny[p_i], gnz[p_i] = 0.0, 0.0, 1.0
 
-    # 13. F9 + v10: Master-Crafted 90s SVGA Lake Zurich (4-band bilinear bathymetry + Bayer 4x4 transitions + crisp isometric wavelets + smooth bilinear foam!)
+    # 13. v13 M1B: Silky-Smooth 4-Band Lake Zurich Bathymetry + Crisp Solid Stone/Timber Pier Decks!
     if glake.any():
         li = np.nonzero(glake)[0]
         is_real_harbor_obj = gharbor[li]
@@ -2319,10 +2497,9 @@ def _shade_drawn_ground_90s(
         wi = li[~is_real_harbor_obj]
         if len(wi) > 0:
             depth_m = np.clip(LAKE_SURFACE_Z - gbathy[wi], 0.0, 65.0)
-            bayer_w = BAYER_4X4[iy25[wi] & 3, ix25[wi] & 3]
-            d_dith = np.clip(depth_m + bayer_w * 0.85, 0.0, 65.0)
+            d_dith = depth_m
             if preset_key == "day":
-                c_b0 = np.array([68.0, 136.0, 118.0], dtype=np.float32)  # Sunlit turquoise-emerald pebble shallows
+                c_b0 = np.array([68.0, 136.0, 118.0], dtype=np.float32)  # Sunlit turquoise-emerald shallows
                 c_b1 = np.array([46.0, 112.0, 116.0], dtype=np.float32)  # Jade mid-shelf
                 c_b2 = np.array([36.0, 92.0, 112.0], dtype=np.float32)   # Alpine teal
                 c_b3 = np.array([28.0, 76.0, 108.0], dtype=np.float32)   # Deep sapphire
@@ -2348,30 +2525,14 @@ def _shade_drawn_ground_90s(
                     (1.0 - t23) * c_b2 + t23 * c_b3,
                 ),
             )
-            # Clamp shallow ortho redness so zero winter shoreline reed tint ever leaks into shallow water!
-            shallow_tint = np.clip((4.5 - depth_m) / 4.5, 0.0, 1.0)[:, None] * 0.14
-            ortho_w = np.clip(raw_ortho[wi].astype(np.float32) * 1.12, 24.0, 165.0)
-            ortho_w[:, 0] = np.minimum(ortho_w[:, 0], ortho_w[:, 1] * 0.92)
-            w_col = (1.0 - shallow_tint) * w_col + shallow_tint * ortho_w
 
             we_w = ge[wi]
             wn_w = gn[wi]
-            # Procedural shallow pebble caustics (0.5m .. 3.0m)
-            c_w = np.clip(1.0 - np.abs(depth_m - 1.45) / 1.45, 0.0, 1.0) * (depth_m >= 0.40) * (depth_m <= 3.2)
-            if (c_w > 0.15).any():
-                c_u = we_w * 0.85 + wn_w * 0.42
-                c_v = -we_w * 0.42 + wn_w * 0.85
-                caust = np.abs(
-                    np.sin(c_u * 1.15 + np.sin(c_v * 0.95) * 0.8) * np.cos(c_v * 1.10 - np.cos(c_u * 0.85) * 0.7)
-                )
-                on_caust = (c_w > 0.15) & (caust > 0.68)
-                peb_dark = (c_w > 0.25) & (p_hash[wi] < 38)
-                w_col[on_caust] += c_w[on_caust, None] * np.array([22.0, 34.0, 26.0], dtype=np.float32)
-                w_col[peb_dark] -= c_w[peb_dark, None] * np.array([10.0, 14.0, 10.0], dtype=np.float32)
 
-            # Isometric 2:1 pixel-art wavelets aligned horizontally in camera screen space
+            # Gentle open-water isometric wavelets (strictly deeper water >= 2.2m, ramped smoothly over 2.2..4.0m)
             u_iso = we_w * 0.2079 + wn_w * 0.9781
             v_iso = -we_w * 0.9781 + wn_w * 0.2079
+            w_fade = np.clip((depth_m - 2.2) / 1.8, 0.0, 1.0)
             row_id = np.floor(v_iso * 0.75).astype(np.int32)
             u_stag = (u_iso + (row_id & 1) * 3.1) * 0.22
             col_id = np.floor(u_stag).astype(np.int32)
@@ -2379,61 +2540,256 @@ def _shade_drawn_ground_90s(
             v_frac = (v_iso * 0.75) % 1.0
             dash_u = u_stag % 1.0
             in_dash = v_frac < 0.24
-            crest = in_dash & (w_hash < 34) & (dash_u >= 0.14) & (dash_u <= 0.74) & (depth_m >= 0.65)
-            trough = (v_frac >= 0.24) & (v_frac < 0.44) & (w_hash < 34) & (dash_u >= 0.18) & (dash_u <= 0.70) & (depth_m >= 0.65)
+            crest = in_dash & (w_hash < 34) & (dash_u >= 0.14) & (dash_u <= 0.74) & (depth_m >= 2.2)
+            trough = (v_frac >= 0.24) & (v_frac < 0.44) & (w_hash < 34) & (dash_u >= 0.18) & (dash_u <= 0.70) & (depth_m >= 2.2)
             crest_sky = (
                 np.array([26.0, 40.0, 64.0], dtype=np.float32)
                 if preset_key == "night"
                 else (np.array([66.0, 118.0, 142.0], dtype=np.float32) if preset_key == "day" else np.array([56.0, 74.0, 96.0], dtype=np.float32))
             )
-            w_col[crest] = 0.64 * w_col[crest] + 0.36 * crest_sky
-            w_col[trough] *= 0.90
+            if crest.any():
+                c_mix = (0.18 * w_fade[crest])[:, None]
+                w_col[crest] = (1.0 - c_mix) * w_col[crest] + c_mix * crest_sky
+            if trough.any():
+                w_col[trough] *= (1.0 - 0.05 * w_fade[trough])[:, None]
 
-            # Crisp 1-2px organic broken shore & pier foam curls (bilinear distance field at <=0.18 m/px!)
-            r05_w = r05[wi]
-            c05_w = c05[wi]
-            if dist_lake is not None:
+            # Clean bilinear shoreline contact rim (tracks smooth lake_sdf >= 0.50 curve with zero 0.5m staircase!)
+            if lake_sdf is not None:
+                ls_w = lake_sdf[wi]
+                f1 = (ls_w >= 0.50) & (ls_w <= 0.72) & (np.sin(u_iso * 0.65 + v_iso * 0.45) > -0.25)
+            elif dist_lake is not None:
                 ds_w = dist_lake[wi]
-                # ds_w is true in-lake distance from shore (0 on land, smoothly >0 in water); combine with pier foam
-                f1 = (((ds_w > 0.0) & (ds_w <= 0.55)) | (scene.foam_ring1_05m[r05_w, c05_w] & (ds_w > 0.65))) & (
-                    np.sin(u_iso * 0.65 + v_iso * 0.45) > -0.35
-                )
-                f2 = (scene.foam_ring2_05m[r05_w, c05_w] & (p_hash[wi] < 54) & (np.sin(u_iso * 0.80) > 0.18))
+                f1 = (ds_w > 0.0) & (ds_w <= 0.45) & (np.sin(u_iso * 0.65 + v_iso * 0.45) > -0.25)
             else:
-                f1 = scene.foam_ring1_05m[r05_w, c05_w] & (np.sin(u_iso * 0.65 + v_iso * 0.45) > -0.35)
-                f2 = scene.foam_ring2_05m[r05_w, c05_w] & (p_hash[wi] < 48) & (np.sin(u_iso * 0.80) > 0.20)
+                r05_w = r05[wi]
+                c05_w = c05[wi]
+                f1 = scene.foam_ring1_05m[r05_w, c05_w] & (np.sin(u_iso * 0.65 + v_iso * 0.45) > -0.25)
             if f1.any():
-                w_col[f1] = 0.45 * w_col[f1] + 0.55 * np.array([218.0, 240.0, 236.0], dtype=np.float32)
-            if f2.any():
-                w_col[f2] = 0.70 * w_col[f2] + 0.30 * np.array([196.0, 230.0, 226.0], dtype=np.float32)
+                foam_tint = (
+                    np.array([84.0, 118.0, 128.0], dtype=np.float32)
+                    if preset_key == "night"
+                    else (np.array([212.0, 236.0, 232.0], dtype=np.float32) if preset_key == "day" else np.array([176.0, 198.0, 196.0], dtype=np.float32))
+                )
+                w_col[f1] = 0.62 * w_col[f1] + 0.38 * foam_tint
 
+            # Smooth pier water contact shadow directly from world-space pier_sdf (zero dotted grid!)
+            if pier_sdf is not None:
+                ps_w = pier_sdf[wi]
+                p_sh = (ps_w >= 0.12) & (ps_w < 0.48)
+                if p_sh.any():
+                    w_col[p_sh] *= 0.84
+
+            gz[wi] = LAKE_SURFACE_Z
             gcol[wi] = np.clip(w_col, 0.0, 250.0)
             gmat[wi] = M_WATER_LAKE
             gnx[wi], gny[wi], gnz[wi] = 0.0, 0.0, 1.0
 
         bi_h = li[is_real_harbor_obj]
         if len(bi_h) > 0:
-            real_h = np.clip(sub_chm_val[bi_h], 0.65, 3.6)
-            gz[bi_h] = LAKE_SURFACE_Z + real_h
-            raw_h = raw_ortho[bi_h].astype(np.float32)
-            hlum = 0.299 * raw_h[:, 0] + 0.587 * raw_h[:, 1] + 0.114 * raw_h[:, 2]
-            is_wpier = (gsem[bi_h] == G_PLATFORM_PIER) | (hlum < 176.0)
-            hcol = condition_90s_albedo(raw_ortho[bi_h], shadow_knee=74.0, vibrancy=1.16)
-            # Crisp warm timber pier planks & stone jetties!
-            plank = ((ix25[bi_h[is_wpier]] + iy25[bi_h[is_wpier]]) % 3) == 0
-            warm_wood = (raw_h[is_wpier, 0] - raw_h[is_wpier, 2]) > 8.0
-            pier_base = np.where(warm_wood[:, None], [176.0, 154.0, 124.0], [170.0, 166.0, 158.0]).astype(np.float32)
-            pier_base[plank] *= 0.87
-            hcol[is_wpier] = 0.72 * pier_base + 0.28 * hcol[is_wpier]
-            # Bright sunlit white moored sailboat & motorboat hulls!
-            is_boat = ~is_wpier
-            if is_boat.any():
-                hcol[is_boat] = np.clip(hcol[is_boat] * 1.06 + 8.0, 185.0, 242.0)
-            gcol[bi_h] = hcol
+            # Flat per-pier deck height & clean global-LV95 planked timber / Swiss quay stone (zero 0.5m LiDAR noise!)
+            if pier_h_val is not None:
+                gz[bi_h] = LAKE_SURFACE_Z + pier_h_val[bi_h].astype(np.float32)
+            else:
+                gz[bi_h] = LAKE_SURFACE_Z + 0.90
+            pe_h = ge[bi_h]
+            pn_h = gn[bi_h]
+            is_stone_pier = gsem[bi_h] == G_PLATFORM_PIER
+            # Stone quay decks (Bendlikon Pavilion, etc.)
+            stone_col = np.full((len(bi_h), 3), [172.0, 168.0, 160.0], dtype=np.float32)
+            stone_joint = ((pe_h % 1.2) < 0.08) | ((pn_h % 1.2) < 0.08)
+            stone_col[stone_joint] *= 0.90
+            # Weathered timber jetties (Seebad Kilchberg & private wooden piers)
+            wood_col = np.full((len(bi_h), 3), [174.0, 146.0, 112.0], dtype=np.float32)
+            wood_alt = (np.floor(pe_h / 0.55).astype(np.int32) & 1) == 0
+            wood_col[wood_alt] *= 0.95
+            wood_seam = (pe_h % 0.55) < 0.08
+            wood_col[wood_seam] *= 0.86
+            gcol[bi_h] = np.where(is_stone_pier[:, None], stone_col, wood_col)
             gmat[bi_h] = M_HARBOR_OBJ
-            gnx[bi_h], gny[bi_h], gnz[bi_h] = 0.15, -0.15, 0.97
+            gnx[bi_h], gny[bi_h], gnz[bi_h] = 0.0, 0.0, 1.0
 
     return gcol, gmat, gz, g_seebad_pool
+
+
+def _fill_3d_poly(
+    camera: IsometricCamera,
+    shift_x: float,
+    shift_y: float,
+    W: int,
+    H: int,
+    zbuf: np.ndarray,
+    rgb_buf: np.ndarray,
+    mat_buf: np.ndarray,
+    obj_buf: np.ndarray,
+    norm_buf: np.ndarray,
+    shadow_buf: np.ndarray,
+    pts_3d: list[tuple[float, float, float]],
+    col_rgb: tuple[float, float, float] | list[float] | np.ndarray,
+    obj_id: int,
+    mat_id: int = M_BRIDGE,
+    norm: tuple[float, float, float] = (0.0, 0.0, 1.0),
+    is_shadow: bool = False,
+    shadow_mat_only: int | None = None,
+    shadow_mul: float = 0.76,
+    z_bias: float = 0.0,
+    plank_e_step: float = 0.0,
+    plank_col: list[float] | np.ndarray | None = None,
+    plank_seam_w: float = 0.09,
+    rib_u_step: float = 0.0,
+    rib_col: list[float] | np.ndarray | None = None,
+    rib_w: float = 0.24,
+    edge_frame_w: float = 0.0,
+) -> tuple[int, int, int, int, float] | None:
+    """Shared exact 2D/3D convex polygon rasterizer with planar z-buffer depth (zero gaps at any mpp!)."""
+    nv = len(pts_3d)
+    if nv < 3:
+        return None
+    pe_a = np.array([p[0] for p in pts_3d], dtype=np.float64)
+    pn_a = np.array([p[1] for p in pts_3d], dtype=np.float64)
+    pz_a = np.array([p[2] for p in pts_3d], dtype=np.float64)
+    sx, sy, sd = camera.project(pe_a, pn_a, pz_a)
+    sx = sx + shift_x
+    sy = sy + shift_y
+    sd = sd + z_bias
+
+    x0 = max(0, int(math.floor(float(sx.min()))))
+    x1 = min(W - 1, int(math.ceil(float(sx.max()))))
+    y0 = max(0, int(math.floor(float(sy.min()))))
+    y1 = min(H - 1, int(math.ceil(float(sy.max()))))
+    if x0 > x1 or y0 > y1:
+        return None
+
+    area2 = 0.0
+    for i_e in range(nv):
+        j_e = (i_e + 1) % nv
+        area2 += (sx[i_e] * sy[j_e] - sx[j_e] * sy[i_e])
+    if abs(area2) < 0.02:
+        return None
+    sgn = 1.0 if area2 > 0.0 else -1.0
+
+    xs_g = np.arange(x0, x1 + 1, dtype=np.float64)
+    ys_g = np.arange(y0, y1 + 1, dtype=np.float64)
+    gx, gy = np.meshgrid(xs_g, ys_g)
+    inside = np.ones(gx.shape, dtype=np.bool_)
+    for i_e in range(nv):
+        j_e = (i_e + 1) % nv
+        ex_e = sx[j_e] - sx[i_e]
+        ey_e = sy[j_e] - sy[i_e]
+        elen = math.hypot(ex_e, ey_e)
+        if elen < 1e-6:
+            continue
+        cross = (ex_e * (gy - sy[i_e]) - ey_e * (gx - sx[i_e])) * sgn
+        inside &= cross >= (-0.08 * elen)
+    if not inside.any():
+        return None
+
+    ax0, ay0, ad0 = float(sx[0]), float(sy[0]), float(sd[0])
+    ax1, ay1, ad1 = float(sx[1]), float(sy[1]), float(sd[1])
+    i2 = 3 if nv == 4 else 2
+    ax2, ay2, ad2 = float(sx[i2]), float(sy[i2]), float(sd[i2])
+    det = (ax1 - ax0) * (ay2 - ay0) - (ax2 - ax0) * (ay1 - ay0)
+    if abs(det) < 1e-5 and nv > 3:
+        i2 = 2 if i2 == 3 else 3
+        ax2, ay2, ad2 = float(sx[i2]), float(sy[i2]), float(sd[i2])
+        det = (ax1 - ax0) * (ay2 - ay0) - (ax2 - ax0) * (ay1 - ay0)
+
+    iy_m, ix_m = np.nonzero(inside)
+    px_m = x0 + ix_m
+    py_m = y0 + iy_m
+    w1 = None
+    w2 = None
+    if abs(det) >= 1e-5:
+        inv_det = 1.0 / det
+        w1 = ((px_m - ax0) * (ay2 - ay0) - (py_m - ay0) * (ax2 - ax0)) * inv_det
+        w2 = ((ax1 - ax0) * (py_m - ay0) - (ay1 - ay0) * (px_m - ax0)) * inv_det
+        dd = (ad0 + w1 * (ad1 - ad0) + w2 * (ad2 - ad0)).astype(np.float32)
+    else:
+        dd = np.full(len(px_m), float(sd.mean()), dtype=np.float32)
+
+    if is_shadow:
+        if shadow_mat_only is not None:
+            sh_ok = mat_buf[py_m, px_m] == shadow_mat_only
+        else:
+            sh_ok = (dd < (zbuf[py_m, px_m] + 0.45)) & (obj_buf[py_m, px_m] == 0)
+        if sh_ok.any():
+            rgb_buf[py_m[sh_ok], px_m[sh_ok]] *= shadow_mul
+        return None
+
+    win = dd < zbuf[py_m, px_m]
+    if win.any():
+        wx, wy, wd = px_m[win], py_m[win], dd[win]
+        zbuf[wy, wx] = wd
+        if plank_e_step > 0.0 and plank_col is not None and w1 is not None and w2 is not None:
+            ew_m = pe_a[0] + w1[win] * (pe_a[1] - pe_a[0]) + w2[win] * (pe_a[i2] - pe_a[0])
+            on_seam = (ew_m % plank_e_step) < plank_seam_w
+            c_arr = np.where(on_seam[:, None], plank_col, col_rgb).astype(np.float32)
+            rgb_buf[wy, wx] = c_arr
+        elif (rib_u_step > 0.0 or edge_frame_w > 0.0) and rib_col is not None and w1 is not None and w2 is not None and nv == 4 and i2 == 3:
+            # Quad p0->p1 = u-axis, p0->p3 = v-axis (note: for quad [p0, p1, p2, p3], i2=3 gives exact (u, v) in [0,1]^2!)
+            u_len = math.sqrt((pe_a[1] - pe_a[0]) ** 2 + (pn_a[1] - pn_a[0]) ** 2 + (pz_a[1] - pz_a[0]) ** 2)
+            v_len = math.sqrt((pe_a[3] - pe_a[0]) ** 2 + (pn_a[3] - pn_a[0]) ** 2 + (pz_a[3] - pz_a[0]) ** 2)
+            u_m = w1[win] * u_len
+            v_m = w2[win] * v_len
+            on_rib = np.zeros(len(wx), dtype=np.bool_)
+            if rib_u_step > 0.0:
+                on_rib |= (u_m % rib_u_step) < rib_w
+            if edge_frame_w > 0.0:
+                on_rib |= (u_m < edge_frame_w) | (u_m > (u_len - edge_frame_w)) | (v_m < edge_frame_w) | (v_m > (v_len - edge_frame_w))
+            rgb_buf[wy, wx] = np.where(on_rib[:, None], rib_col, col_rgb).astype(np.float32)
+        else:
+            rgb_buf[wy, wx] = col_rgb
+        mat_buf[wy, wx] = mat_id
+        obj_buf[wy, wx] = obj_id
+        norm_buf[wy, wx] = norm
+        shadow_buf[wy, wx] = False
+    return (x0, y0, x1, y1, float(sd.max()))
+
+
+def _fill_3d_box(
+    camera: IsometricCamera,
+    shift_x: float,
+    shift_y: float,
+    W: int,
+    H: int,
+    zbuf: np.ndarray,
+    rgb_buf: np.ndarray,
+    mat_buf: np.ndarray,
+    obj_buf: np.ndarray,
+    norm_buf: np.ndarray,
+    shadow_buf: np.ndarray,
+    e0: float,
+    e1: float,
+    n0: float,
+    n1: float,
+    z_bot: float,
+    z_top: float,
+    col_rgb: tuple[float, float, float] | list[float] | np.ndarray,
+    obj_id: int,
+    mat_id: int = M_BRIDGE,
+    top_rgb: tuple[float, float, float] | list[float] | np.ndarray | None = None,
+) -> None:
+    """Rasterize a solid 3D axis-aligned isometric box (top cap + all 4 vertical faces; z-buffer culls back faces)."""
+    if z_top <= z_bot + 0.04:
+        return
+    c_top = top_rgb if top_rgb is not None else col_rgb
+    # Top horizontal cap
+    _fill_3d_poly(
+        camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+        [(e0, n0, z_top), (e1, n0, z_top), (e1, n1, z_top), (e0, n1, z_top)],
+        c_top, obj_id, mat_id=mat_id, norm=(0.0, 0.0, 1.0),
+    )
+    # 4 vertical faces (z-buffer cleanly selects the 2 camera-facing faces with exact outward normals)
+    faces = (
+        ([(e1, n0, z_bot), (e1, n1, z_bot), (e1, n1, z_top), (e1, n0, z_top)], (1.0, 0.0, 0.0)),
+        ([(e0, n0, z_bot), (e1, n0, z_bot), (e1, n0, z_top), (e0, n0, z_top)], (0.0, -1.0, 0.0)),
+        ([(e0, n1, z_bot), (e0, n0, z_bot), (e0, n0, z_top), (e0, n1, z_top)], (-1.0, 0.0, 0.0)),
+        ([(e1, n1, z_bot), (e0, n1, z_bot), (e0, n1, z_top), (e1, n1, z_top)], (0.0, 1.0, 0.0)),
+    )
+    for f_pts, f_norm in faces:
+        _fill_3d_poly(
+            camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+            f_pts, col_rgb, obj_id, mat_id=mat_id, norm=f_norm,
+        )
 
 
 def _draw_3d_box_column(
@@ -2457,42 +2813,14 @@ def _draw_3d_box_column(
     obj_id: int,
     mat_id: int = M_BRIDGE,
 ) -> None:
-    """Rasterize a crisp vertical 3D rectangular pillar/mast (viaduct pier or SBB catenary mast)."""
-    if z_top <= z_bot + 0.1:
+    """Rasterize a solid 3D rectangular pillar/column/box (zero 5-stick split at any half_w or mpp!)."""
+    if z_top <= z_bot + 0.08:
         return
-    step_z = max(0.06, camera.mpp * 0.52)
-    zs = np.arange(z_bot, z_top + 0.05, step_z, dtype=np.float32)
-    if len(zs) == 0:
-        return
-    # Sample 4 perimeter faces of the square column
-    offs = [
-        (half_w, 0.0, 1.0, 0.0),
-        (0.0, half_w, 0.0, 1.0),
-        (-half_w, 0.0, -1.0, 0.0),
-        (0.0, -half_w, 0.0, -1.0),
-        (0.0, 0.0, 0.6, -0.6),
-    ]
-    for oe, on, nx_v, ny_v in offs:
-        px, py, pd = camera.project(np.full_like(zs, e_c + oe), np.full_like(zs, n_c + on), zs)
-        ix = np.round(px + shift_x).astype(np.int32)
-        iy = np.round(py + shift_y).astype(np.int32)
-        vm = (ix >= 0) & (ix < W - 1) & (iy >= 0) & (iy < H - 1)
-        if not vm.any():
-            continue
-        ix, iy, pd = ix[vm], iy[vm], pd[vm]
-        for ox in (0, 1):
-            tx = ix + ox
-            w_m = pd < zbuf[iy, tx]
-            if w_m.any():
-                wy, wx = iy[w_m], tx[w_m]
-                zbuf[wy, wx] = pd[w_m]
-                rgb_buf[wy, wx] = col_rgb
-                mat_buf[wy, wx] = mat_id
-                obj_buf[wy, wx] = obj_id
-                norm_buf[wy, wx, 0] = nx_v
-                norm_buf[wy, wx, 1] = ny_v
-                norm_buf[wy, wx, 2] = 0.25
-                shadow_buf[wy, wx] = False
+    hw = max(float(half_w), camera.mpp * 0.60)
+    _fill_3d_box(
+        camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+        e_c - hw, e_c + hw, n_c - hw, n_c + hw, z_bot, z_top, col_rgb, obj_id, mat_id=mat_id,
+    )
 
 
 def _render_elevated_bridges_and_rail_portals(
@@ -2691,23 +3019,36 @@ def _render_elevated_bridges_and_rail_portals(
                 norm_buf[ty[win], tx[win], 1] = 0.0
                 norm_buf[ty[win], tx[win], 2] = 1.0
 
-        # Vertical Concrete Box-Girder Side Fascia along outer bridge edges (leaving open air beneath!)
+        # Vertical Concrete Box-Girder Side Fascia along outer bridge edges (resolution-aware tangent sub-sampling -> zero gaps!)
         er_b, ec_b = np.nonzero(bmask & (np.abs(sub_bsdist) >= (sub_bhw - 0.65)))
         if len(er_b) > 0:
-            fe_b = E_MIN + (ec_b + c0 + 0.5) * GRID_RES
-            fn_b = N_MAX - (er_b + r0 + 0.5) * GRID_RES
-            fz_top = sub_bz[er_b, ec_b] + 0.92
-            girder_d = np.where(sub_bcls[er_b, ec_b] == BR_STEPS, 0.95, 1.45)
-            fz_bot = np.maximum(sub_dem[er_b, ec_b], sub_bz[er_b, ec_b] - girder_d)
-            f_bid = sub_bid[er_b, ec_b].astype(np.int32)
-            # Outward normal from centerline tangent + sign of bsdist
-            sgn_sd = np.where(sub_bsdist[er_b, ec_b] >= 0.0, 1.0, -1.0)
-            f_ang = sub_bang[er_b, ec_b]
-            fnx_b = (np.sin(f_ang) * sgn_sd).astype(np.float32)
-            fny_b = (-np.cos(f_ang) * sgn_sd).astype(np.float32)
-            f_is_rail_br = sub_bcls[er_b, ec_b] == BR_RAIL_BRIDGE
+            fe_b0 = E_MIN + (ec_b + c0 + 0.5) * GRID_RES
+            fn_b0 = N_MAX - (er_b + r0 + 0.5) * GRID_RES
+            fz_top0 = sub_bz[er_b, ec_b] + 0.92
+            girder_d0 = np.where(sub_bcls[er_b, ec_b] == BR_STEPS, 0.95, 1.45)
+            fz_bot0 = np.maximum(sub_dem[er_b, ec_b], sub_bz[er_b, ec_b] - girder_d0)
+            f_bid0 = sub_bid[er_b, ec_b].astype(np.int32)
+            sgn_sd0 = np.where(sub_bsdist[er_b, ec_b] >= 0.0, 1.0, -1.0)
+            f_ang0 = sub_bang[er_b, ec_b]
+            ftx0 = np.cos(f_ang0)
+            fty0 = np.sin(f_ang0)
+            fnx_b0 = (np.sin(f_ang0) * sgn_sd0).astype(np.float32)
+            fny_b0 = (-np.cos(f_ang0) * sgn_sd0).astype(np.float32)
+            f_is_rail_br0 = sub_bcls[er_b, ec_b] == BR_RAIL_BRIDGE
 
-            dz_g = max(0.22, camera.mpp * 0.50)
+            n_sub_f = max(2, int(math.ceil(GRID_RES / max(0.06, camera.mpp * 0.70))))
+            sub_offs = np.linspace(-0.25, 0.25, n_sub_f, dtype=np.float64)
+            fe_b = (fe_b0[:, None] + ftx0[:, None] * sub_offs[None, :]).ravel()
+            fn_b = (fn_b0[:, None] + fty0[:, None] * sub_offs[None, :]).ravel()
+            fz_top = np.repeat(fz_top0, n_sub_f)
+            girder_d = np.repeat(girder_d0, n_sub_f)
+            fz_bot = np.repeat(fz_bot0, n_sub_f)
+            f_bid = np.repeat(f_bid0, n_sub_f)
+            fnx_b = np.repeat(fnx_b0, n_sub_f)
+            fny_b = np.repeat(fny_b0, n_sub_f)
+            f_is_rail_br = np.repeat(f_is_rail_br0, n_sub_f)
+
+            dz_g = max(0.06, camera.mpp * 0.55)
             max_gh = float((fz_top - fz_bot).max())
             n_gs = max(2, int(math.ceil(max_gh / dz_g)) + 1)
             for gi in range(n_gs):
@@ -2724,7 +3065,6 @@ def _render_elevated_bridges_and_rail_portals(
                     continue
                 ix_g, iy_g, pd_g = ix_g[vg], iy_g[vg], pd_g[vg]
                 ia = np.nonzero(act)[0][vg]
-                # Top railing band vs main concrete girder fascia vs dark shadow bevel at soffit
                 h_down = fz_top[ia] - zc_a[vg]
                 g_col = np.full((len(ia), 3), [172.0, 170.0, 164.0], dtype=np.float32)
                 g_col[f_is_rail_br[ia]] = [118.0, 124.0, 134.0]
@@ -2757,7 +3097,7 @@ def _render_elevated_bridges_and_rail_portals(
         for sgn in (-1.0, 1.0):
             me = ce + sgn * shw * nx_c
             mn = cn + sgn * shw * ny_c
-            zs = np.arange(cz, cz + 6.4, max(0.28, camera.mpp * 0.55), dtype=np.float32)
+            zs = np.arange(cz, cz + 6.4, max(0.06, camera.mpp * 0.55), dtype=np.float32)
             px, py, pd = camera.project(np.full_like(zs, me), np.full_like(zs, mn), zs)
             ix, iy = np.round(px + shift_x).astype(np.int32), np.round(py + shift_y).astype(np.int32)
             vm = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
@@ -2771,7 +3111,7 @@ def _render_elevated_bridges_and_rail_portals(
                 norm_buf[iy[w_m], ix[w_m]] = [0.4, -0.4, 0.8]
                 shadow_buf[iy[w_m], ix[w_m]] = False
         # Overhead horizontal steel truss beam at cz + 6.1m
-        ts = np.linspace(-shw, shw, int(round(shw * 2 / max(0.25, camera.mpp * 0.6))) + 1)
+        ts = np.linspace(-shw, shw, int(round(shw * 2 / max(0.06, camera.mpp * 0.55))) + 1)
         be_t = ce + ts * nx_c
         bn_t = cn + ts * ny_c
         bz_t = np.full_like(ts, cz + 6.1)
@@ -2791,7 +3131,7 @@ def _render_elevated_bridges_and_rail_portals(
     # 3b. F13: Overhead 1px Steel SBB Catenary Contact & Messenger Wires + Droppers!
     # HARD GAP GUARD (12.0 <= span_m <= 65.0) prevents bridging the 684.1m station/viaduct gap!
     cps = scene.catenary_portals
-    wire_step = max(0.18, camera.mpp * 0.65)
+    wire_step = max(0.05, camera.mpp * 0.55)
     c_wire_col = np.array([120.0, 128.0, 144.0] if is_night else [164.0, 172.0, 182.0], dtype=np.float32)
     m_wire_col = np.array([96.0, 104.0, 120.0] if is_night else [132.0, 140.0, 152.0], dtype=np.float32)
     for i_cp in range(len(cps) - 1):
@@ -2894,7 +3234,7 @@ def _render_elevated_bridges_and_rail_portals(
             return bool(amask[rr_b, cc_b])
 
         def _draw_bhf_seg(e0, n0, z0, e1, n1, z1, col, mat_c=M_BRIDGE, oid=312004, thick=False):
-            step_b = max(0.18, camera.mpp * 0.65)
+            step_b = max(0.05, camera.mpp * 0.55)
             dist = math.sqrt((e1 - e0) ** 2 + (n1 - n0) ** 2 + (z1 - z0) ** 2)
             ns = max(2, int(math.ceil(dist / step_b)) + 1)
             t = np.linspace(0.0, 1.0, ns, dtype=np.float64)
@@ -2976,48 +3316,22 @@ def _render_elevated_bridges_and_rail_portals(
                 camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
                 pe_c, pn_c, z_pl, 427.85, 0.16, (118.0, 126.0, 136.0), 312001, M_BRIDGE,
             )
-        # Canopy roof deck (translucent cyan-blue glass panels + galvanized steel ribs)
-        nu_c = int(round(elen / 0.22)) + 1
-        nv_c = int(round((2.0 * hw_s) / 0.22)) + 1
-        us_c = np.linspace(0.0, elen, nu_c, dtype=np.float32)
-        vs_c = np.linspace(-hw_s, hw_s, nv_c, dtype=np.float32)
-        uu_c, vv_c = np.meshgrid(us_c, vs_c, indexing="ij")
-        uf_c, vf_c = uu_c.ravel(), vv_c.ravel()
-        ce_d = ee0 + uf_c * eux + vf_c * enx
-        cn_d = en0 + uf_c * euy + vf_c * eny
-        cz_d = np.full_like(ce_d, 427.88)
-        cc_d = np.floor((ce_d - E_MIN) / GRID_RES).astype(np.int32)
-        rr_d = np.floor((N_MAX - cn_d) / GRID_RES).astype(np.int32)
-        ok_d = (cc_d >= 0) & (cc_d < GRID_W) & (rr_d >= 0) & (rr_d < GRID_H)
-        if crop_box_lv95 is not None:
-            ok_d &= (ce_d >= crop_box_lv95[0] + 1.0) & (ce_d <= crop_box_lv95[2] - 1.0) & (cn_d >= crop_box_lv95[1] + 1.0) & (cn_d <= crop_box_lv95[3] - 1.0)
-        if ok_d.any():
-            ok_d[ok_d] &= amask[rr_d[ok_d], cc_d[ok_d]] & (~scene.bldg_roof_mask[rr_d[ok_d], cc_d[ok_d]])
-        if ok_d.any():
-            px, py, pd = camera.project(ce_d[ok_d], cn_d[ok_d], cz_d[ok_d])
-            ix = np.round(px + shift_x).astype(np.int32)
-            iy = np.round(py + shift_y).astype(np.int32)
-            vm = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
-            if vm.any():
-                ix, iy, pd = ix[vm], iy[vm], pd[vm]
-                uf_v, vf_v = uf_c[ok_d][vm], vf_c[ok_d][vm]
-                is_rib = (np.abs(vf_v) >= (hw_s - 0.22)) | ((uf_v % 4.1) < 0.28)
-                c_deck = np.where(
-                    is_rib[:, None],
-                    [172.0, 178.0, 186.0],
-                    [74.0, 128.0, 168.0] if is_night else [108.0, 184.0, 212.0],
-                ).astype(np.float32)
-                win = pd < zbuf[iy, ix]
-                if win.any():
-                    zbuf[iy[win], ix[win]] = pd[win]
-                    rgb_buf[iy[win], ix[win]] = c_deck[win]
-                    mat_buf[iy[win], ix[win]] = M_BRIDGE
-                    obj_buf[iy[win], ix[win]] = 312001
-                    norm_buf[iy[win], ix[win]] = [0.0, 0.0, 1.0]
-                    shadow_buf[iy[win], ix[win]] = False
+        # Canopy roof deck (solid 3D polygon: translucent cyan-blue glass panels + galvanized steel ribs, zero gaps!)
+        if _pt_ok_bhf(0.5 * (ee0 + ee1), 0.5 * (en0 + en1), ins=1.0):
+            canopy_pts = [
+                (ee0 - hw_s * enx, en0 - hw_s * eny, 427.88),
+                (ee1 - hw_s * enx, en1 - hw_s * eny, 427.88),
+                (ee1 + hw_s * enx, en1 + hw_s * eny, 427.88),
+                (ee0 + hw_s * enx, en0 + hw_s * eny, 427.88),
+            ]
+            glass_c = [74.0, 128.0, 168.0] if is_night else [108.0, 184.0, 212.0]
+            _fill_3d_poly(
+                camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                canopy_pts, glass_c, 312001, mat_id=M_BRIDGE, norm=(0.0, 0.0, 1.0),
+                rib_u_step=4.1, rib_col=[172.0, 178.0, 186.0], rib_w=0.28, edge_frame_w=0.22,
+            )
 
-        # 4c. 3 Backlit Blue-and-White SBB Platform Signs (KILCHBERG) on camera-facing east fascias
-        #     (1 on North East glass shelter east fascia + 2 on West canopy idx=17 east fascia, 100% unoccluded!)
+        # 4c. 3 Backlit Blue-and-White SBB Platform Signs (KILCHBERG) as solid 3D vertical quads (zero dots!)
         sign_mat = M_WINDOW_LIT if is_night else M_BRIDGE
         sign_spots = (
             (2683850.25, 1242140.1, 427.62),  # North East glass shelter camera-facing east fascia
@@ -3027,26 +3341,21 @@ def _render_elevated_bridges_and_rail_portals(
         for se_s, sn_s, sz_s in sign_spots:
             if not _pt_ok_bhf(se_s, sn_s):
                 continue
-            for dz_s, sc_s in (
-                (-0.22, [22.0, 64.0, 148.0]),
-                (0.00,  [244.0, 246.0, 248.0]),
-                (0.22,  [22.0, 64.0, 148.0]),
+            for dz_lo, dz_hi, sc_s in (
+                (-0.33, -0.11, [22.0, 64.0, 148.0]),
+                (-0.11,  0.11, [244.0, 246.0, 248.0]),
+                ( 0.11,  0.33, [22.0, 64.0, 148.0]),
             ):
-                ts_s = np.linspace(-1.40, 1.40, 15)
-                px, py, pd = camera.project(se_s + ts_s * eux, sn_s + ts_s * euy, np.full_like(ts_s, sz_s + dz_s))
-                ix = np.round(px + shift_x).astype(np.int32)
-                iy = np.round(py + shift_y).astype(np.int32)
-                vm = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
-                if vm.any():
-                    ix, iy, pd = ix[vm], iy[vm], pd[vm] - 0.35
-                    win = pd < zbuf[iy, ix]
-                    if win.any():
-                        zbuf[iy[win], ix[win]] = pd[win]
-                        rgb_buf[iy[win], ix[win]] = sc_s
-                        mat_buf[iy[win], ix[win]] = sign_mat
-                        obj_buf[iy[win], ix[win]] = 312002
-                        norm_buf[iy[win], ix[win]] = [0.3, -0.3, 0.9]
-                        shadow_buf[iy[win], ix[win]] = False
+                s_pts = [
+                    (se_s - 1.40 * eux, sn_s - 1.40 * euy, sz_s + dz_lo),
+                    (se_s + 1.40 * eux, sn_s + 1.40 * euy, sz_s + dz_lo),
+                    (se_s + 1.40 * eux, sn_s + 1.40 * euy, sz_s + dz_hi),
+                    (se_s - 1.40 * eux, sn_s - 1.40 * euy, sz_s + dz_hi),
+                ]
+                _fill_3d_poly(
+                    camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                    s_pts, sc_s, 312002, mat_id=sign_mat, norm=(0.3, -0.3, 0.9), z_bias=-0.35,
+                )
 
         # 4d. Iconic White Round Swiss SBB Railway Station Clocks (1944 Hans Hilfiker, oid in 310192..310193 EXCLUDED from occ_m!)
         #     1) Open South East platform apron + 2) Suspended directly beneath West bahnhof_canopy (id=17)
@@ -3099,31 +3408,19 @@ def _render_elevated_bridges_and_rail_portals(
                     norm_buf[ty_k, tx_k] = [0.25, -0.25, 0.93]
                     shadow_buf[ty_k, tx_k] = False
 
-        # 4d-ii. M3.5 Modern SBB steel-and-glass platform wind shelter along bahnhof_canopy (oid=310194 EXCLUDED from occ_m!)
+        # 4d-ii. M3.5 Modern SBB steel-and-glass platform wind shelter along bahnhof_canopy (solid 3D quad, oid=310194 EXCLUDED from occ_m!)
         if _pt_ok_bhf(2683844.5, 1242104.0, ins=2.0):
-            ws_n = np.linspace(1242096.0, 1242112.0, 48)
-            ws_z = np.linspace(422.1, 425.2, 12)
-            wn_g, wz_g = np.meshgrid(ws_n, ws_z, indexing="ij")
-            we_f = np.full(wn_g.size, 2683844.5, dtype=np.float64)
-            wn_f = wn_g.ravel()
-            wz_f = wz_g.ravel()
-            px_w, py_w, pd_w = camera.project(we_f, wn_f, wz_f)
-            ix_w = np.round(px_w + shift_x).astype(np.int32)
-            iy_w = np.round(py_w + shift_y).astype(np.int32)
-            vm_w = (ix_w >= 0) & (ix_w < W) & (iy_w >= 0) & (iy_w < H)
-            if vm_w.any():
-                ix_w, iy_w, pd_w = ix_w[vm_w], iy_w[vm_w], pd_w[vm_w] - 0.15
-                wn_v, wz_v = wn_f[vm_w], wz_f[vm_w]
-                win_w = pd_w < zbuf[iy_w, ix_w]
-                if win_w.any():
-                    iy_g, ix_g = iy_w[win_w], ix_w[win_w]
-                    is_mull_w = (((wn_v[win_w] - 1242096.0) % 2.65) < 0.22) | (wz_v[win_w] < 422.4) | (wz_v[win_w] > 424.95)
-                    zbuf[iy_g, ix_g] = pd_w[win_w]
-                    rgb_buf[iy_g, ix_g] = np.where(is_mull_w[:, None], [86.0, 92.0, 100.0], [148.0, 188.0, 210.0])
-                    mat_buf[iy_g, ix_g] = M_BRIDGE
-                    obj_buf[iy_g, ix_g] = 310194
-                    norm_buf[iy_g, ix_g] = [0.7, 0.0, 0.7]
-                    shadow_buf[iy_g, ix_g] = False
+            ws_pts = [
+                (2683844.5, 1242096.0, 422.1),
+                (2683844.5, 1242112.0, 422.1),
+                (2683844.5, 1242112.0, 425.2),
+                (2683844.5, 1242096.0, 425.2),
+            ]
+            _fill_3d_poly(
+                camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                ws_pts, [148.0, 188.0, 210.0], 310194, mat_id=M_BRIDGE, norm=(0.7, 0.0, 0.7), z_bias=-0.15,
+                rib_u_step=2.65, rib_col=[86.0, 92.0, 100.0], rib_w=0.22, edge_frame_w=0.26,
+            )
 
         # 4e. v9.0 Bahnhof Kilchberg Fine Platform Furniture, Ticket Machine, Perronanzeiger, Velounterstand & SBB Signals
         wux, wuy = w_dx / w_len, w_dy / w_len
@@ -3199,10 +3496,17 @@ def _render_elevated_bridges_and_rail_portals(
                             camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
                             pe_v, pn_v, zv_g, zv_g + 2.35, 0.10, (142.0, 148.0, 156.0), 312007, M_BRIDGE,
                         )
-                for roff in (-0.85, -0.35, 0.15, 0.65):
-                    _draw_bhf_seg(ve0 + roff * vnx, vn0 + roff * vny, zv_g + 2.38, ve1 + roff * vnx, vn1 + roff * vny, zv_g + 2.38, [120.0, 152.0, 174.0], oid=312007, thick=True)
-                _draw_bhf_seg(ve0 - 0.95 * vnx, vn0 - 0.95 * vny, zv_g + 2.40, ve1 - 0.95 * vnx, vn1 - 0.95 * vny, zv_g + 2.40, [164.0, 170.0, 178.0], oid=312007)
-                _draw_bhf_seg(ve0 + 0.75 * vnx, vn0 + 0.75 * vny, zv_g + 2.40, ve1 + 0.75 * vnx, vn1 + 0.75 * vny, zv_g + 2.40, [164.0, 170.0, 178.0], oid=312007)
+                velo_pts = [
+                    (ve0 - 0.95 * vnx, vn0 - 0.95 * vny, zv_g + 2.38),
+                    (ve1 - 0.95 * vnx, vn1 - 0.95 * vny, zv_g + 2.38),
+                    (ve1 + 0.75 * vnx, vn1 + 0.75 * vny, zv_g + 2.38),
+                    (ve0 + 0.75 * vnx, vn0 + 0.75 * vny, zv_g + 2.38),
+                ]
+                _fill_3d_poly(
+                    camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                    velo_pts, [120.0, 152.0, 174.0], 312007, mat_id=M_BRIDGE, norm=(0.0, 0.0, 1.0),
+                    rib_col=[164.0, 170.0, 178.0], edge_frame_w=0.16,
+                )
                 bike_cols = ([186.0, 56.0, 52.0], [52.0, 116.0, 176.0], [62.0, 68.0, 76.0], [186.0, 56.0, 52.0], [52.0, 116.0, 176.0])
                 for bi_k, bf in enumerate((0.16, 0.32, 0.50, 0.68, 0.84)):
                     be_k, bn_k = ve0 + vdx * bf, vn0 + vdy * bf
@@ -3888,10 +4192,18 @@ def _render_3d_sports_details(
         _draw_3d_panel(e_l, n_l, e_r, n_r, bz_z + 0.15, bz_z + 2.25, np.array([118.0, 148.0, 168.0], dtype=np.float32), oid=oid_z, mesh_only=True)
         _draw_3d_seg(e_l, n_l, bz_z, e_l, n_l, bz_z + 2.35, [52.0, 56.0, 64.0], oid=oid_z, thick=True)
         _draw_3d_seg(e_r, n_r, bz_z, e_r, n_r, bz_z + 2.35, [52.0, 56.0, 64.0], oid=oid_z, thick=True)
-        # Cantilevered roof deck (3 parallel strips)
-        for rv in (-0.35, 0.25, 0.85):
-            _draw_3d_seg(e_l + rv * vx_z, n_l + rv * vy_z, bz_z + 2.35, e_r + rv * vx_z, n_r + rv * vy_z, bz_z + 2.35, [66.0, 72.0, 80.0], oid=oid_z, thick=True)
-        _draw_3d_seg(e_l + 0.85 * vx_z, n_l + 0.85 * vy_z, bz_z + 2.40, e_r + 0.85 * vx_z, n_r + 0.85 * vy_z, bz_z + 2.40, [162.0, 168.0, 174.0], oid=oid_z)
+        # Cantilevered solid roof deck quad (zero slatted-bar gaps!)
+        zvv_roof_pts = [
+            (e_l - 0.35 * vx_z, n_l - 0.35 * vy_z, bz_z + 2.36),
+            (e_r - 0.35 * vx_z, n_r - 0.35 * vy_z, bz_z + 2.36),
+            (e_r + 0.85 * vx_z, n_r + 0.85 * vy_z, bz_z + 2.36),
+            (e_l + 0.85 * vx_z, n_l + 0.85 * vy_z, bz_z + 2.36),
+        ]
+        _fill_3d_poly(
+            camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+            zvv_roof_pts, [66.0, 72.0, 80.0], oid_z, mat_id=M_BRIDGE, norm=(0.0, 0.0, 1.0),
+            rib_col=[162.0, 168.0, 174.0], edge_frame_w=0.14,
+        )
         # Warm interior timber bench
         _draw_3d_seg(e_l + 0.35 * vx_z + 0.3 * ux_z, n_l + 0.35 * vy_z + 0.3 * uy_z, bz_z + 0.50, e_r + 0.35 * vx_z - 0.3 * ux_z, n_r + 0.35 * vy_z - 0.3 * uy_z, bz_z + 0.50, [146.0, 104.0, 68.0], oid=oid_z, thick=True)
         # Iconic ZVV blue/white bus-stop pole sign
@@ -3961,32 +4273,34 @@ def _render_3d_sports_details(
             continue
         hz_b = _sample_dem(he_b, hn_b)
         oid_h = 237600 + hi_b
-        # Stacked pixel-art round hay bale (shadow base + warm straw body + sunlit spiral top)
-        for z_off, rad_b, c_b in (
-            (0.05, 0.78, [42.0, 62.0, 34.0]),
-            (0.32, 0.70, [168.0, 134.0, 68.0]),
-            (0.68, 0.70, [208.0, 174.0, 96.0]),
-            (1.02, 0.66, [208.0, 174.0, 96.0]),
-            (1.24, 0.58, [232.0, 204.0, 124.0]),
-        ):
-            ang_h = np.linspace(0.0, 2.0 * math.pi, 10, endpoint=False)
-            es_h = np.concatenate([[he_b], he_b + rad_b * np.cos(ang_h)])
-            ns_h = np.concatenate([[hn_b], hn_b + rad_b * np.sin(ang_h)])
-            zs_h = np.full_like(es_h, hz_b + z_off)
-            px, py, pd = camera.project(es_h, ns_h, zs_h)
-            ix = np.round(px + shift_x).astype(np.int32)
-            iy = np.round(py + shift_y).astype(np.int32)
-            vm = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
-            if vm.any():
-                ix, iy, pd = ix[vm], iy[vm], pd[vm]
-                win = pd < zbuf[iy, ix]
-                if win.any():
-                    zbuf[iy[win], ix[win]] = pd[win]
-                    rgb_buf[iy[win], ix[win]] = c_b
-                    mat_buf[iy[win], ix[win]] = M_BRIDGE
-                    obj_buf[iy[win], ix[win]] = oid_h
-                    norm_buf[iy[win], ix[win]] = [0.25, -0.25, 0.93]
-                    shadow_buf[iy[win], ix[win]] = False
+        # Solid 3D cylindrical round hay bale (shadow disc + 12-gon cylindrical wall + sunlit straw top!)
+        ang_h = np.linspace(0.0, 2.0 * math.pi, 12, endpoint=False)
+        cos_h, sin_h = np.cos(ang_h), np.sin(ang_h)
+        sh_pts = [(he_b + 0.82 * float(cos_h[k]), hn_b + 0.82 * float(sin_h[k]), hz_b + 0.03) for k in range(12)]
+        _fill_3d_poly(
+            camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+            sh_pts, [42.0, 62.0, 34.0], oid_h, mat_id=M_BRIDGE, is_shadow=True, shadow_mul=0.72,
+        )
+        for k in range(12):
+            k2 = (k + 1) % 12
+            c0, s0 = float(cos_h[k]), float(sin_h[k])
+            c1, s1 = float(cos_h[k2]), float(sin_h[k2])
+            nx_h, ny_h = 0.5 * (c0 + c1), 0.5 * (s0 + s1)
+            side_pts = [
+                (he_b + 0.70 * c0, hn_b + 0.70 * s0, hz_b + 0.05),
+                (he_b + 0.70 * c1, hn_b + 0.70 * s1, hz_b + 0.05),
+                (he_b + 0.68 * c1, hn_b + 0.68 * s1, hz_b + 1.22),
+                (he_b + 0.68 * c0, hn_b + 0.68 * s0, hz_b + 1.22),
+            ]
+            _fill_3d_poly(
+                camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                side_pts, [196.0, 162.0, 86.0], oid_h, mat_id=M_BRIDGE, norm=(nx_h, ny_h, 0.18),
+            )
+        top_pts = [(he_b + 0.68 * float(cos_h[k]), hn_b + 0.68 * float(sin_h[k]), hz_b + 1.24) for k in range(12)]
+        _fill_3d_poly(
+            camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+            top_pts, [228.0, 198.0, 118.0], oid_h, mat_id=M_BRIDGE, norm=(0.0, 0.0, 1.0),
+        )
 
     # 9d. v9.0 Museum-Grade Village, Civic & Estate 3D Props (all strictly _prop_ok(..., inset=2.0)!)
     # 1. Lindt Forecourt: granite bollards (oid=244910), boxwood planters (237700..237703), golden entrance totem (244911)
@@ -4274,28 +4588,13 @@ def _render_3d_harbor_and_boats(
                 shadow_buf[wy, wx] = False
 
     # -------------------------------------------------------------------------
-    # Part A: 3D Timber Pier Pilings, Water Contact Shadows & Handcrafted Pier Accents
+    # Part A: 3D Timber Pier Pilings & Handcrafted Solid Pier Decks
+    # (Smooth pier water contact shadows are now computed directly in Stage 2 via pier_sdf!)
     # -------------------------------------------------------------------------
     sub_lake = scene.lake_mask[r0:r1, c0:c1]
     sub_pier = sub_mask & scene.pier_only_mask_05m[r0:r1, c0:c1] & sub_lake
     if sub_pier.any():
-        # Crisp water contact shadow directly around every timber pier / jetty edge
-        pier_halo = ndimage.binary_dilation(sub_pier, iterations=2) & (~sub_pier) & sub_lake
-        if pier_halo.any():
-            hr, hc = np.nonzero(pier_halo)
-            he = E_MIN + (hc + c0 + 0.5) * GRID_RES
-            hn = N_MAX - (hr + r0 + 0.5) * GRID_RES
-            px, py, _ = camera.project(he, hn, np.full_like(he, LAKE_SURFACE_Z + 0.02))
-            ix = np.round(px + shift_x).astype(np.int32)
-            iy = np.round(py + shift_y).astype(np.int32)
-            vm = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
-            if vm.any():
-                ix, iy = ix[vm], iy[vm]
-                is_w = mat_buf[iy, ix] == M_WATER_LAKE
-                if is_w.any():
-                    rgb_buf[iy[is_w], ix[is_w]] *= 0.78
-
-        # 3D Timber Pilings & Mooring Bollards spaced every 3.0m along pier edges
+        # 3D Timber Pilings & Mooring Bollards spaced every 3.0m along pier edges (excluding Bendlikon handcrafted pier box)
         pier_edge = sub_pier & (~ndimage.binary_erosion(sub_pier, structure=np.ones((3, 3), dtype=bool)))
         er_p, ec_p = np.nonzero(pier_edge)
         if len(er_p) > 0:
@@ -4306,18 +4605,20 @@ def _render_3d_harbor_and_boats(
             for rr_p, cc_p in zip(gr_e[keep_pil], gc_e[keep_pil]):
                 ep = E_MIN + (cc_p + 0.5) * GRID_RES
                 np_ = N_MAX - (rr_p + 0.5) * GRID_RES
+                if 2684035.0 <= ep <= 2684072.0 and 1242060.0 <= np_ <= 1242090.0:
+                    continue
                 if crop_box_lv95 is not None and not (
                     crop_box_lv95[0] + 1.5 <= ep <= crop_box_lv95[2] - 1.5
                     and crop_box_lv95[1] + 1.5 <= np_ <= crop_box_lv95[3] - 1.5
                 ):
                     continue
-                z_deck = LAKE_SURFACE_Z + float(np.clip(scene.chm[rr_p, cc_p], 0.70, 1.45))
+                z_deck = LAKE_SURFACE_Z + float(scene.pier_deck_h_05m[rr_p, cc_p])
                 _draw_3d_box_column(
                     camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
                     ep, np_, LAKE_SURFACE_Z - 0.15, z_deck + 0.35, 0.16, (88.0, 70.0, 52.0), 255000, M_HARBOR_OBJ,
                 )
 
-    # Bendlikon ZSG Steamer Pier (Badweg 1.1) handcrafted fenders, railings & corner lantern!
+    # Bendlikon ZSG Steamer Pier (Badweg 1.1) handcrafted fenders, solid planked gangway, railings & corner lantern!
     def _in_box_am(ep: float, np_: float, ins: float = 1.5) -> bool:
         if crop_box_lv95 is not None and not (
             crop_box_lv95[0] + ins <= ep <= crop_box_lv95[2] - ins
@@ -4328,7 +4629,8 @@ def _render_3d_harbor_and_boats(
         cc_t = int(np.clip((ep - E_MIN) / GRID_RES, 0, GRID_W - 1))
         return bool(amask[rr_t, cc_t])
 
-    if _in_box_am(2684061.0, 1242076.0, ins=0.5):
+    bend_in_view = _in_box_am(2684061.0, 1242076.0, ins=0.5) or _in_box_am(2684046.0, 1242070.0, ins=0.5)
+    if bend_in_view:
         # 6 heavy lake-side timber fender pilings with white safety caps (leaving 3.5m steamer boarding gap)
         for fe_f, fn_f in (
             (2684069.6, 1242065.0), (2684069.8, 1242070.0), (2684069.8, 1242078.8),
@@ -4343,15 +4645,65 @@ def _render_3d_harbor_and_boats(
                     camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
                     fe_f, fn_f, 408.55, 408.85, 0.25, (226.0, 224.0, 218.0), 255200, M_HARBOR_OBJ,
                 )
-        # Clean 3D weathered-timber approach walkway deck (Steg) + galvanized safety railings
-        for rn_deck in np.linspace(1242066.0, 1242074.3, 14):
-            _draw_harbor_seg(2684038.5, float(rn_deck), 407.70, 2684055.0, float(rn_deck), 407.70, [152.0, 136.0, 114.0], oid=255201, thick=True)
-        for re_slat in np.linspace(2684039.0, 2684054.5, 16):
-            _draw_harbor_seg(float(re_slat), 1242065.7, 407.76, float(re_slat), 1242074.6, 407.76, [116.0, 100.0, 82.0], oid=255201)
-        for rn_r in (1242065.5, 1242074.8):
-            _draw_harbor_seg(2684038.5, rn_r, 408.55, 2684055.0, rn_r, 408.55, [178.0, 184.0, 190.0], oid=255201)
-            for re_p in np.linspace(2684039.0, 2684054.5, 6):
-                _draw_harbor_seg(float(re_p), rn_r, 407.60, float(re_p), rn_r, 408.55, [142.0, 148.0, 156.0], oid=255201)
+        # Solid 3D isometric weathered-timber approach walkway deck (Steg) — zero wire-cage grid holes!
+        ge0, ge1 = 2684036.8, 2684055.3
+        gn0, gn1 = 1242065.6, 1242074.7
+        gz_bot, gz_top = 407.18, 407.72
+        # 0. Flush warm-stone shore threshold sill meeting the paved footpath cleanly (zero grey concrete blob!)
+        se0, se1 = 2684035.8, 2684036.9
+        sn0, sn1 = 1242065.6, 1242068.2
+        sz_top = 407.56
+        for sf_pts, sf_n in (
+            ([(se0, sn0, gz_bot), (se1, sn0, gz_bot), (se1, sn0, sz_top), (se0, sn0, sz_top)], (0.0, -1.0, 0.0)),
+            ([(se0, sn1, gz_bot), (se0, sn0, gz_bot), (se0, sn0, sz_top), (se0, sn1, sz_top)], (-1.0, 0.0, 0.0)),
+        ):
+            _fill_3d_poly(
+                camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                sf_pts, [142.0, 138.0, 128.0], 255201, mat_id=M_HARBOR_OBJ, norm=sf_n,
+            )
+        _fill_3d_poly(
+            camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+            [(se0, sn0, sz_top), (se1, sn0, sz_top), (se1, sn1, sz_top), (se0, sn1, sz_top)],
+            [176.0, 170.0, 158.0], 255201, mat_id=M_HARBOR_OBJ, norm=(0.0, 0.0, 1.0),
+        )
+        # 1. Soft water contact shadow directly beneath gangway
+        _fill_3d_poly(
+            camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+            [(ge0, gn0 - 0.5, LAKE_SURFACE_Z + 0.02), (ge1, gn0 - 0.5, LAKE_SURFACE_Z + 0.02),
+             (ge1, gn1 + 0.5, LAKE_SURFACE_Z + 0.02), (ge0, gn1 + 0.5, LAKE_SURFACE_Z + 0.02)],
+            [0.0, 0.0, 0.0], 255201, mat_id=M_HARBOR_OBJ, is_shadow=True, shadow_mat_only=M_WATER_LAKE, shadow_mul=0.76,
+        )
+        # 2. 4 pairs of solid timber support pilings beneath gangway
+        for pe_st in (2684040.5, 2684045.0, 2684049.5, 2684053.8):
+            for pn_st in (1242066.0, 1242074.3):
+                if _in_box_am(pe_st, pn_st, ins=0.5):
+                    _draw_3d_box_column(
+                        camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                        pe_st, pn_st, LAKE_SURFACE_Z - 0.15, 407.25, 0.18, (82.0, 66.0, 50.0), 255200, M_HARBOR_OBJ,
+                    )
+        # 3. Solid vertical timber side fascia beams
+        for f_pts, f_col, f_n in (
+            ([(ge0, gn0, gz_bot), (ge1, gn0, gz_bot), (ge1, gn0, gz_top), (ge0, gn0, gz_top)], [102.0, 86.0, 68.0], (0.0, -1.0, 0.0)),
+            ([(ge1, gn0, gz_bot), (ge1, gn1, gz_bot), (ge1, gn1, gz_top), (ge1, gn0, gz_top)], [118.0, 100.0, 80.0], (1.0, 0.0, 0.0)),
+            ([(ge0, gn1, gz_bot), (ge0, gn0, gz_bot), (ge0, gn0, gz_top), (ge0, gn1, gz_top)], [118.0, 100.0, 80.0], (-1.0, 0.0, 0.0)),
+            ([(ge1, gn1, gz_bot), (ge0, gn1, gz_bot), (ge0, gn1, gz_top), (ge1, gn1, gz_top)], [102.0, 86.0, 68.0], (0.0, 1.0, 0.0)),
+        ):
+            _fill_3d_poly(
+                camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                f_pts, f_col, 255201, mat_id=M_HARBOR_OBJ, norm=f_n,
+            )
+        # 4. Solid planked top timber deck (global LV95 plank seams, zero grid gaps!)
+        _fill_3d_poly(
+            camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+            [(ge0, gn0, gz_top), (ge1, gn0, gz_top), (ge1, gn1, gz_top), (ge0, gn1, gz_top)],
+            [166.0, 146.0, 118.0], 255201, mat_id=M_HARBOR_OBJ, norm=(0.0, 0.0, 1.0),
+            plank_e_step=0.65, plank_col=[138.0, 120.0, 96.0], plank_seam_w=0.09,
+        )
+        # 5. Crisp 1px galvanized safety railings on thin-pole oid=244957 (excluded from fat Stage 5 outlines!)
+        for rn_r in (1242065.6, 1242074.7):
+            _draw_harbor_seg(2684037.1, rn_r, 408.55, 2684055.0, rn_r, 408.55, [178.0, 184.0, 190.0], oid=244957)
+            for re_p in np.linspace(2684037.5, 2684054.5, 6):
+                _draw_harbor_seg(float(re_p), rn_r, 407.68, float(re_p), rn_r, 408.55, [142.0, 148.0, 156.0], oid=244957)
         # Warm corner pier lantern globe at SE corner
         if _in_box_am(2684068.8, 1242066.0):
             _draw_harbor_seg(2684068.8, 1242066.0, 407.8, 2684068.8, 1242066.0, 410.4, [72.0, 76.0, 84.0], oid=255202)
@@ -4437,35 +4789,39 @@ def _render_3d_harbor_and_boats(
             _draw_harbor_seg(je_t - 0.5, jn_t - 1.2, jz_t + 1.05, je_t + 1.0, jn_t - 1.2, jz_t + 1.10, [244.0, 242.0, 236.0], oid=244956, thick=True)
             _draw_harbor_seg(je_t - 0.5, jn_t - 1.2, jz_t + 2.95, je_t + 1.3, jn_t - 1.2, jz_t + 3.02, [244.0, 242.0, 236.0], oid=244956, thick=True)
 
-    # Floating wooden swim raft (Floss) offshore at Seebad
+    # Floating wooden swim raft (Floss) offshore at Seebad — solid 3D polygon deck box (zero 15x15 point-splat gaps!)
     fl_e, fl_n = 2684356.0, 1241484.0
     if _in_box_am(fl_e, fl_n, ins=2.5):
         rr_f = int(np.clip((N_MAX - fl_n) / GRID_RES, 0, GRID_H - 1))
         cc_f = int(np.clip((fl_e - E_MIN) / GRID_RES, 0, GRID_W - 1))
         if scene.lake_mask[rr_f, cc_f]:
-            us_f = np.linspace(-1.7, 1.7, 15)
-            vs_f = np.linspace(-1.7, 1.7, 15)
-            uf_g, vf_g = np.meshgrid(us_f, vs_f, indexing="ij")
-            ef_r = (fl_e + uf_g).ravel()
-            nf_r = (fl_n + vf_g).ravel()
-            zf_r = np.full_like(ef_r, LAKE_SURFACE_Z + 0.28)
-            px_f, py_f, pd_f = camera.project(ef_r, nf_r, zf_r)
-            ix_f, iy_f = np.round(px_f + shift_x).astype(np.int32), np.round(py_f + shift_y).astype(np.int32)
-            vm_f = (ix_f >= 0) & (ix_f < W) & (iy_f >= 0) & (iy_f < H)
-            if vm_f.any():
-                ix_f, iy_f, pd_f = ix_f[vm_f], iy_f[vm_f], pd_f[vm_f]
-                uf_v = uf_g.ravel()[vm_f]
-                win_f = pd_f < zbuf[iy_f, ix_f]
-                if win_f.any():
-                    wy_f, wx_f = iy_f[win_f], ix_f[win_f]
-                    zbuf[wy_f, wx_f] = pd_f[win_f]
-                    seam_f = ((uf_v[win_f] + 1.7) % 0.55) < 0.10
-                    rgb_buf[wy_f, wx_f] = np.where(seam_f[:, None], [136.0, 104.0, 68.0], [184.0, 148.0, 102.0])
-                    mat_buf[wy_f, wx_f] = M_HARBOR_OBJ
-                    obj_buf[wy_f, wx_f] = 255310
-                    norm_buf[wy_f, wx_f] = [0.0, 0.0, 1.0]
-            _draw_harbor_seg(fl_e - 1.7, fl_n - 0.3, LAKE_SURFACE_Z, fl_e - 1.7, fl_n - 0.3, LAKE_SURFACE_Z + 0.95, [206.0, 212.0, 220.0], oid=255310)
-            _draw_harbor_seg(fl_e - 1.7, fl_n + 0.3, LAKE_SURFACE_Z, fl_e - 1.7, fl_n + 0.3, LAKE_SURFACE_Z + 0.95, [206.0, 212.0, 220.0], oid=255310)
+            fe0, fe1 = fl_e - 1.7, fl_e + 1.7
+            fn0, fn1 = fl_n - 1.7, fl_n + 1.7
+            fz0, fz1 = LAKE_SURFACE_Z + 0.02, LAKE_SURFACE_Z + 0.30
+            _fill_3d_poly(
+                camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                [(fe0 - 0.3, fn0 - 0.3, LAKE_SURFACE_Z + 0.01), (fe1 + 0.3, fn0 - 0.3, LAKE_SURFACE_Z + 0.01),
+                 (fe1 + 0.3, fn1 + 0.3, LAKE_SURFACE_Z + 0.01), (fe0 - 0.3, fn1 + 0.3, LAKE_SURFACE_Z + 0.01)],
+                [0.0, 0.0, 0.0], 255310, mat_id=M_HARBOR_OBJ, is_shadow=True, shadow_mat_only=M_WATER_LAKE, shadow_mul=0.76,
+            )
+            for f_pts, f_n in (
+                ([(fe0, fn0, fz0), (fe1, fn0, fz0), (fe1, fn0, fz1), (fe0, fn0, fz1)], (0.0, -1.0, 0.0)),
+                ([(fe1, fn0, fz0), (fe1, fn1, fz0), (fe1, fn1, fz1), (fe1, fn0, fz1)], (1.0, 0.0, 0.0)),
+                ([(fe0, fn1, fz0), (fe0, fn0, fz0), (fe0, fn0, fz1), (fe0, fn1, fz1)], (-1.0, 0.0, 0.0)),
+                ([(fe1, fn1, fz0), (fe0, fn1, fz0), (fe0, fn1, fz1), (fe1, fn1, fz1)], (0.0, 1.0, 0.0)),
+            ):
+                _fill_3d_poly(
+                    camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                    f_pts, [124.0, 96.0, 64.0], 255310, mat_id=M_HARBOR_OBJ, norm=f_n,
+                )
+            _fill_3d_poly(
+                camera, shift_x, shift_y, W, H, zbuf, rgb_buf, mat_buf, obj_buf, norm_buf, shadow_buf,
+                [(fe0, fn0, fz1), (fe1, fn0, fz1), (fe1, fn1, fz1), (fe0, fn1, fz1)],
+                [184.0, 148.0, 102.0], 255310, mat_id=M_HARBOR_OBJ, norm=(0.0, 0.0, 1.0),
+                plank_e_step=0.55, plank_col=[144.0, 112.0, 74.0], plank_seam_w=0.09,
+            )
+            _draw_harbor_seg(fl_e - 1.7, fl_n - 0.3, LAKE_SURFACE_Z, fl_e - 1.7, fl_n - 0.3, LAKE_SURFACE_Z + 0.95, [206.0, 212.0, 220.0], oid=244958)
+            _draw_harbor_seg(fl_e - 1.7, fl_n + 0.3, LAKE_SURFACE_Z, fl_e - 1.7, fl_n + 0.3, LAKE_SURFACE_Z + 0.95, [206.0, 212.0, 220.0], oid=244958)
 
     # Red-white swim-zone buoy line offshore at Seebad
     buoy_pts = (
@@ -4578,162 +4934,10 @@ def _render_3d_harbor_and_boats(
             _draw_harbor_seg(bse, bsn - 0.32, 407.2, bse, bsn + 0.32, 407.2, [142.0, 108.0, 76.0], oid=255441 + bs_i, thick=True)
 
     # -------------------------------------------------------------------------
-    # Part B: 3D Isometric Moored Boats (40 clean open-water sailboats & Boesch motorboats!)
+    # Part B (v13 M1B): Point-splatted baked moored boats removed cleanly —
+    # live docs/js/living/plugins/vessels.js renders crisp moored sailboats with
+    # wind-synced pennants & night anchor lights over spotless Lake Zurich water!
     # -------------------------------------------------------------------------
-    b_step = max(0.18, mpp * 0.72)
-    for idx_b, boat in enumerate(scene.boats):
-        be = float(boat["e"])
-        bn = float(boat["n"])
-        if crop_box_lv95 is not None and not (
-            crop_box_lv95[0] + 4.0 <= be <= crop_box_lv95[2] - 4.0
-            and crop_box_lv95[1] + 4.0 <= bn <= crop_box_lv95[3] - 4.0
-        ):
-            continue
-        rb = int(math.floor((N_MAX - bn) / GRID_RES))
-        cb = int(math.floor((be - E_MIN) / GRID_RES))
-        if not (0 <= rb < GRID_H and 0 <= cb < GRID_W):
-            continue
-        # Strictly exclude any false-positive boat overlapping roofs, piers, land, or outside active_mask!
-        if (
-            not scene.lake_mask[rb, cb]
-            or not amask[rb, cb]
-            or scene.bldg_roof_mask[rb, cb]
-            or scene.pier_only_mask_05m[rb, cb]
-        ):
-            continue
-        px_c, py_c, _ = camera.project(np.array([be]), np.array([bn]), np.array([LAKE_SURFACE_Z]))
-        if px_c[0] + shift_x < -36 or px_c[0] + shift_x > W + 36 or py_c[0] + shift_y < -48 or py_c[0] + shift_y > H + 36:
-            continue
-
-        L_b = float(np.clip(boat["length"], 3.8, 10.8))
-        half_l = 0.5 * L_b
-        half_w = float(np.clip(L_b * 0.175, 0.80, 1.55))
-        ang_b = math.radians(float(boat["angle"]))
-        ue, un = math.cos(ang_b), math.sin(ang_b)
-        ve, vn = -un, ue
-        is_sail = bool(boat["sail"])
-        oid_b = 260000 + idx_b
-
-        # Tapered hull local (s, t) grid
-        ns_b = max(5, int(round(L_b / b_step)) + 1)
-        nt_b = max(4, int(round(2.0 * half_w / b_step)) + 1)
-        ss = np.linspace(-half_l, half_l, ns_b, dtype=np.float32)
-        tt = np.linspace(-half_w, half_w, nt_b, dtype=np.float32)
-        sg, tg = np.meshgrid(ss, tt, indexing="ij")
-        sf_b, tf_b = sg.ravel(), tg.ravel()
-        w_s = np.where(
-            sf_b > (0.25 * half_l),
-            half_w * np.sqrt(np.clip(1.0 - ((sf_b - 0.25 * half_l) / max(0.1, 0.75 * half_l)) ** 2, 0.0, 1.0)),
-            np.where(
-                sf_b < (-0.55 * half_l),
-                half_w * (0.78 + 0.22 * (sf_b + half_l) / max(0.1, 0.45 * half_l)),
-                half_w,
-            ),
-        )
-        in_hull = np.abs(tf_b) <= np.maximum(0.14, w_s)
-        if not in_hull.any():
-            continue
-        sf_h, tf_h, ws_h = sf_b[in_hull], tf_b[in_hull], w_s[in_hull]
-        eh = be + sf_h * ue + tf_h * ve
-        nh = bn + sf_h * un + tf_h * vn
-        sheer = np.clip((sf_h - 0.15 * half_l) / max(0.5, 0.85 * half_l), 0.0, 1.0) * 0.14
-
-        # 1. Grounded dark water contact shadow directly beneath hull
-        px_s, py_s, _ = camera.project(eh + 0.35, nh - 0.35, np.full_like(eh, LAKE_SURFACE_Z + 0.01))
-        ix_s = np.round(px_s + shift_x).astype(np.int32)
-        iy_s = np.round(py_s + shift_y).astype(np.int32)
-        vs_b = (ix_s >= 0) & (ix_s < W) & (iy_s >= 0) & (iy_s < H)
-        if vs_b.any():
-            ix_s, iy_s = ix_s[vs_b], iy_s[vs_b]
-            is_w_s = mat_buf[iy_s, ix_s] == M_WATER_LAKE
-            if is_w_s.any():
-                rgb_buf[iy_s[is_w_s], ix_s[is_w_s]] *= 0.74
-
-        # 2. Hull freeboard layers (waterline navy boot-stripe + crisp white gelcoat freeboard)
-        for zl_off, hull_c in (
-            (0.14, np.array([42.0, 62.0, 92.0], dtype=np.float32)),
-            (0.42, np.array([228.0, 226.0, 220.0], dtype=np.float32)),
-            (0.68, np.array([238.0, 236.0, 230.0], dtype=np.float32)),
-        ):
-            px, py, pd = camera.project(eh, nh, LAKE_SURFACE_Z + zl_off + sheer)
-            ix = np.round(px + shift_x).astype(np.int32)
-            iy = np.round(py + shift_y).astype(np.int32)
-            vm = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
-            if not vm.any():
-                continue
-            ix, iy, pd = ix[vm], iy[vm], pd[vm]
-            win = pd < zbuf[iy, ix]
-            if win.any():
-                zbuf[iy[win], ix[win]] = pd[win]
-                rgb_buf[iy[win], ix[win]] = hull_c
-                mat_buf[iy[win], ix[win]] = M_HARBOR_OBJ
-                obj_buf[iy[win], ix[win]] = oid_b
-                norm_buf[iy[win], ix[win]] = [0.35, -0.35, 0.86]
-                shadow_buf[iy[win], ix[win]] = False
-
-        # 3. Deck, cockpit, cabin / windscreen
-        if is_sail:
-            deck_c = np.full((len(sf_h), 3), [240.0, 238.0, 232.0], dtype=np.float32)
-            z_deck = LAKE_SURFACE_Z + 0.74 + sheer
-            in_cockpit = (sf_h >= -0.62 * half_l) & (sf_h <= 0.05 * half_l) & (np.abs(tf_h) <= 0.58 * ws_h)
-            in_cabin = (sf_h > 0.05 * half_l) & (sf_h <= 0.42 * half_l) & (np.abs(tf_h) <= 0.56 * ws_h)
-            deck_c[in_cockpit] = [148.0, 102.0, 62.0] if (idx_b & 1) else [44.0, 64.0, 92.0]
-            deck_c[in_cabin] = [244.0, 242.0, 236.0]
-            z_deck[in_cabin] += 0.30
-            # Tiny dark cabin porthole pixels
-            porthole = in_cabin & (np.abs(tf_h) > 0.38 * ws_h) & (np.abs(sf_h - 0.24 * half_l) < 0.22)
-            deck_c[porthole] = [46.0, 62.0, 82.0]
-        else:
-            # Classic Boesch varnished mahogany vs white Lake Zurich day-cruiser
-            z_deck = LAKE_SURFACE_Z + 0.72 + sheer
-            if (idx_b % 2) == 0:
-                deck_c = np.full((len(sf_h), 3), [146.0, 82.0, 44.0], dtype=np.float32)
-                seam = (sf_h > 0.15 * half_l) & (np.abs(tf_h) < 0.14)
-                deck_c[seam] = [228.0, 216.0, 194.0]
-            else:
-                deck_c = np.full((len(sf_h), 3), [236.0, 234.0, 228.0], dtype=np.float32)
-                stripe_c = [46.0, 74.0, 118.0] if ((idx_b >> 1) & 1) == 0 else [154.0, 48.0, 52.0]
-                sheer_edge = np.abs(tf_h) > (0.78 * ws_h)
-                deck_c[sheer_edge] = stripe_c
-            in_cockpit = (sf_h >= -0.68 * half_l) & (sf_h <= 0.12 * half_l) & (np.abs(tf_h) <= 0.65 * ws_h)
-            deck_c[in_cockpit] = [218.0, 208.0, 188.0]
-            windscreen = (np.abs(sf_h - 0.16 * half_l) <= 0.22) & (np.abs(tf_h) <= 0.70 * ws_h)
-            deck_c[windscreen] = [62.0, 92.0, 120.0]
-            z_deck[windscreen] += 0.32
-
-        px, py, pd = camera.project(eh, nh, z_deck)
-        ix = np.round(px + shift_x).astype(np.int32)
-        iy = np.round(py + shift_y).astype(np.int32)
-        vm = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
-        if vm.any():
-            ix, iy, pd, dc_v = ix[vm], iy[vm], pd[vm], deck_c[vm]
-            win = pd < zbuf[iy, ix]
-            if win.any():
-                zbuf[iy[win], ix[win]] = pd[win]
-                rgb_buf[iy[win], ix[win]] = dc_v[win]
-                mat_buf[iy[win], ix[win]] = M_HARBOR_OBJ
-                obj_buf[iy[win], ix[win]] = oid_b
-                norm_buf[iy[win], ix[win]] = [0.0, 0.0, 1.0]
-                shadow_buf[iy[win], ix[win]] = False
-
-        # 4. Sailboat 1px aluminum mast + furled boom + subtle water reflection
-        if is_sail:
-            me = be + 0.10 * half_l * ue
-            mn = bn + 0.10 * half_l * un
-            mast_h = float(np.clip(L_b * 0.92, 5.2, 8.8))
-            _draw_harbor_seg(me, mn, LAKE_SURFACE_Z + 0.90, me, mn, LAKE_SURFACE_Z + 0.90 + mast_h, [186.0, 192.0, 200.0], oid=oid_b)
-            boom_c = [48.0, 76.0, 126.0] if (idx_b % 3 == 0) else [232.0, 226.0, 212.0]
-            _draw_harbor_seg(me, mn, LAKE_SURFACE_Z + 1.85, me - 0.52 * half_l * ue, mn - 0.52 * half_l * un, LAKE_SURFACE_Z + 1.85, boom_c, oid=oid_b, thick=True)
-            # Subtle mast water reflection downward along +Y
-            px_m, py_m, _ = camera.project(np.array([me]), np.array([mn]), np.array([LAKE_SURFACE_Z + 0.15]))
-            mx0 = int(round(float(px_m[0] + shift_x)))
-            my0 = int(round(float(py_m[0] + shift_y)))
-            r_len = min(18, int(round((mast_h / mpp) * 0.45)))
-            for dy_r in range(2, r_len):
-                ry_m = my0 + dy_r
-                rx_m = mx0 + int(round(math.sin(ry_m * 0.7)))
-                if 0 <= ry_m < H and 0 <= rx_m < W and mat_buf[ry_m, rx_m] == M_WATER_LAKE:
-                    rgb_buf[ry_m, rx_m] = 0.78 * rgb_buf[ry_m, rx_m] + 0.22 * np.array([195.0, 202.0, 210.0], dtype=np.float32)
 
     # -------------------------------------------------------------------------
     # Part C: F13 Seebad Kilchberg Beach Umbrellas & Striped Towels (Day & Sunset ONLY!)
@@ -4881,10 +5085,27 @@ def _render_sculpted_pixel_art_trees_and_hedges(
     tiered Alpine Spruce, Mediterranean Cemetery Cypresses, sunlit top-left rim highlights,
     cool-teal shaded undersides, and beveled garden boxwood hedges!"""
     # -------------------------------------------------------------------------
-    # 4A. v12 Smooth Rounded Pillow Hedges (Euclidean EDT dome cross-section + 3-tone cel, ZERO voxel speckle!)
+    # 4A. v13.0 Varied Botanical Bushes & Hedges:
+    #     (a) Clipped Swiss Boxwood / Yew Garden Hedges (crisp bevelled trapezoid + subtle leaf-notch edge)
+    #     (b) Flowering Garden Shrubs (Hydrangea / Rose / Rhododendron 2x2-3x3 cel clusters on leafy mound)
+    #     (c) Woodland Bramble / Understory Thickets (irregular mossy/fern profile near G_FOREST)
+    #     (d) Strictly Land-Side Lakeside Reeds / Sedge Tufts (0.6..2.8m from shore, spotless water!)
     # -------------------------------------------------------------------------
     sub_hedge = sub_mask & scene.hedge_mask[r0:r1, c0:c1]
     if sub_hedge.any():
+        # Seam-invariant 8m forest proximity mask using 16-cell padded slice
+        fp_r0 = max(0, r0 - 16)
+        fp_r1 = min(GRID_H, r1 + 16)
+        fp_c0 = max(0, c0 - 16)
+        fp_c1 = min(GRID_W, c1 + 16)
+        sub_for_pad = scene.sem[fp_r0:fp_r1, fp_c0:fp_c1] == G_FOREST
+        if sub_for_pad.any():
+            near_forest_sub = ndimage.binary_dilation(sub_for_pad, iterations=14)[
+                (r0 - fp_r0) : (r1 - fp_r0), (c0 - fp_c0) : (c1 - fp_c0)
+            ]
+        else:
+            near_forest_sub = np.zeros((r1 - r0, c1 - c0), dtype=np.bool_)
+
         hr0, hc0 = np.nonzero(sub_hedge)
         he0 = E_MIN + (hc0 + c0 + 0.5) * GRID_RES
         hn0 = N_MAX - (hr0 + r0 + 0.5) * GRID_RES
@@ -4899,25 +5120,114 @@ def _render_sculpted_pixel_art_trees_and_hedges(
             hr, hc, he, hn = hr0, hc0, he0, hn0
             edt_h = scene.hedge_edt_05m[r0:r1, c0:c1][hr, hc].astype(np.float32)
             mn_h = scene.meadow_noise_05m[r0:r1, c0:c1][hr, hc].astype(np.float32)
+
         hz_base = sub_dem[hr, hc]
-        # Smooth rounded pillow dome profile from Euclidean distance-to-edge field
-        edge_frac = np.clip(edt_h / 0.85, 0.0, 1.0)
-        hh = np.clip(sub_chm[hr, hc], 0.90, 1.95) * np.sqrt(0.32 + 0.68 * edge_frac)
-        h_top_col = np.where(
-            (mn_h > 0.20)[:, None],
-            [114.0, 182.0, 64.0],
-            [88.0, 158.0, 56.0],
+        h_sem = scene.sem[r0:r1, c0:c1][hr, hc]
+        h_near_for = near_forest_sub[hr, hc] | (h_sem == G_FOREST)
+        in_morf_h = (he >= 2683870.0) & (he <= 2683920.0) & (hn >= 1242334.0) & (hn <= 1242402.0)
+
+        # Deterministic 4m world-grid hash so entire shrub clumps get coherent botanical type & flower color
+        hx4 = np.floor(he / 4.0).astype(np.int64).astype(np.uint32)
+        hy4 = np.floor(hn / 4.0).astype(np.int64).astype(np.uint32)
+        h_clump = ((hx4 * np.uint32(73856093)) ^ (hy4 * np.uint32(19349663)) ^ np.uint32(0x4B1D)) & np.uint32(0xFF)
+
+        # Type classification: (c) Woodland bramble, (b) Flowering garden shrub (~16%), (a) Clipped Swiss boxwood
+        is_bramble = h_near_for
+        is_flower_shrub = (~is_bramble) & (~in_morf_h) & ((h_clump % 6) == 0)
+        is_boxwood = (~is_bramble) & (~is_flower_shrub)
+
+        # v13 M1B Iter2: World-LV95 aperiodic 3-4 px leafy cluster field (organic foliage texture, 100% seam-safe!)
+        b_tuft = (
+            0.55 * np.sin(he * 11.4 + hn * 7.8)
+            + 0.45 * np.cos(he * 7.2 - hn * 12.1)
         ).astype(np.float32)
-        h_mid_col = np.full((len(hr), 3), [54.0, 122.0, 48.0], dtype=np.float32)
-        h_base_col = np.full((len(hr), 3), [30.0, 78.0, 40.0], dtype=np.float32)
+
+        # Height profiles per botanical hedge type
+        raw_chm_h = np.clip(sub_chm[hr, hc], 0.85, 1.90)
+        # (a) Clipped Swiss boxwood: crisp architectural bevelled trapezoid + subtle 0.7m leaf-notch edge
+        notch_box = 0.06 * np.sin(he * 8.2 + hn * 6.4) + 0.03 * b_tuft
+        bevel_box = np.clip((edt_h + notch_box) / 0.35, 0.0, 1.0)
+        hh_box = np.clip(raw_chm_h, 0.90, 1.75) * (0.42 + 0.58 * bevel_box)
+        # (b) Flowering shrub: organic scalloped leafy mound
+        edge_fl = np.clip(edt_h / 0.75, 0.0, 1.0)
+        hh_fl = np.clip(raw_chm_h, 0.85, 1.65) * np.sqrt(0.32 + 0.68 * edge_fl) * (0.90 + 0.12 * np.sin(he * 2.6) * np.cos(hn * 2.6) + 0.06 * b_tuft)
+        # (c) Woodland bramble: irregular undulating mossy thicket
+        hh_bram = raw_chm_h * np.sqrt(0.28 + 0.72 * edge_fl) * (0.76 + 0.28 * np.sin(he * 1.45) * np.cos(hn * 1.45) + 0.08 * b_tuft)
+
+        hh = np.where(is_bramble, hh_bram, np.where(is_flower_shrub, hh_fl, hh_box)).astype(np.float32)
+
+        # Per-type cel-shaded palettes with organic 3-4 px leaf-tuft modulation
+        tuft_mul = (1.0 + 0.11 * b_tuft)[:, None]
+        # Default (a) Clipped Boxwood / Yew
+        h_top_col = np.clip(
+            np.where(
+                (mn_h > 0.18)[:, None],
+                [108.0, 170.0, 60.0],
+                [84.0, 146.0, 52.0],
+            ).astype(np.float32) * tuft_mul,
+            18.0, 240.0,
+        )
+        h_mid_col = np.clip(np.full((len(hr), 3), [52.0, 114.0, 44.0], dtype=np.float32) * (1.0 + 0.08 * b_tuft)[:, None], 14.0, 220.0)
+        h_base_col = np.full((len(hr), 3), [26.0, 68.0, 34.0], dtype=np.float32)
+
+        # (c) Woodland bramble / fern understory
+        if is_bramble.any():
+            fern_hi = (np.sin(he[is_bramble] * 1.8 - hn[is_bramble] * 1.5) > 0.22)
+            h_top_col[is_bramble] = np.clip(
+                np.where(
+                    fern_hi[:, None], [108.0, 148.0, 50.0], [72.0, 126.0, 46.0]
+                ).astype(np.float32) * tuft_mul[is_bramble],
+                16.0, 230.0,
+            )
+            h_mid_col[is_bramble] = np.clip(
+                np.array([40.0, 90.0, 38.0], dtype=np.float32) * (1.0 + 0.08 * b_tuft[is_bramble])[:, None],
+                12.0, 210.0,
+            )
+            h_base_col[is_bramble] = [20.0, 56.0, 30.0]
+
+        # (b) Flowering garden shrubs: dark-emerald leafy mound + harmonious multi-tone organic flower bouquets (NO polka-dots!)
+        if is_flower_shrub.any():
+            h_top_col[is_flower_shrub] = np.clip(
+                np.array([62.0, 128.0, 48.0], dtype=np.float32) * tuft_mul[is_flower_shrub], 16.0, 235.0
+            )
+            h_mid_col[is_flower_shrub] = np.clip(
+                np.array([40.0, 96.0, 42.0], dtype=np.float32) * (1.0 + 0.08 * b_tuft[is_flower_shrub])[:, None], 14.0, 210.0
+            )
+            h_base_col[is_flower_shrub] = [22.0, 62.0, 32.0]
+
+            fe_f = he[is_flower_shrub]
+            fn_f = hn[is_flower_shrub]
+            fx_c = np.floor(fe_f / 1.35)
+            fy_c = np.floor(fn_f / 1.35)
+            fcx = (fx_c + 0.5) * 1.35 + 0.24 * np.sin(fx_c * 3.1 + fy_c * 2.3)
+            fcy = (fy_c + 0.5) * 1.35 + 0.24 * np.cos(fx_c * 2.7 - fy_c * 3.7)
+            dist_fl = np.hypot(fe_f - fcx, fn_f - fcy)
+            b_fl_t = b_tuft[is_flower_shrub]
+            # Soft multi-petal bouquet cluster (0.30..0.44m organic patch on upper sunlit interior, never scattered dots!)
+            on_bloom = (dist_fl < (0.34 + 0.08 * b_fl_t)) & (edt_h[is_flower_shrub] > 0.22)
+            if on_bloom.any():
+                pal_sel = (h_clump[is_flower_shrub] >> 2) % 3
+                is_hi_fl = b_fl_t > 0.12
+                # 0: soft garden rose-pink, 1: hydrangea periwinkle-blue, 2: warm cream-blossom (never harsh pure white!)
+                fl_rose = np.where(is_hi_fl[:, None], [236.0, 186.0, 198.0], [216.0, 146.0, 166.0])
+                fl_hyd = np.where(is_hi_fl[:, None], [172.0, 196.0, 228.0], [132.0, 162.0, 206.0])
+                fl_crm = np.where(is_hi_fl[:, None], [232.0, 222.0, 192.0], [216.0, 204.0, 174.0])
+                fl_col = np.where(
+                    (pal_sel == 0)[:, None],
+                    fl_rose,
+                    np.where((pal_sel == 1)[:, None], fl_hyd, fl_crm),
+                ).astype(np.float32)
+                idx_fs = np.nonzero(is_flower_shrub)[0]
+                h_top_col[idx_fs[on_bloom]] = fl_col[on_bloom]
+
         h_oid = np.full(len(hr), 190000, dtype=np.int32)
 
         if camera.mpp <= 0.16:
             hedge_slices = (
                 (0.22, h_base_col, 0.56, ((0, 0), (1, 0), (0, 1), (1, 1))),
                 (0.50, h_mid_col, 0.72, ((0, 0), (1, 0), (0, 1), (1, 1))),
-                (0.76, h_mid_col * 1.12, 0.86, ((0, 0), (1, 0), (0, 1), (1, 1))),
-                (0.92, h_top_col * 0.92, 0.94, ((0, 0), (1, 0), (0, 1))),
+                (0.76, h_mid_col * 1.10, 0.86, ((0, 0), (1, 0), (0, 1), (1, 1))),
+                (0.92, h_top_col * 0.93, 0.94, ((0, 0), (1, 0), (0, 1))),
                 (1.00, h_top_col, 0.99, ((0, 0), (1, 0))),
             )
         else:
@@ -4954,23 +5264,96 @@ def _render_sculpted_pixel_art_trees_and_hedges(
                 norm_buf[ty[win], tx[win], 1] = 0.0 if nz_v > 0.9 else -0.25
                 norm_buf[ty[win], tx[win], 2] = nz_v
 
+    # (d) Strictly Land-Side Lakeside Reeds / Sedge Tufts (0.6m <= dist_lake <= 2.8m, ZERO water/pier/Seebad bleed!)
+    lp_r0 = max(0, r0 - 10)
+    lp_r1 = min(GRID_H, r1 + 10)
+    lp_c0 = max(0, c0 - 10)
+    lp_c1 = min(GRID_W, c1 + 10)
+    sub_lake_pad = scene.lake_mask[lp_r0:lp_r1, lp_c0:lp_c1]
+    if sub_lake_pad.any():
+        dist_lk_sub = (
+            ndimage.distance_transform_edt(~sub_lake_pad).astype(np.float32) * GRID_RES
+        )[(r0 - lp_r0) : (r1 - lp_r0), (c0 - lp_c0) : (c1 - lp_c0)]
+        sub_sem_r = scene.sem[r0:r1, c0:c1]
+        reed_cand = (
+            sub_mask
+            & (~scene.lake_mask[r0:r1, c0:c1])
+            & (dist_lk_sub >= 0.70)
+            & (dist_lk_sub <= 2.75)
+            & ((sub_sem_r == G_TERRAIN) | (sub_sem_r == G_PARK_CEMETERY))
+            & (~scene.bldg_roof_mask[r0:r1, c0:c1])
+            & (~scene.hedge_mask[r0:r1, c0:c1])
+            & (scene.road_dist[r0:r1, c0:c1] > (scene.road_hw[r0:r1, c0:c1] + np.float16(1.2)))
+        )
+        if reed_cand.any():
+            rr_r, rc_r = np.nonzero(reed_cand)
+            re_r = E_MIN + (rc_r + c0 + 0.5) * GRID_RES
+            rn_r = N_MAX - (rr_r + r0 + 0.5) * GRID_RES
+            # Exclude Seebad Kilchberg swimming beach/concrete apron & Bendlikon Schifflände stone pier apron
+            excl_apron = (
+                ((re_r >= 2684160.0) & (re_r <= 2684295.0) & (rn_r >= 1241200.0) & (rn_r <= 1241435.0))
+                | ((re_r >= 2684000.0) & (re_r <= 2684165.0) & (rn_r >= 1241650.0) & (rn_r <= 1241835.0))
+            )
+            # Sparse deterministic pockets (~18% of natural embankment via 6m world-grid hash)
+            rx6 = np.floor(re_r / 6.0).astype(np.int64).astype(np.uint32)
+            ry6 = np.floor(rn_r / 6.0).astype(np.int64).astype(np.uint32)
+            r_pkt = ((rx6 * np.uint32(73856093)) ^ (ry6 * np.uint32(19349663)) ^ np.uint32(0x2F5A)) & np.uint32(0xFF)
+            # Keep clean ~18% natural shore pockets, spaced cleanly
+            r_cell_h = ((np.floor(re_r * 2.0).astype(np.int64).astype(np.uint32) * np.uint32(2654435761)) ^ (np.floor(rn_r * 2.0).astype(np.int64).astype(np.uint32) * np.uint32(83492791))) & np.uint32(0xFF)
+            keep_reed = (~excl_apron) & ((r_pkt % 100) < 22) & ((r_cell_h % 5) < 2)
+            if keep_reed.any():
+                rr_r, rc_r = rr_r[keep_reed], rc_r[keep_reed]
+                re_r, rn_r = re_r[keep_reed], rn_r[keep_reed]
+                rz_r = sub_dem[rr_r, rc_r]
+                rh_r = 0.58 + 0.36 * ((r_cell_h[keep_reed] & 15).astype(np.float32) / 15.0)
+                rsh_r = sub_shadow[rr_r, rc_r]
+                # 3 vertical stacked tufted sedge blade levels: base olive -> mid reed -> golden-ochre tip
+                reed_levels = (
+                    (0.28, np.array([58.0, 96.0, 44.0], dtype=np.float32)),
+                    (0.66, np.array([82.0, 122.0, 54.0], dtype=np.float32)),
+                    (1.00, np.array([164.0, 150.0, 78.0], dtype=np.float32)),
+                )
+                for frac_z, r_rgb in reed_levels:
+                    px_rd, py_rd, pd_rd = camera.project(re_r, rn_r, rz_r + rh_r * frac_z)
+                    ix_rd = np.round(px_rd + shift_x).astype(np.int32)
+                    iy_rd = np.round(py_rd + shift_y).astype(np.int32)
+                    vrd = (ix_rd >= 0) & (ix_rd < W - 2) & (iy_rd >= 0) & (iy_rd < H - 1)
+                    if not vrd.any():
+                        continue
+                    ix_rd, iy_rd, pd_rd = ix_rd[vrd], iy_rd[vrd], pd_rd[vrd]
+                    sh_rd = rsh_r[vrd]
+                    # 2px-wide clean vertical sedge blade tuft
+                    for ox in (0, 1):
+                        tx, ty = ix_rd + ox, iy_rd
+                        win = pd_rd < zbuf[ty, tx]
+                        if win.any():
+                            zbuf[ty[win], tx[win]] = pd_rd[win]
+                            rgb_buf[ty[win], tx[win]] = r_rgb * (1.0 if ox == 0 else 0.86)
+                            mat_buf[ty[win], tx[win]] = M_TREE
+                            obj_buf[ty[win], tx[win]] = 191000
+                            shadow_buf[ty[win], tx[win]] = sh_rd[win]
+                            norm_buf[ty[win], tx[win], 0] = 0.15
+                            norm_buf[ty[win], tx[win], 1] = -0.15
+                            norm_buf[ty[win], tx[win], 2] = 0.96
+
     # -------------------------------------------------------------------------
-    # 4B. All 16,000+ Individual Hand-Crafted 90s Pixel-Art 3D Trees!
+    # 4B. v13.0 All 16,000+ Realistic Botanical Pixel-Art 3D Trees (8 Swiss/Zürichsee Species!)
+    #     0: Swiss Oak/Beech | 1: Alpine Spruce/Fir | 2: Silver Birch | 3: Lakeside Weeping Willow
+    #     4: Lombardy Poplar/Cypress | 5: Blossoming Orchard/Cherry | 6: Copper Beech | 7: Swiss Linden/Maple
     # -------------------------------------------------------------------------
     te = scene.tree_e
     tn = scene.tree_n
     tz = scene.tree_z
     th = scene.tree_h
     trad = scene.tree_rad
-    tsp = scene.tree_species
-    tdist_l = scene.tree_dist_lake
+    tsp = scene.tree_species_v13
     t_ids = np.arange(len(te), dtype=np.int32)
 
     if crop_box_lv95 is not None:
         e0, n0, e1, n1 = crop_box_lv95
         keep = (te >= e0 + 1.5) & (te <= e1 - 1.5) & (tn >= n0 + 1.5) & (tn <= n1 - 1.5)
-        te, tn, tz, th, trad, tsp, tdist_l, t_ids = (
-            te[keep], tn[keep], tz[keep], th[keep], trad[keep], tsp[keep], tdist_l[keep], t_ids[keep]
+        te, tn, tz, th, trad, tsp, t_ids = (
+            te[keep], tn[keep], tz[keep], th[keep], trad[keep], tsp[keep], t_ids[keep]
         )
 
     if len(te) == 0:
@@ -4978,7 +5361,7 @@ def _render_sculpted_pixel_art_trees_and_hedges(
 
     px_base, py_base, pd_base = camera.project(te, tn, tz)
     px_top, py_top, _ = camera.project(te, tn, tz + th)
-    r_px_est = (trad * 1.48 / camera.mpp) + 12.0
+    r_px_est = np.minimum(52.0, (trad * 1.40 / camera.mpp) + 10.0)
     in_vp = (
         (px_base + shift_x + r_px_est >= -6.0)
         & (px_base + shift_x - r_px_est <= W + 6.0)
@@ -4988,8 +5371,8 @@ def _render_sculpted_pixel_art_trees_and_hedges(
     if not in_vp.any():
         return
 
-    te, tn, tz, th, trad, tsp, tdist_l, t_ids = (
-        te[in_vp], tn[in_vp], tz[in_vp], th[in_vp], trad[in_vp], tsp[in_vp], tdist_l[in_vp], t_ids[in_vp]
+    te, tn, tz, th, trad, tsp, t_ids = (
+        te[in_vp], tn[in_vp], tz[in_vp], th[in_vp], trad[in_vp], tsp[in_vp], t_ids[in_vp]
     )
     px_base = px_base[in_vp] + shift_x
     py_base = py_base[in_vp] + shift_y
@@ -4998,28 +5381,30 @@ def _render_sculpted_pixel_art_trees_and_hedges(
     pd_base = pd_base[in_vp]
 
     t_ord = np.argsort(pd_base)[::-1]
-    te, tn, tz, th, trad, tsp, tdist_l, t_ids = (
-        te[t_ord], tn[t_ord], tz[t_ord], th[t_ord], trad[t_ord], tsp[t_ord], tdist_l[t_ord], t_ids[t_ord]
+    te, tn, tz, th, trad, tsp, t_ids = (
+        te[t_ord], tn[t_ord], tz[t_ord], th[t_ord], trad[t_ord], tsp[t_ord], t_ids[t_ord]
     )
     px_base, py_base, py_top, pd_base = px_base[t_ord], py_base[t_ord], py_top[t_ord], pd_base[t_ord]
 
-    # v12 Vibrant 5-Tone Cel-Shaded Foliage Ramps (tinyrj.com inspired: deep pine-ink -> emerald -> bright lime!)
+    # v13.0 Botanical 5-Tone Cel-Shaded Foliage Ramps for all 8 Swiss/Zürichsee Species
     SPECIES_RAMPS = np.array(
         [
-            # 0: Wide-Spreading Swiss Oak / Beech (deep pine-ink -> rich forest -> vibrant emerald -> bright lime)
-            [[18.0, 56.0, 36.0], [34.0, 96.0, 44.0], [60.0, 146.0, 50.0], [100.0, 182.0, 60.0], [140.0, 210.0, 72.0]],
-            # 1: Airy Linden / Birch / Fruit Orchard (rich forest -> bright sunlit lime-emerald)
-            [[22.0, 66.0, 38.0], [42.0, 112.0, 48.0], [76.0, 164.0, 54.0], [120.0, 196.0, 66.0], [158.0, 222.0, 82.0]],
-            # 2: Alpine Spruce / Silver Fir (crisp mountain blue-green needles)
-            [[16.0, 46.0, 42.0], [28.0, 72.0, 54.0], [46.0, 108.0, 66.0], [68.0, 138.0, 80.0], [96.0, 166.0, 96.0]],
-            # 3: Slender Mediterranean / Cemetery Cypress (deep rich cypress emerald)
-            [[16.0, 44.0, 34.0], [26.0, 70.0, 44.0], [42.0, 102.0, 56.0], [64.0, 134.0, 68.0], [88.0, 160.0, 82.0]],
-            # 4: Stately Estate Copper Beech (deep aubergine-plum -> warm bronze-burgundy)
-            [[40.0, 20.0, 32.0], [66.0, 32.0, 42.0], [98.0, 46.0, 50.0], [130.0, 64.0, 60.0], [162.0, 86.0, 74.0]],
-            # 5: Spring Cherry / Apple Blossom Tree (dusty rose -> sunlit creamy-white petals)
-            [[120.0, 70.0, 86.0], [170.0, 110.0, 124.0], [212.0, 156.0, 170.0], [238.0, 202.0, 212.0], [252.0, 236.0, 240.0]],
-            # 6: Weeping Lakeside Willow (silvery-sage cascading Zürichsee willow)
-            [[22.0, 64.0, 44.0], [40.0, 100.0, 58.0], [70.0, 142.0, 74.0], [106.0, 178.0, 92.0], [144.0, 206.0, 114.0]],
+            # 0: Swiss Oak / Beech (deep pine-ink -> rich forest -> vibrant emerald -> olive-emerald -> bright sunlit tip)
+            [[18.0, 52.0, 34.0], [34.0, 92.0, 42.0], [58.0, 138.0, 48.0], [96.0, 174.0, 58.0], [136.0, 204.0, 72.0]],
+            # 1: Alpine Spruce / Silver Fir (deep alpine blue-spruce -> dark fir -> mountain spruce -> sunlit blue-green needles)
+            [[14.0, 40.0, 38.0], [24.0, 66.0, 50.0], [40.0, 98.0, 62.0], [62.0, 132.0, 76.0], [90.0, 160.0, 92.0]],
+            # 2: Silver Birch (fresh light-emerald / yellow-green feathery birch foliage)
+            [[28.0, 72.0, 40.0], [48.0, 118.0, 48.0], [84.0, 168.0, 56.0], [128.0, 198.0, 68.0], [172.0, 218.0, 86.0]],
+            # 3: Lakeside Weeping Willow (silvery-sage cascading Zürichsee willow)
+            [[22.0, 62.0, 44.0], [40.0, 98.0, 58.0], [70.0, 140.0, 74.0], [108.0, 176.0, 92.0], [148.0, 206.0, 116.0]],
+            # 4: Lombardy Poplar / Mediterranean Cypress (deep sculptural cypress emerald)
+            [[14.0, 42.0, 32.0], [26.0, 68.0, 42.0], [44.0, 102.0, 54.0], [68.0, 136.0, 66.0], [96.0, 166.0, 80.0]],
+            # 5: Blossoming Orchard / Cherry / Magnolia (dusty rose -> warm pink -> sunlit creamy-white petals)
+            [[122.0, 72.0, 88.0], [172.0, 114.0, 128.0], [212.0, 156.0, 170.0], [238.0, 202.0, 212.0], [252.0, 236.0, 240.0]],
+            # 6: Copper Beech / Blutbuche (deep aubergine-plum -> rich burgundy -> warm bronze-copper)
+            [[40.0, 20.0, 32.0], [66.0, 32.0, 42.0], [98.0, 46.0, 50.0], [130.0, 64.0, 60.0], [164.0, 88.0, 74.0]],
+            # 7: Swiss Linden / Maple (warm sunlit olive-emerald upright broadleaf)
+            [[24.0, 68.0, 38.0], [44.0, 108.0, 46.0], [74.0, 154.0, 52.0], [116.0, 188.0, 64.0], [156.0, 214.0, 78.0]],
         ],
         dtype=np.float32,
     )
@@ -5036,33 +5421,59 @@ def _render_sculpted_pixel_art_trees_and_hedges(
 
     mpp = camera.mpp
     z_px_per_m = (cp_c * camera.z_exag) / mpp
+    px_s_tr = 0.25 / max(0.08, mpp)
+
+    def _draw_branch_seg(
+        x_a: float, y_a: float, x_b: float, y_b: float,
+        half_w: int, d_br: float, col_lit: np.ndarray, col_sh: np.ndarray, oid_b: int,
+    ) -> None:
+        """Rasterize a crisp tapered woody branch fork segment into zbuf/rgb_buf (100% tree-relative)."""
+        steps = max(2, int(math.ceil(max(abs(x_b - x_a), abs(y_b - y_a)) * 1.4)))
+        for st_i in range(steps + 1):
+            t_f = st_i / steps
+            bx = int(round(x_a + (x_b - x_a) * t_f))
+            by = int(round(y_a + (y_b - y_a) * t_f))
+            if by < 0 or by >= H:
+                continue
+            hw_cur = half_w if t_f < 0.55 else max(0, half_w - 1)
+            for ox in range(-hw_cur, hw_cur + 1):
+                px_b = bx + ox
+                if 0 <= px_b < W and d_br < zbuf[by, px_b]:
+                    zbuf[by, px_b] = d_br
+                    rgb_buf[by, px_b] = col_lit if ox <= 0 else col_sh
+                    mat_buf[by, px_b] = M_TRUNK
+                    obj_buf[by, px_b] = oid_b
+                    norm_buf[by, px_b] = [0.45, -0.45, 0.40]
+                    shadow_buf[by, px_b] = False
+
+    def _leaf_tuft_field(
+        dx_a: np.ndarray, dy_a: np.ndarray, s1_i: int, s2_i: int, scale_px: float = 3.0,
+    ) -> np.ndarray:
+        """Aperiodic tree-relative 2-4 px coherent leaf-tuft cluster field in [-1, +1].
+        ZERO 1x1 speckle, ZERO Bayer checkerboard, ZERO periodic 2D grid, 100% macro-tile seam-invariant!"""
+        k0 = (2.0 * math.pi) / max(1.8, scale_px)
+        ang0 = (s1_i & 255) * 0.02454369
+        c0, sn0 = math.cos(ang0), math.sin(ang0)
+        c1, sn1 = math.cos(ang0 + 1.13), math.sin(ang0 + 1.13)
+        c2, sn2 = math.cos(ang0 + 2.29), math.sin(ang0 + 2.29)
+        p0 = ((s1_i >> 8) & 255) * 0.02454369
+        p1 = (s2_i & 255) * 0.02454369
+        p2 = ((s2_i >> 8) & 255) * 0.02454369
+        u0 = (dx_a * c0 + dy_a * sn0) * k0 + p0
+        u1 = (dx_a * c1 + dy_a * sn1) * (k0 * 0.87) + p1
+        u2 = (dx_a * c2 + dy_a * sn2) * (k0 * 1.16) + p2
+        raw = 0.42 * np.sin(u0) + 0.34 * np.cos(u1) + 0.24 * np.sin(u2)
+        return np.tanh(1.55 * raw).astype(np.float32)
 
     for i in range(len(te)):
-        sp_k = min(5, int(tsp[i]))
+        sp = int(tsp[i])
         tid = int(t_ids[i])
         oid = 100000 + tid
-        te_i = float(te[i])
-        tn_i = float(tn[i])
         h_m = float(th[i])
         r_m = float(trad[i])
         cx0 = float(px_base[i])
         cy0 = float(py_base[i])
         d0 = float(pd_base[i])
-
-        # F14c: Reclassify ~10 deterministic existing Reformierte Kirche Cemetery trees to slender dark cypresses!
-        if (
-            sp_k == 0
-            and 2683375.0 <= te_i <= 2683500.0
-            and 1241053.0 <= tn_i <= 1241314.0
-            and (tid % 11) == 0
-        ):
-            sp_k = 3
-        # v11 Morfanlage: keep shady green lakeside park foliage (no pink/maroon ornamentals)
-        if sp_k in (4, 5) and 2683870.0 <= te_i <= 2683920.0 and 1242334.0 <= tn_i <= 1242402.0:
-            sp_k = 0
-
-        is_willow = (sp_k in (0, 1)) and (float(tdist_l[i]) < 25.0) and ((tid % 5) < 2)
-        is_oak = (not is_willow) and (sp_k == 0 or (sp_k == 1 and r_m >= 3.2 and (tid & 1) == 0))
 
         # Deterministic per-tree variation seeds
         s0 = ((tid * 73856093) ^ 0x5A5A) & 0xFFFF
@@ -5071,32 +5482,47 @@ def _render_sculpted_pixel_art_trees_and_hedges(
         w_var = 0.88 + 0.24 * ((s0 & 255) / 255.0)
         h_var = 0.90 + 0.20 * (((s0 >> 8) & 255) / 255.0)
 
-        if is_willow:
-            r_px = max(4.0, (r_m * 1.32 * w_var) / mpp)
-            h_px = max(8.0, min(h_m * z_px_per_m * h_var, r_px * 2.45))
-            crown_ry = max(3.8, min(h_px * 0.56, r_px * 0.98))
-            trunk_h_px = max(1.6, h_px * 0.16)
-        elif sp_k in (0, 1, 4, 5):
-            if is_oak:
-                r_px = max(3.8, (r_m * 1.28 * w_var) / mpp)
-                h_px = max(7.0, min(h_m * z_px_per_m * h_var, r_px * 2.65))
-                oak_ry_fac = 0.46 + 0.16 * (((s1 >> 8) & 15) / 15.0)
-                crown_ry = max(3.4, min(h_px * oak_ry_fac, r_px * 0.96))
-                trunk_h_px = max(2.4, h_px - crown_ry * 1.82)
-            else:
-                r_px = max(3.4, (r_m * 1.15 * w_var) / mpp)
-                h_px = max(7.5, min(h_m * z_px_per_m * h_var, r_px * 2.75))
-                crown_ry = max(3.8, min(h_px * 0.52, r_px * 1.04))
-                trunk_h_px = max(2.8, h_px - crown_ry * 1.75)
-        else:
-            r_px = max(3.0, (r_m * 1.06 * w_var) / mpp)
-            h_px = max(8.5, min(h_m * z_px_per_m * h_var, r_px * 3.9))
-            trunk_h_px = max(1.8, h_px * 0.14)
-            crown_ry = max(3.4, 0.5 * (h_px - trunk_h_px))
+        # Species proportions — CRITICAL GUARD: clamp r_px so outer boughs + scallops stay <= 52 px (< guard_x = 56 px)!
+        if sp == 1:  # Alpine Spruce / Silver Fir
+            r_px = min(38.0, max(3.4, (r_m * 1.12 * w_var) / mpp))
+            h_px = max(10.0, min(h_m * z_px_per_m * h_var, r_px * 3.65))
+            trunk_h_px = max(2.4, h_px * (0.18 + 0.05 * ((s1 & 7) / 7.0)))
+            crown_ry = max(4.0, 0.5 * (h_px - trunk_h_px))
+        elif sp == 4:  # Lombardy Poplar / Mediterranean Cypress
+            r_px = min(22.0, max(2.8, (min(r_m, 2.1) * 0.98 * w_var) / mpp))
+            h_px = max(10.0, min(h_m * z_px_per_m * h_var * 1.08, r_px * 4.25))
+            trunk_h_px = max(1.8, h_px * 0.13)
+            crown_ry = max(4.2, 0.5 * (h_px - trunk_h_px))
+        elif sp == 3:  # Lakeside Weeping Willow (tall gnarled trunk + airy dome + delicate hanging tendrils!)
+            r_px = min(38.0, max(4.5, (r_m * 1.22 * w_var) / mpp))
+            h_px = max(9.0, min(h_m * z_px_per_m * h_var, r_px * 2.45))
+            trunk_h_px = max(3.6, h_px * 0.34)
+            crown_ry = max(3.8, min(h_px * 0.44, r_px * 0.78))
+        elif sp == 2:  # Silver Birch (slender, taller airy crown)
+            r_px = min(36.0, max(3.6, (r_m * 1.12 * w_var) / mpp))
+            h_px = max(8.5, min(h_m * z_px_per_m * h_var * 1.06, r_px * 2.95))
+            crown_ry = max(4.0, min(h_px * 0.48, r_px * 1.06))
+            trunk_h_px = max(3.4, h_px - crown_ry * 1.66)
+        elif sp == 7:  # Swiss Linden / Maple (upright oval-dome broadleaf)
+            r_px = min(39.0, max(3.8, (r_m * 1.16 * w_var) / mpp))
+            h_px = max(8.0, min(h_m * z_px_per_m * h_var, r_px * 2.75))
+            crown_ry = max(4.0, min(h_px * 0.52, r_px * (0.92 + 0.16 * (((s1 >> 8) & 15) / 15.0))))
+            trunk_h_px = max(3.0, h_px - crown_ry * 1.72)
+        elif sp == 5:  # Blossoming Orchard / Cherry / Magnolia (compact open-vase)
+            r_px = min(34.0, max(3.6, (r_m * 1.18 * w_var) / mpp))
+            h_px = max(7.0, min(h_m * z_px_per_m * h_var, r_px * 2.35))
+            crown_ry = max(3.4, min(h_px * 0.48, r_px * 0.86))
+            trunk_h_px = max(2.6, h_px - crown_ry * 1.72)
+        else:  # 0: Swiss Oak / Beech & 6: Copper Beech (wide-spreading majestic broadleaf)
+            r_px = min(40.0, max(4.0, (r_m * 1.25 * w_var) / mpp))
+            h_px = max(7.5, min(h_m * z_px_per_m * h_var, r_px * 2.60))
+            oak_ry_fac = 0.72 + 0.16 * (((s1 >> 8) & 15) / 15.0)
+            crown_ry = max(3.5, min(h_px * 0.50, r_px * oak_ry_fac))
+            trunk_h_px = max(2.6, h_px - crown_ry * 1.76)
 
-        # 0. v12 Clean Solid Oval Cool-Tinted Canopy Contact Shadow (ZERO checkerboard dither ring!)
-        sh_rx = int(math.ceil(r_px * 0.88))
-        sh_ry = max(2, int(math.ceil(r_px * 0.40)))
+        # 0. Clean Solid Oval Cool-Tinted Canopy Contact Shadow (ZERO checkerboard dither ring!)
+        sh_rx = int(math.ceil(r_px * (0.76 if sp in (1, 4) else 0.90)))
+        sh_ry = max(2, int(math.ceil(r_px * (0.34 if sp in (1, 4) else 0.42))))
         sx0 = max(0, int(round(cx0 - sh_rx * 0.75)))
         sx1 = min(W - 1, int(round(cx0 + sh_rx * 1.10)))
         sy0 = max(0, int(round(cy0 - sh_ry * 0.65)))
@@ -5110,59 +5536,16 @@ def _render_sculpted_pixel_art_trees_and_hedges(
             if in_sh.any():
                 rgb_buf[sy0 : sy1 + 1, sx0 : sx1 + 1][in_sh] *= np.array([0.74, 0.78, 0.86], dtype=np.float32)
 
-        # 1. Crisp 2-tone timber trunk with root flare extending cleanly into the crown interior!
         crown_bot_y = cy0 - trunk_h_px
         crown_top_y = crown_bot_y - crown_ry * 2.0
         crown_cy = 0.5 * (crown_bot_y + crown_top_y)
 
-        px_s_tr = 0.25 / max(0.08, mpp)
-        tx_i = int(round(cx0))
-        ty_bot = int(round(cy0)) + 1
-        ty_top = int(round(crown_cy))
-        tw_half = max(1, int(round(1.0 * px_s_tr))) if r_px >= (6.8 * px_s_tr) else (1 if px_s_tr >= 1.5 else 0)
-        y_lo_t = max(0, ty_top)
-        y_hi_t = min(H - 1, ty_bot)
-        x_lo_t = max(0, tx_i - tw_half)
-        x_hi_t = min(W - 1, tx_i + tw_half)
-        if y_hi_t >= y_lo_t and x_hi_t >= x_lo_t:
-            sl_z = zbuf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1]
-            d_tr = d0 + 0.14
-            w_tr = d_tr < sl_z
-            if w_tr.any():
-                sl_z[w_tr] = d_tr
-                bark_base = np.array([176.0, 170.0, 158.0] if (sp_k == 1 and (not is_willow) and (s2 & 3) < 2) else [86.0, 60.0, 40.0], dtype=np.float32)
-                if tw_half >= 1:
-                    tw_w = x_hi_t - x_lo_t + 1
-                    th_h = y_hi_t - y_lo_t + 1
-                    bx_rel = np.arange(x_lo_t, x_hi_t + 1, dtype=np.float32) - tx_i
-                    b_shade = np.where(bx_rel < 0, 1.12, np.where(bx_rel > 0, 0.78, 0.96)).astype(np.float32)
-                    b_patch = np.broadcast_to(bark_base[None, None, :] * b_shade[None, :, None], (th_h, tw_w, 3))
-                    rgb_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = b_patch[w_tr]
-                else:
-                    rgb_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = bark_base
-                mat_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = M_TRUNK
-                obj_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = oid
-                norm_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = [0.5, -0.5, 0.35]
-                shadow_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = False
-        # Subtle 1px root flare at tree base when high-res
-        if px_s_tr >= 1.5 and 0 <= ty_bot < H:
-            for fx_off in (-(tw_half + 1), tw_half + 1):
-                fx_p = tx_i + fx_off
-                if 0 <= fx_p < W and (d0 + 0.16) < zbuf[ty_bot, fx_p]:
-                    zbuf[ty_bot, fx_p] = d0 + 0.16
-                    rgb_buf[ty_bot, fx_p] = [74.0, 52.0, 34.0]
-                    mat_buf[ty_bot, fx_p] = M_TRUNK
-                    obj_buf[ty_bot, fx_p] = oid
-                    norm_buf[ty_bot, fx_p] = [0.4, -0.4, 0.5]
-                    shadow_buf[ty_bot, fx_p] = False
-
-        # 2. Compute tight screen bounding box for sculpted 3D crown
-        pad_x = int(math.ceil(r_px * 1.38)) + 2
-
+        # Compute tight screen bounding box (clamped <= 52 px < guard_x=56 px!)
+        pad_x = min(52, int(math.ceil(r_px * 1.28)) + 2)
         x0_b = max(0, int(math.floor(cx0)) - pad_x)
         x1_b = min(W - 1, int(math.ceil(cx0)) + pad_x)
         y0_b = max(0, int(math.floor(crown_top_y)) - 4)
-        y1_b = min(H - 1, int(math.ceil(cy0)) + 1) if is_willow else min(H - 1, int(math.ceil(crown_bot_y)) + 2)
+        y1_b = min(H - 1, int(math.ceil(cy0)) + 1) if sp == 3 else min(H - 1, int(math.ceil(crown_bot_y)) + 2)
         if x1_b < x0_b or y1_b < y0_b:
             continue
 
@@ -5170,178 +5553,482 @@ def _render_sculpted_pixel_art_trees_and_hedges(
         ys = np.arange(y0_b, y1_b + 1, dtype=np.float32)
         gx, gy = np.meshgrid(xs, ys)
         dx = gx - cx0
+        dy_c = gy - crown_cy
         v_h = (crown_bot_y - gy) / max(1.0, (crown_bot_y - crown_top_y))
 
-        ramp = SPECIES_RAMPS[6 if is_willow else sp_k].copy()
-        hue_shift = (((s2 & 31) / 31.0) - 0.5) * 0.14
+        ramp = SPECIES_RAMPS[sp].copy()
+        hue_shift = (((s2 & 31) / 31.0) - 0.5) * 0.12
         if abs(hue_shift) > 0.01:
-            ramp = np.clip(ramp * np.array([1.0 + hue_shift * 0.8, 1.0 + hue_shift * 0.5, 1.0 - hue_shift * 0.4], dtype=np.float32), 8.0, 252.0)
-        if not is_night and sp_k not in (4, 5):
-            # Subtle warm golden sunlit tip nudge on tone 4 for crisp directional rim highlights
-            ramp[4] = np.clip(ramp[4] + np.array([8.0, 6.0, -4.0], dtype=np.float32), 8.0, 252.0)
+            ramp = np.clip(ramp * np.array([1.0 + hue_shift * 0.75, 1.0 + hue_shift * 0.45, 1.0 - hue_shift * 0.4], dtype=np.float32), 8.0, 252.0)
+        if not is_night and sp not in (5, 6):
+            ramp[4] = np.clip(ramp[4] + np.array([9.0, 7.0, -3.0], dtype=np.float32), 8.0, 252.0)
+            ramp[0] = np.clip(ramp[0] * np.array([0.92, 0.94, 0.96], dtype=np.float32), 10.0, 252.0)
 
-        # v12: ZERO micro_1x1 / bayer_t / clump_2x2 speckle — smooth multi-lobe cloud crowns + internal ink creases!
-        lobe_crease = None
+        # ---------------------------------------------------------------------
+        # PASS A: Compact Shaded Lower-Core Recess (shrunk so sky & branches peek cleanly through upper/mid crown!)
+        # Skipped for airy Silver Birch (sp==2) and Weeping Willow (sp==3) so real air gaps frame the trunk & boughs!
+        # ---------------------------------------------------------------------
+        if sp in (0, 5, 6, 7) and r_px >= 6.0:
+            ux_bk = dx / max(1.5, r_px * 0.58)
+            uy_bk = (dy_c - 0.24 * crown_ry) / max(1.5, crown_ry * 0.52)
+            th_bk = np.arctan2(uy_bk, ux_bk)
+            sc_bk = 1.0 + 0.12 * np.cos(5.0 * th_bk + (s1 & 15) * 0.4)
+            in_bk = (np.sqrt(ux_bk * ux_bk + uy_bk * uy_bk) / sc_bk) < 1.0
+            if in_bk.any():
+                d_bk = d0 + 0.18
+                sub_z_bk = zbuf[y0_b : y1_b + 1, x0_b : x1_b + 1]
+                win_bk = in_bk & (d_bk < sub_z_bk)
+                if win_bk.any():
+                    wy_bk, wx_bk = np.nonzero(win_bk)
+                    gy_bk, gx_bk = y0_b + wy_bk, x0_b + wx_bk
+                    zbuf[gy_bk, gx_bk] = d_bk
+                    bk_col = np.array([34.0, 74.0, 34.0], dtype=np.float32) if sp == 5 else (ramp[0] * 0.90)
+                    rgb_buf[gy_bk, gx_bk] = bk_col
+                    mat_buf[gy_bk, gx_bk] = M_TREE
+                    obj_buf[gy_bk, gx_bk] = oid
+                    norm_buf[gy_bk, gx_bk] = [0.15, -0.10, 0.88]
+                    shadow_buf[gy_bk, gx_bk] = False
 
-        if sp_k == 2:
-            in_v = (v_h >= -0.04) & (v_h <= 1.05)
+        # ---------------------------------------------------------------------
+        # PASS B: Tapered Woody Trunk, Root Flare & Angled Y-Forked Primary Limbs (depth d0 + 0.05..0.08)
+        # ---------------------------------------------------------------------
+        tx_i = int(round(cx0))
+        ty_bot = int(round(cy0)) + 1
+        if sp == 1:
+            # Alpine Spruce: visible dark reddish-brown trunk peeking between shaggy drooping boughs
+            fork_y = cy0 - h_px * 0.78
+            tw_half = max(1, int(round(0.85 * px_s_tr))) if r_px >= (7.0 * px_s_tr) else (1 if px_s_tr >= 1.5 else 0)
+            bark_lit = np.array([88.0, 56.0, 40.0], dtype=np.float32)
+            bark_mid = np.array([70.0, 44.0, 32.0], dtype=np.float32)
+            bark_sh = np.array([46.0, 30.0, 22.0], dtype=np.float32)
+            lenticel_col = bark_sh
+        elif sp == 3:
+            # Weeping Willow: sturdy gnarled warm grey-brown trunk visible beneath arching fronds
+            fork_y = crown_bot_y - crown_ry * 0.22
+            tw_half = max(1, int(round(1.15 * px_s_tr))) if r_px >= (6.0 * px_s_tr) else 1
+            bark_lit = np.array([102.0, 82.0, 62.0], dtype=np.float32)
+            bark_mid = np.array([80.0, 64.0, 48.0], dtype=np.float32)
+            bark_sh = np.array([52.0, 42.0, 32.0], dtype=np.float32)
+            lenticel_col = bark_sh
+        elif sp == 2:
+            fork_y = crown_bot_y - crown_ry * 0.30
+            tw_half = 1 if r_px >= (5.5 * px_s_tr) else 0
+            bark_lit = np.array([218.0, 214.0, 206.0], dtype=np.float32)
+            bark_mid = np.array([188.0, 184.0, 178.0], dtype=np.float32)
+            bark_sh = np.array([154.0, 152.0, 148.0], dtype=np.float32)
+            lenticel_col = np.array([52.0, 48.0, 46.0], dtype=np.float32)
+        elif sp == 5:
+            fork_y = crown_bot_y - crown_ry * 0.28
+            tw_half = max(1, int(round(0.85 * px_s_tr))) if r_px >= (6.5 * px_s_tr) else (1 if px_s_tr >= 1.5 else 0)
+            bark_lit = np.array([86.0, 56.0, 42.0], dtype=np.float32)
+            bark_mid = np.array([72.0, 46.0, 34.0], dtype=np.float32)
+            bark_sh = np.array([50.0, 32.0, 24.0], dtype=np.float32)
+            lenticel_col = bark_sh
+        else:
+            fork_y = crown_bot_y - crown_ry * (0.28 if sp in (0, 6, 7) else 0.15)
+            tw_half = max(1, int(round(1.0 * px_s_tr))) if r_px >= (6.5 * px_s_tr) else (1 if px_s_tr >= 1.5 else 0)
+            bark_lit = np.array([96.0, 68.0, 46.0], dtype=np.float32)
+            bark_mid = np.array([82.0, 56.0, 38.0], dtype=np.float32)
+            bark_sh = np.array([54.0, 36.0, 24.0], dtype=np.float32)
+            lenticel_col = bark_sh
+
+        ty_top = int(round(fork_y))
+        y_lo_t = max(0, ty_top)
+        y_hi_t = min(H - 1, ty_bot)
+        d_tr = d0 + (0.05 if sp == 3 else 0.08)
+        if sp in (2, 3) and y_hi_t >= y_lo_t:
+            # Organic gently curved/leaning trunk for Silver Birch & gnarled Weeping Willow
+            lean_dir = 1.0 if ((s1 & 1) == 0) else -1.0
+            lean_amp = (1.4 if sp == 2 else 1.8) * lean_dir
+            t_span = max(1.0, float(ty_bot - ty_top))
+            for py_t in range(y_lo_t, y_hi_t + 1):
+                t_up = np.clip((ty_bot - py_t) / t_span, 0.0, 1.0)
+                x_c_t = int(round(cx0 + math.sin(t_up * math.pi * 0.85) * lean_amp))
+                hw_row = tw_half if (t_up < 0.72 or sp == 2) else max(0, tw_half - 1)
+                for ox_t in range(-hw_row, hw_row + 1):
+                    px_t = x_c_t + ox_t
+                    if 0 <= px_t < W and d_tr < zbuf[py_t, px_t]:
+                        zbuf[py_t, px_t] = d_tr
+                        c_b = bark_lit if ox_t < 0 else (bark_sh if ox_t > 0 else bark_mid)
+                        if sp == 2 and ox_t == hw_row and (((int(round(cy0 - py_t)) + (s1 & 3)) % 5) == 0):
+                            c_b = lenticel_col
+                        rgb_buf[py_t, px_t] = c_b
+                        mat_buf[py_t, px_t] = M_TRUNK
+                        obj_buf[py_t, px_t] = oid
+                        norm_buf[py_t, px_t] = [0.5, -0.5, 0.35]
+                        shadow_buf[py_t, px_t] = False
+        elif y_hi_t >= y_lo_t:
+            x_lo_t = max(0, tx_i - tw_half)
+            x_hi_t = min(W - 1, tx_i + tw_half)
+            if x_hi_t >= x_lo_t:
+                sl_z = zbuf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1]
+                w_tr = d_tr < sl_z
+                if w_tr.any():
+                    sl_z[w_tr] = d_tr
+                    tw_w = x_hi_t - x_lo_t + 1
+                    th_h = y_hi_t - y_lo_t + 1
+                    if tw_half >= 1:
+                        bx_rel = np.arange(x_lo_t, x_hi_t + 1, dtype=np.float32) - tx_i
+                        b_col = np.where(
+                            (bx_rel < 0)[:, None], bark_lit, np.where((bx_rel > 0)[:, None], bark_sh, bark_mid)
+                        ).astype(np.float32)
+                        b_patch = np.broadcast_to(b_col[None, :, :], (th_h, tw_w, 3)).copy()
+                    else:
+                        b_patch = np.broadcast_to(bark_lit[None, None, :], (th_h, tw_w, 3)).copy()
+                    rgb_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = b_patch[w_tr]
+                    mat_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = M_TRUNK
+                    obj_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = oid
+                    norm_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = [0.5, -0.5, 0.35]
+                    shadow_buf[y_lo_t : y_hi_t + 1, x_lo_t : x_hi_t + 1][w_tr] = False
+
+        # Crisp 1px root flare at tree base when high-res
+        if px_s_tr >= 1.5 and 0 <= ty_bot < H:
+            for fx_off in (-(tw_half + 1), tw_half + 1):
+                fx_p = tx_i + fx_off
+                if 0 <= fx_p < W and (d0 + 0.12) < zbuf[ty_bot, fx_p]:
+                    zbuf[ty_bot, fx_p] = d0 + 0.12
+                    rgb_buf[ty_bot, fx_p] = bark_sh
+                    mat_buf[ty_bot, fx_p] = M_TRUNK
+                    obj_buf[ty_bot, fx_p] = oid
+                    norm_buf[ty_bot, fx_p] = [0.4, -0.4, 0.5]
+                    shadow_buf[ty_bot, fx_p] = False
+
+        # Angled primary woody Y-fork branch limbs reaching into the crown interior!
+        if sp in (0, 2, 3, 5, 6, 7) and r_px >= 5.5:
+            br_hw = 1 if (r_px >= 13.0 and sp != 2) else 0
+            f_y0 = fork_y + crown_ry * 0.14
+            tilt_b = (((s2 >> 4) & 7) / 7.0 - 0.5) * 0.18
+            if sp == 3:
+                # Gnarled Weeping Willow: 3-4 wide-arching primary boughs peeking cleanly through hanging tendrils!
+                lean_w = (1.8 if ((s1 & 1) == 0) else -1.8) * 0.7
+                fx_w = cx0 + lean_w
+                _draw_branch_seg(fx_w, f_y0, fx_w - r_px * 0.56, crown_cy - crown_ry * 0.16, br_hw, d_tr, bark_lit, bark_sh, oid)
+                _draw_branch_seg(fx_w, f_y0, fx_w + r_px * 0.54, crown_cy - crown_ry * 0.12, br_hw, d_tr, bark_lit, bark_sh, oid)
+                _draw_branch_seg(fx_w, f_y0 - crown_ry * 0.10, fx_w - r_px * 0.20, crown_cy - crown_ry * 0.44, 0, d_tr, bark_lit, bark_sh, oid)
+                if r_px >= 10.0:
+                    _draw_branch_seg(fx_w, f_y0 - crown_ry * 0.08, fx_w + r_px * 0.24, crown_cy - crown_ry * 0.40, 0, d_tr, bark_lit, bark_sh, oid)
+            elif sp == 2:
+                # Delicate upward V-forked pale birch limbs reaching high through airy crown gaps
+                lean_b = (1.4 if ((s1 & 1) == 0) else -1.4) * 0.65
+                fx_b = cx0 + lean_b
+                _draw_branch_seg(fx_b, f_y0, fx_b - r_px * (0.44 + tilt_b), crown_cy - crown_ry * 0.40, 0, d_tr, bark_lit, bark_sh, oid)
+                _draw_branch_seg(fx_b, f_y0, fx_b + r_px * (0.42 - tilt_b), crown_cy - crown_ry * 0.36, 0, d_tr, bark_lit, bark_sh, oid)
+                _draw_branch_seg(fx_b, f_y0 - crown_ry * 0.15, fx_b + r_px * tilt_b, crown_cy - crown_ry * 0.60, 0, d_tr, bark_lit, bark_sh, oid)
+            elif sp == 5:
+                # Wide-angled open-vase orchard cherry branch forks
+                _draw_branch_seg(cx0, f_y0, cx0 - r_px * 0.54, crown_cy - crown_ry * 0.12, br_hw, d_tr, bark_lit, bark_sh, oid)
+                _draw_branch_seg(cx0, f_y0, cx0 + r_px * 0.52, crown_cy - crown_ry * 0.08, br_hw, d_tr, bark_lit, bark_sh, oid)
+                _draw_branch_seg(cx0, f_y0 - crown_ry * 0.10, cx0 - r_px * 0.14, crown_cy - crown_ry * 0.42, 0, d_tr, bark_lit, bark_sh, oid)
+            else:
+                # Asymmetric Y-forked primary limbs for Oak, Copper Beech, Linden
+                _draw_branch_seg(cx0, f_y0, cx0 - r_px * (0.48 + tilt_b), crown_cy - crown_ry * 0.18, br_hw, d_tr, bark_lit, bark_sh, oid)
+                _draw_branch_seg(cx0, f_y0, cx0 + r_px * (0.46 - tilt_b), crown_cy - crown_ry * 0.14, br_hw, d_tr, bark_lit, bark_sh, oid)
+                if r_px >= 12.0:
+                    _draw_branch_seg(cx0, f_y0 - crown_ry * 0.12, cx0 + r_px * (0.16 + tilt_b), crown_cy - crown_ry * 0.46, 0, d_tr, bark_lit, bark_sh, oid)
+
+        # ---------------------------------------------------------------------
+        # PASS C: Studio Ghibli / 90s Isometric Botanical Foliage (aperiodic 2-4 px leaf-tufts, ZERO clipart/cabbage/play-doh!)
+        # ---------------------------------------------------------------------
+        blossom_leaf_mask = None
+
+        if sp == 1:
+            # 1. ALPINE SPRUCE / SILVER FIR: 6-9 irregular asymmetric drooping multi-bough tiers + shaggy 2-4px needle fingers!
+            tuft_f = _leaf_tuft_field(dx, dy_c, s1, s2, scale_px=2.6)
+            n_tiers = 9 if h_px >= 38.0 else (7 if h_px >= 22.0 else 6)
+            c_h_span = max(2.0, crown_bot_y - crown_top_y)
+            best_z = np.full(gx.shape, -1.0, dtype=np.float32)
+            best_nx = np.zeros(gx.shape, dtype=np.float32)
+            best_ny = np.zeros(gx.shape, dtype=np.float32)
+            best_bias = np.zeros(gx.shape, dtype=np.float32)
+
+            for k_t in range(n_tiers):
+                hk = ((tid * 1664525 + k_t * 1013904223) ^ s1) & 0xFFFF
+                v_base = (k_t + 0.35) / float(n_tiers)
+                v_jit = (((hk & 15) / 15.0) - 0.5) * (0.20 / float(n_tiers))
+                v_t = min(0.92, max(0.03, v_base + v_jit))
+                y_tier = crown_bot_y - v_t * c_h_span
+                tier_h = max(2.2, (c_h_span / float(n_tiers)) * (1.28 - 0.24 * v_t))
+                cx_t = ((((hk >> 4) & 15) / 15.0) - 0.5) * 0.16 * r_px
+                reach_l = 0.84 + 0.32 * (((hk >> 8) & 15) / 15.0)
+                reach_r = 0.84 + 0.32 * (((hk >> 12) & 15) / 15.0)
+                w_env = max(1.6, r_px * (1.06 - 0.86 * (v_t ** 0.88)))
+
+                # 3 to 5 overlapping drooping needle-bough sub-lobes per tier (outer tips curve downward!)
+                if w_env >= 9.0:
+                    sub_boughs = (
+                        (-0.62 * reach_l, 0.24, 0.44 * reach_l, 0.72, 0.16),
+                        (-0.28 * reach_l, 0.08, 0.42, 0.78, 0.20),
+                        (0.02, -0.02, 0.44, 0.80, 0.14),
+                        (0.30 * reach_r, 0.10, 0.42, 0.78, -0.04),
+                        (0.60 * reach_r, 0.26, 0.44 * reach_r, 0.72, -0.18),
+                    )
+                else:
+                    sub_boughs = (
+                        (-0.46 * reach_l, 0.18, 0.52 * reach_l, 0.76, 0.16),
+                        (0.0, 0.0, 0.52, 0.82, 0.12),
+                        (0.46 * reach_r, 0.20, 0.52 * reach_r, 0.76, -0.14),
+                    )
+                for b_u, b_dy, b_rx_f, b_ry_f, b_lit in sub_boughs:
+                    bx_c = cx_t + b_u * w_env
+                    by_c = y_tier + b_dy * tier_h
+                    brx = max(1.3, b_rx_f * w_env)
+                    bry = max(1.3, b_ry_f * tier_h)
+                    ux = (dx - bx_c) / brx
+                    # Drooping spruce bough curve: outer tips dip downward (+0.18 * tier_h * u^2)
+                    dy_droop = (dy_c - (by_c - crown_cy)) - 0.18 * tier_h * (ux * ux)
+                    uy = dy_droop / bry
+                    r_eff = np.sqrt(ux * ux + uy * uy) - 0.14 * tuft_f
+                    in_b = r_eff < 1.0
+                    if not in_b.any():
+                        continue
+                    lz = np.sqrt(np.maximum(0.0, 1.0 - np.minimum(1.0, r_eff * r_eff))) * (0.85 + 0.15 * v_t)
+                    better = in_b & (lz > best_z)
+                    best_z[better] = lz[better]
+                    best_nx[better] = np.clip((dx[better] - cx_t) / max(1.5, w_env), -1.0, 1.0)
+                    best_ny[better] = np.clip(-uy[better] * 0.7 + 0.22, -0.9, 0.9)
+                    # Deep blue-spruce under-bough shadow on underside of each drooping tier!
+                    under_sh = np.where(uy[better] > 0.26, -0.38, np.where(uy[better] < -0.18, 0.24, 0.0))
+                    best_bias[better] = b_lit + under_sh
+
+            # Narrow windswept organic leader spire at apex (v_h > 0.84)
+            lead_lean = ((((s2 >> 4) & 7) / 7.0) - 0.5) * 2.4
             v_c = np.clip(v_h, 0.0, 1.0)
-            n_tiers = 5.0 if h_px >= 14.0 else 4.0
-            t_ph = (v_c * n_tiers) % 1.0
-            tier_wave = 0.64 + 0.42 * ((1.0 - t_ph) ** 0.85)
-            half_w_y = np.maximum(1.0, r_px * (1.02 - 0.88 * v_c) * tier_wave)
-            nx_n = dx / half_w_y
-            inside = in_v & (np.abs(nx_n) <= 1.0)
+            in_lead = (v_h >= 0.84) & (v_h <= 1.06) & (np.abs(dx - lead_lean * np.clip((v_h - 0.84) / 0.22, 0.0, 1.0)) <= np.maximum(0.9, (1.06 - v_h) * r_px * 0.55 + 0.35 * tuft_f))
+            if in_lead.any():
+                use_ld = in_lead & (best_z < 0.45)
+                best_z[use_ld] = 0.65
+                best_nx[use_ld] = -0.25
+                best_ny[use_ld] = 0.55
+                best_bias[use_ld] = 0.16
+
+            inside = best_z > 0.12
             if not inside.any():
                 continue
-            nz_n = np.sqrt(np.maximum(0.06, 1.0 - np.minimum(0.98, nx_n * nx_n)))
-            ny_n = 0.25 + 0.48 * v_c - 0.34 * t_ph
-            tier_sh = np.where(t_ph > 0.74, -0.36, np.where(t_ph < 0.24, 0.18, 0.0))
-            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s + tier_sh
+            nz_n = np.maximum(0.14, best_z)
+            nd_s = best_nx * lx_s + best_ny * ly_s + nz_n * lz_s + best_bias + 0.26 * tuft_f
             d_surf = d0 - nz_n * (r_m * 0.78) - v_c * (h_m * 0.45 * sp_c)
 
-        elif sp_k == 3:
+        elif sp == 4:
+            # 4. LOMBARDY POPLAR / MEDITERRANEAN CYPRESS: Asymmetric stacked-tuft columnar flame + 2-4px tufted silhouette!
+            tuft_f = _leaf_tuft_field(dx, dy_c, s1, s2, scale_px=2.6)
             in_v = (v_h >= -0.02) & (v_h <= 1.05)
             v_c = np.clip(v_h, 0.0, 1.0)
-            flame = np.sin(np.power(v_c, 0.70) * math.pi)
-            half_w_y = np.maximum(1.0, r_px * (0.26 + 0.84 * flame))
-            nx_n = dx / half_w_y
+            n_tufts = 7.0 if h_px >= 24.0 else 5.0
+            tuft_ph = (v_c * n_tufts) % 1.0
+            tuft_idx = np.floor(v_c * n_tufts)
+            lean_c = ((((s1 >> 6) & 7) / 7.0) - 0.5) * 2.0 * (v_c ** 1.2)
+            flame = np.sin(np.power(np.clip(v_c, 0.01, 0.995), 0.68) * math.pi)
+            tuft_mod = 0.86 + 0.16 * np.sin(tuft_ph * math.pi) + 0.08 * np.cos(tuft_idx * 2.1 + (s1 & 7))
+            half_w_y = np.maximum(1.1, r_px * (0.20 + 0.84 * flame) * tuft_mod + 0.13 * r_px * tuft_f)
+            nx_n = (dx - lean_c) / half_w_y
             inside = in_v & (np.abs(nx_n) <= 1.0)
             if not inside.any():
                 continue
-            nz_n = np.sqrt(np.maximum(0.06, 1.0 - np.minimum(0.98, nx_n * nx_n)))
-            ny_n = (v_c - 0.45) * 0.8
-            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s
-            d_surf = d0 - nz_n * (r_m * 0.75) - v_c * (h_m * 0.45 * sp_c)
+            nz_n = np.sqrt(np.maximum(0.08, 1.0 - np.minimum(0.98, nx_n * nx_n)))
+            ny_n = (v_c - 0.42) * 0.65 + (0.25 - 0.45 * tuft_ph)
+            axial_sh = np.where(nx_n > 0.16, -0.34, np.where(nx_n < -0.18, 0.24, 0.0))
+            nd_s = nx_n * lx_s + ny_n * ly_s + nz_n * lz_s + axial_sh + 0.24 * tuft_f
+            d_surf = d0 - nz_n * (r_m * 0.74) - v_c * (h_m * 0.45 * sp_c)
 
-        elif is_willow:
-            # 1. WEEPING LAKESIDE WILLOW: 5 smooth rounded upper dome lobes + clean cascading frond curtain!
-            dy_c = gy - crown_cy
-            jx1 = (((s1 & 15) / 15.0) - 0.5) * 0.24 * r_px
-            jy1 = ((((s1 >> 4) & 15) / 15.0) - 0.5) * 0.16 * crown_ry
+        elif sp == 3:
+            # 3. LAKESIDE WEEPING WILLOW: Airy asymmetrical leaf-tuft dome + discrete wispy hanging leaf tendrils!
+            # ZERO solid striped green cabbage bucket! Visible gnarled trunk + 30-45% air gaps + tips <= cy0 - 1.5!
+            tuft_f = _leaf_tuft_field(dx, dy_c, s1, s2, scale_px=2.8)
+            jx1 = (((s1 & 15) / 15.0) - 0.5) * 0.22 * r_px
+            jy1 = ((((s1 >> 4) & 15) / 15.0) - 0.5) * 0.14 * crown_ry
+            asym_w = ((((s2 >> 6) & 15) / 15.0) - 0.5) * 0.18 * r_px
+            # 7 asymmetrical uneven-sized upper-crown leaf-tuft lobes arching over the forked boughs
             w_lobes = (
-                (jx1 * 0.4, -0.40 * crown_ry + jy1 * 0.5, 0.58 * r_px, 0.46 * crown_ry),
-                (-0.44 * r_px + jx1 * 0.3, -0.24 * crown_ry, 0.50 * r_px, 0.44 * crown_ry),
-                (0.44 * r_px - jx1 * 0.3, -0.22 * crown_ry, 0.50 * r_px, 0.44 * crown_ry),
-                (-0.22 * r_px, -0.08 * crown_ry, 0.54 * r_px, 0.42 * crown_ry),
-                (0.24 * r_px, -0.06 * crown_ry, 0.54 * r_px, 0.42 * crown_ry),
+                (asym_w * 0.35 + jx1 * 0.30, -0.56 * crown_ry + jy1 * 0.35, 0.50 * r_px, 0.38 * crown_ry, 6.0, 0.14, 0.4, 0.26),
+                (-0.46 * r_px + jx1 * 0.20, -0.32 * crown_ry, 0.44 * r_px, 0.36 * crown_ry, 5.0, 0.15, 1.9, 0.20),
+                (0.46 * r_px - jx1 * 0.20, -0.28 * crown_ry, 0.42 * r_px, 0.36 * crown_ry, 5.0, 0.15, 3.1, 0.10),
+                (-0.72 * r_px + jx1 * 0.15, -0.06 * crown_ry, 0.34 * r_px, 0.34 * crown_ry, 5.0, 0.16, 4.2, 0.12),
+                (0.70 * r_px - jx1 * 0.15, -0.02 * crown_ry, 0.34 * r_px, 0.34 * crown_ry, 5.0, 0.16, 5.1, -0.04),
+                (-0.18 * r_px + asym_w * 0.2, -0.14 * crown_ry, 0.42 * r_px, 0.34 * crown_ry, 6.0, 0.14, 2.5, 0.14),
+                (0.24 * r_px + asym_w * 0.2, -0.12 * crown_ry, 0.40 * r_px, 0.34 * crown_ry, 6.0, 0.14, 5.7, 0.02),
             )
             best_z = np.full(gx.shape, -1.0, dtype=np.float32)
             best_nx = np.zeros(gx.shape, dtype=np.float32)
             best_ny = np.zeros(gx.shape, dtype=np.float32)
-            for l_ox, l_oy, l_rx, l_ry in w_lobes:
+            best_wbias = np.zeros(gx.shape, dtype=np.float32)
+            ph_seed = (s2 & 15) * 0.4
+            for l_ox, l_oy, l_rx, l_ry, k_f, amp, ph_o, l_b in w_lobes:
                 ux = (dx - l_ox) / max(1.4, l_rx)
                 uy = (dy_c - l_oy) / max(1.4, l_ry)
-                r2 = ux * ux + uy * uy
-                in_l = r2 < 1.0
+                th_l = np.arctan2(uy, ux)
+                sc_l = 1.0 + amp * (0.62 * np.cos(k_f * th_l + ph_o + ph_seed) + 0.38 * np.sin((k_f + 2.0) * th_l + ph_o))
+                r_eff = np.sqrt(ux * ux + uy * uy) / sc_l - 0.11 * tuft_f
+                in_l = r_eff < 1.0
                 if not in_l.any():
                     continue
-                lz = np.sqrt(np.maximum(0.0, 1.0 - np.minimum(1.0, r2)))
+                lz = np.sqrt(np.maximum(0.0, 1.0 - np.minimum(1.0, r_eff * r_eff)))
                 better = in_l & (lz > best_z)
                 best_z[better] = lz[better]
                 best_nx[better] = ux[better]
                 best_ny[better] = -uy[better]
+                best_wbias[better] = l_b
 
-            strand_wave = np.sin(gx * 1.15 + (s1 & 15) * 0.4) * 0.5 + 0.5
-            w_curt = r_px * (0.96 - 0.16 * np.clip(dy_c / max(1.0, crown_ry), 0.0, 1.3))
-            y_end = crown_bot_y + (0.22 + 0.36 * strand_wave) * crown_ry
-            in_curt = (dy_c > (-0.05 * crown_ry)) & (gy <= y_end) & (np.abs(dx) <= np.maximum(1.2, w_curt))
-            curt_nx = np.clip(dx / np.maximum(1.5, w_curt), -0.98, 0.98)
-            curt_z = np.sqrt(np.maximum(0.08, 1.0 - curt_nx * curt_nx)) * 0.85
-            use_curt = in_curt & (curt_z > best_z)
-            best_z[use_curt] = curt_z[use_curt]
-            best_nx[use_curt] = curt_nx[use_curt]
-            best_ny[use_curt] = -0.25
+            # 9-16 discrete wispy hanging weeping frond strands with 30-35% genuine open air gaps!
+            # Sparser near center |u_s| < 0.20 so the gnarled trunk & arched boughs clearly show through!
+            n_strands = int(np.clip(round(r_px * 0.48), 9, 16))
+            y_tip_max = cy0 - 1.5  # STRICT CLAMP: tendrils NEVER hang below trunk base into water!
+            in_strand_any = np.zeros(gx.shape, dtype=np.bool_)
+            strand_z = np.full(gx.shape, -1.0, dtype=np.float32)
+            strand_nd = np.zeros(gx.shape, dtype=np.float32)
 
-            inside = (best_z > 0.14) | (in_curt & (strand_wave > 0.26))
+            for k_s in range(n_strands):
+                hs = ((tid * 2246822519 + k_s * 3266489917) ^ s2) & 0xFFFF
+                u_lin = -0.95 + (1.90 * (k_s + 0.5)) / float(n_strands)
+                u_jit = (((hs & 15) / 15.0) - 0.5) * (1.1 / float(n_strands))
+                u_s = float(np.clip(u_lin + u_jit, -0.96, 0.96))
+                # Leave natural arched window near center so gnarled trunk & Y-fork boughs remain visible
+                if abs(u_s) < 0.20 and ((hs >> 4) % 3) != 0:
+                    continue
+                x_start = u_s * r_px * 0.96
+                y_start = crown_cy - 0.16 * crown_ry + 0.24 * crown_ry * (u_s * u_s)
+                avail_drop = max(2.2, y_tip_max - y_start)
+                # Outer tendrils drape lower (72-94%), inner tendrils shorter (48-70%)
+                len_frac = (0.72 + 0.22 * (((hs >> 6) & 15) / 15.0)) if abs(u_s) >= 0.28 else (0.48 + 0.22 * (((hs >> 6) & 15) / 15.0))
+                y_tip = min(y_tip_max, y_start + avail_drop * len_frac)
+                drop_h = max(1.5, y_tip - y_start)
+                t_s = (gy - y_start) / drop_h
+                in_y_s = (t_s >= 0.0) & (t_s <= 1.0)
+                if not in_y_s.any():
+                    continue
+                # Gentle outward-then-downward parabolic sway
+                sway_x = u_s * 0.16 * r_px + ((((hs >> 10) & 7) / 7.0) - 0.5) * 1.4
+                x_curve = x_start + sway_x * np.sin(np.clip(t_s, 0.0, 1.0) * math.pi * 0.85)
+                # Graceful 1.8-2.8 px fronds tapering to 1.0-1.4 px feathered tips, beaded by leaf tufts
+                w_base = 0.92 + 0.52 * (((hs >> 13) & 7) / 7.0)
+                w_strand = np.maximum(0.55, w_base * (1.0 - 0.44 * np.clip(t_s, 0.0, 1.0)) + 0.26 * tuft_f)
+                on_s = in_y_s & (np.abs(dx - x_curve) <= w_strand)
+                if not on_s.any():
+                    continue
+                # Outer/front strands slightly closer in depth than inner strands
+                z_s = float(0.45 + 0.40 * math.sqrt(max(0.05, 1.0 - u_s * u_s * 0.85)))
+                better_s = on_s & (z_s > strand_z)
+                in_strand_any |= on_s
+                strand_z[better_s] = z_s
+                # Sunlit silvery-sage on top-left fronds -> cool shaded sage-teal on inner/right fronds
+                s_lit = u_s * lx_s * 0.78 + (1.0 - t_s[better_s]) * 0.48 + 0.24 * tuft_f[better_s] + 0.08 - 0.12 * (1.0 - abs(u_s))
+                strand_nd[better_s] = s_lit
+
+            in_dome = best_z > 0.16
+            inside = in_dome | in_strand_any
             if not inside.any():
                 continue
-            nz_n = np.maximum(0.15, best_z)
-            nd_s = best_nx * lx_s + best_ny * ly_s + nz_n * lz_s
-            nd_s += np.where(in_curt, (strand_wave - 0.5) * 0.28, 0.0)
-            rim_hi = inside & (best_z < 0.56) & ((best_nx * lx_s + best_ny * ly_s) > 0.32) & (v_h > 0.45)
-            nd_s = np.where(rim_hi, nd_s + 0.24, nd_s) - np.clip(0.38 - v_h, 0.0, 0.42) * 0.50
-            d_surf = d0 - nz_n * (r_m * 0.80) - np.clip(v_h, 0.0, 1.0) * (h_m * 0.40 * sp_c)
+            nz_n = np.where(in_dome & (best_z >= strand_z), np.maximum(0.16, best_z), np.maximum(0.16, strand_z))
+            dome_nd = best_nx * lx_s + best_ny * ly_s + np.maximum(0.16, best_z) * lz_s + best_wbias + 0.22 * tuft_f
+            rim_hi = in_dome & (best_z < 0.62) & ((best_nx * lx_s + best_ny * ly_s) > 0.26) & (v_h > 0.42)
+            dome_nd = np.where(rim_hi, dome_nd + 0.22, dome_nd)
+            nd_s = np.where(in_dome & (best_z >= strand_z), dome_nd, strand_nd)
+            # Keep hanging fronds in front of back-recess, but allow front-facing gnarled trunk to peek through gaps
+            d_surf = np.where(
+                in_dome & (best_z >= strand_z),
+                d0 - nz_n * (r_m * 0.80) - np.clip(v_h, 0.0, 1.0) * (h_m * 0.40 * sp_c),
+                d0 - nz_n * (r_m * 0.45) - np.clip(v_h, 0.0, 1.0) * (h_m * 0.22 * sp_c),
+            )
 
         else:
-            # v12: Bold Rounded Multi-Lobe Cloud Canopies (5–8 scalloped puffs + internal ink creases, tinyrj.com style!)
-            dy_c = gy - crown_cy
-            jx1 = (((s1 & 15) / 15.0) - 0.5) * 0.28 * r_px
-            jy1 = ((((s1 >> 4) & 15) / 15.0) - 0.5) * 0.20 * crown_ry
-            jx2 = ((((s1 >> 8) & 15) / 15.0) - 0.5) * 0.26 * r_px
-            jy2 = ((((s1 >> 12) & 15) / 15.0) - 0.5) * 0.20 * crown_ry
+            # BROADLEAF SPECIES (0: Oak/Beech, 2: Silver Birch, 5: Blossoming Orchard, 6: Copper Beech, 7: Linden/Maple)
+            # Studio Ghibli 2-4px aperiodic leaf-tuft clusters + asymmetric multi-bough silhouettes!
+            tuft_scale = 2.5 if sp in (2, 5) else 3.0
+            tuft_f = _leaf_tuft_field(dx, dy_c, s1, s2, scale_px=tuft_scale)
+            jx1 = (((s1 & 15) / 15.0) - 0.5) * 0.24 * r_px
+            jy1 = ((((s1 >> 4) & 15) / 15.0) - 0.5) * 0.16 * crown_ry
+            jx2 = ((((s1 >> 8) & 15) / 15.0) - 0.5) * 0.22 * r_px
+            jy2 = ((((s1 >> 12) & 15) / 15.0) - 0.5) * 0.16 * crown_ry
             asym = ((((s2 >> 6) & 15) / 15.0) - 0.5) * 0.22 * r_px
+            ph_s = (s2 & 15) * 0.42
 
-            if is_oak:
-                # 8 bold overlapping rounded cloud lobes
+            if sp == 2:
+                # 2. SILVER BIRCH: 8 smaller airy feathery leaf sprays (pale curved trunk & V-forks peek cleanly through!)
                 lobes = (
-                    (asym * 0.5 + jx1 * 0.35, -0.52 * crown_ry + jy1 * 0.3, 0.52 * r_px, 0.44 * crown_ry),
-                    (-0.50 * r_px + jx2 * 0.35, -0.28 * crown_ry + jy2 * 0.3, 0.50 * r_px, 0.44 * crown_ry),
-                    (0.48 * r_px + jx1 * 0.35, -0.24 * crown_ry - jy1 * 0.3, 0.50 * r_px, 0.44 * crown_ry),
-                    (-0.68 * r_px + jx1 * 0.25, 0.08 * crown_ry + jy2 * 0.25, 0.48 * r_px, 0.42 * crown_ry),
-                    (0.66 * r_px - jx2 * 0.25, 0.12 * crown_ry + jy1 * 0.25, 0.48 * r_px, 0.42 * crown_ry),
-                    (0.02 * r_px + asym * 0.3, -0.04 * crown_ry, 0.58 * r_px, 0.50 * crown_ry),
-                    (-0.34 * r_px + jx2 * 0.25, 0.36 * crown_ry, 0.48 * r_px, 0.40 * crown_ry),
-                    (0.36 * r_px + jx1 * 0.25, 0.36 * crown_ry, 0.48 * r_px, 0.40 * crown_ry),
+                    (asym * 0.45 + jx1 * 0.35, -0.62 * crown_ry + jy1 * 0.25, 0.33 * r_px, 0.29 * crown_ry, 5.0, 0.18, 0.2, 0.24),
+                    (-0.48 * r_px + jx2 * 0.25, -0.34 * crown_ry + jy2 * 0.25, 0.32 * r_px, 0.28 * crown_ry, 5.0, 0.18, 1.5, 0.18),
+                    (0.46 * r_px + jx1 * 0.25, -0.26 * crown_ry - jy1 * 0.25, 0.31 * r_px, 0.28 * crown_ry, 5.0, 0.18, 2.8, 0.10),
+                    (-0.16 * r_px + asym * 0.22, -0.10 * crown_ry, 0.34 * r_px, 0.27 * crown_ry, 5.0, 0.17, 4.1, 0.08),
+                    (0.24 * r_px + asym * 0.18, 0.02 * crown_ry + jy1 * 0.2, 0.30 * r_px, 0.26 * crown_ry, 5.0, 0.18, 2.1, -0.02),
+                    (-0.56 * r_px + jx1 * 0.20, 0.08 * crown_ry + jy2 * 0.2, 0.28 * r_px, 0.25 * crown_ry, 5.0, 0.18, 3.6, 0.00),
+                    (-0.36 * r_px + jx2 * 0.20, 0.34 * crown_ry, 0.29 * r_px, 0.24 * crown_ry, 5.0, 0.18, 5.2, -0.18),
+                    (0.38 * r_px + jx1 * 0.20, 0.30 * crown_ry, 0.29 * r_px, 0.24 * crown_ry, 5.0, 0.18, 0.9, -0.22),
                 )
-                n_upper, n_lower_start = 3, 6
-                bias_hi, bias_lo = 0.22, -0.24
+            elif sp == 5:
+                # 5. BLOSSOMING ORCHARD / CHERRY: 8 airy dappled blossom clusters with open lower V-crotch
+                lobes = (
+                    (asym * 0.45 + jx1 * 0.3, -0.52 * crown_ry + jy1 * 0.25, 0.40 * r_px, 0.34 * crown_ry, 6.0, 0.16, 0.5, 0.24),
+                    (-0.50 * r_px + jx2 * 0.25, -0.26 * crown_ry + jy2 * 0.25, 0.38 * r_px, 0.33 * crown_ry, 6.0, 0.16, 1.8, 0.18),
+                    (0.48 * r_px + jx1 * 0.25, -0.20 * crown_ry - jy1 * 0.25, 0.38 * r_px, 0.33 * crown_ry, 6.0, 0.16, 3.1, 0.08),
+                    (-0.18 * r_px + asym * 0.2, -0.08 * crown_ry, 0.40 * r_px, 0.34 * crown_ry, 6.0, 0.15, 4.4, 0.10),
+                    (0.24 * r_px + asym * 0.2, -0.02 * crown_ry, 0.38 * r_px, 0.32 * crown_ry, 6.0, 0.15, 2.3, 0.00),
+                    (-0.62 * r_px + jx1 * 0.2, 0.08 * crown_ry, 0.34 * r_px, 0.30 * crown_ry, 5.0, 0.16, 3.7, -0.04),
+                    (-0.44 * r_px + jx2 * 0.2, 0.28 * crown_ry, 0.35 * r_px, 0.28 * crown_ry, 5.0, 0.16, 5.5, -0.22),
+                    (0.46 * r_px + jx1 * 0.2, 0.26 * crown_ry, 0.35 * r_px, 0.28 * crown_ry, 5.0, 0.16, 1.1, -0.24),
+                )
+            elif sp == 7:
+                # 7. SWISS LINDEN / MAPLE: 9 asymmetric upright oval-dome leaf-tuft boughs
+                lobes = (
+                    (asym * 0.38 + jx1 * 0.28, -0.60 * crown_ry + jy1 * 0.25, 0.42 * r_px, 0.36 * crown_ry, 6.0, 0.15, 0.3, 0.26),
+                    (-0.44 * r_px + jx2 * 0.25, -0.36 * crown_ry + jy2 * 0.25, 0.40 * r_px, 0.36 * crown_ry, 6.0, 0.15, 1.7, 0.20),
+                    (0.44 * r_px + jx1 * 0.25, -0.28 * crown_ry - jy1 * 0.25, 0.39 * r_px, 0.35 * crown_ry, 6.0, 0.15, 3.0, 0.10),
+                    (-0.14 * r_px + asym * 0.22, -0.14 * crown_ry, 0.44 * r_px, 0.38 * crown_ry, 6.0, 0.14, 4.3, 0.12),
+                    (0.22 * r_px + asym * 0.18, -0.04 * crown_ry, 0.42 * r_px, 0.36 * crown_ry, 6.0, 0.14, 1.4, 0.00),
+                    (-0.54 * r_px + jx1 * 0.2, 0.12 * crown_ry, 0.38 * r_px, 0.33 * crown_ry, 5.0, 0.15, 5.4, -0.04),
+                    (0.52 * r_px - jx2 * 0.2, 0.16 * crown_ry, 0.38 * r_px, 0.33 * crown_ry, 5.0, 0.15, 0.8, -0.12),
+                    (-0.36 * r_px + jx2 * 0.18, 0.36 * crown_ry, 0.35 * r_px, 0.28 * crown_ry, 5.0, 0.15, 2.2, -0.22),
+                    (0.36 * r_px + jx1 * 0.18, 0.36 * crown_ry, 0.35 * r_px, 0.28 * crown_ry, 5.0, 0.15, 3.7, -0.24),
+                )
             else:
-                # 6 bold rounded cloud puffs for linden / birch / orchard / blossom
+                # 0. SWISS OAK / BEECH & 6. COPPER BEECH: 10 asymmetric varied-radius boughs + clear lower V-crotch for gnarled Y-fork!
                 lobes = (
-                    (asym * 0.45 + jx1 * 0.3, -0.46 * crown_ry + jy1 * 0.3, 0.48 * r_px, 0.44 * crown_ry),
-                    (-0.44 * r_px + jx2 * 0.3, -0.20 * crown_ry + jy2 * 0.3, 0.46 * r_px, 0.42 * crown_ry),
-                    (0.42 * r_px + jx1 * 0.3, -0.18 * crown_ry - jy1 * 0.3, 0.46 * r_px, 0.42 * crown_ry),
-                    (0.02 * r_px + asym * 0.25, 0.02 * crown_ry, 0.54 * r_px, 0.48 * crown_ry),
-                    (-0.30 * r_px + jx2 * 0.2, 0.36 * crown_ry, 0.46 * r_px, 0.40 * crown_ry),
-                    (0.30 * r_px + jx1 * 0.2, 0.34 * crown_ry, 0.46 * r_px, 0.40 * crown_ry),
+                    (asym * 0.48 + jx1 * 0.30, -0.56 * crown_ry + jy1 * 0.25, 0.44 * r_px, 0.36 * crown_ry, 6.0, 0.15, 0.4, 0.26),
+                    (-0.46 * r_px + jx2 * 0.28, -0.34 * crown_ry + jy2 * 0.25, 0.44 * r_px, 0.38 * crown_ry, 6.0, 0.15, 1.7, 0.20),
+                    (0.46 * r_px + jx1 * 0.28, -0.24 * crown_ry - jy1 * 0.25, 0.42 * r_px, 0.36 * crown_ry, 6.0, 0.15, 3.0, 0.12),
+                    (-0.68 * r_px + jx1 * 0.20, 0.02 * crown_ry + jy2 * 0.20, 0.38 * r_px, 0.34 * crown_ry, 6.0, 0.16, 4.2, 0.06),
+                    (0.66 * r_px - jx2 * 0.20, 0.08 * crown_ry + jy1 * 0.20, 0.38 * r_px, 0.34 * crown_ry, 6.0, 0.16, 5.4, -0.06),
+                    (-0.18 * r_px + asym * 0.25, -0.14 * crown_ry, 0.44 * r_px, 0.36 * crown_ry, 6.0, 0.14, 1.1, 0.14),
+                    (0.24 * r_px + asym * 0.20, -0.04 * crown_ry, 0.42 * r_px, 0.36 * crown_ry, 6.0, 0.14, 2.8, 0.02),
+                    (-0.46 * r_px + jx2 * 0.20, 0.30 * crown_ry, 0.36 * r_px, 0.28 * crown_ry, 5.0, 0.16, 2.5, -0.22),
+                    (0.44 * r_px + jx1 * 0.20, 0.32 * crown_ry, 0.36 * r_px, 0.28 * crown_ry, 5.0, 0.16, 3.9, -0.26),
+                    (-0.08 * r_px + jx1 * 0.16, 0.18 * crown_ry, 0.34 * r_px, 0.26 * crown_ry, 5.0, 0.15, 4.9, -0.10),
                 )
-                n_upper, n_lower_start = 2, 4
-                bias_hi, bias_lo = 0.18, -0.20
 
             best_z = np.full(gx.shape, -1.0, dtype=np.float32)
             best_nx = np.zeros(gx.shape, dtype=np.float32)
             best_ny = np.zeros(gx.shape, dtype=np.float32)
             best_lobe_bias = np.zeros(gx.shape, dtype=np.float32)
-            best_lobe_id = np.full(gx.shape, -1, dtype=np.int16)
-            for l_idx, (l_ox, l_oy, l_rx, l_ry) in enumerate(lobes):
+            for l_ox, l_oy, l_rx, l_ry, k_f, amp, ph_o, l_bias in lobes:
                 ux = (dx - l_ox) / max(1.4, l_rx)
                 uy = (dy_c - l_oy) / max(1.4, l_ry)
-                r2 = ux * ux + uy * uy
-                in_l = r2 < 1.0
+                th_l = np.arctan2(uy, ux)
+                sc_l = 1.0 + amp * (0.62 * np.cos(k_f * th_l + ph_o + ph_s) + 0.38 * np.sin((k_f + 2.0) * th_l + ph_o * 1.3))
+                # Organic 2-4 px leaf-tuft silhouette break-up (kills smooth vector/play-doh outline!)
+                r_eff = np.sqrt(ux * ux + uy * uy) / sc_l - 0.11 * tuft_f
+                in_l = r_eff < 1.0
                 if not in_l.any():
                     continue
-                lz = np.sqrt(np.maximum(0.0, 1.0 - np.minimum(1.0, r2)))
+                lz = np.sqrt(np.maximum(0.0, 1.0 - np.minimum(1.0, r_eff * r_eff)))
                 better = in_l & (lz > best_z)
                 best_z[better] = lz[better]
                 best_nx[better] = ux[better]
                 best_ny[better] = -uy[better]
-                best_lobe_bias[better] = bias_hi if l_idx < n_upper else (bias_lo if l_idx >= n_lower_start else 0.0)
-                best_lobe_id[better] = l_idx
+                best_lobe_bias[better] = l_bias
 
-            inside = best_z > 0.12
+            inside = best_z > (0.22 if sp == 2 else 0.15)
             if not inside.any():
                 continue
             nz_n = best_z
-            nd_s = best_nx * lx_s + best_ny * ly_s + nz_n * lz_s + best_lobe_bias
-            # Crisp directional sunlit crown highlight on upper sunlit puffs
-            rim_hi = inside & (best_z < 0.62) & ((best_nx * lx_s + best_ny * ly_s) > 0.30) & (v_h > 0.42)
-            nd_s = np.where(rim_hi, nd_s + 0.26, nd_s)
-            nd_s = nd_s - np.clip(0.38 - v_h, 0.0, 0.38) * 0.62
-            # Internal multi-lobe ink crease arcs along shadowed lower edges of overlapping cloud puffs!
-            if gx.shape[0] >= 3 and gx.shape[1] >= 3:
-                lc = np.zeros(gx.shape, dtype=np.bool_)
-                diff_d_l = (best_lobe_id[:-1, :] >= 0) & (best_lobe_id[1:, :] >= 0) & (best_lobe_id[:-1, :] != best_lobe_id[1:, :])
-                diff_r_l = (best_lobe_id[:, :-1] >= 0) & (best_lobe_id[:, 1:] >= 0) & (best_lobe_id[:, :-1] != best_lobe_id[:, 1:])
-                lc[:-1, :] |= diff_d_l & (best_ny[:-1, :] < -0.18)
-                lc[:, :-1] |= diff_r_l & (best_nx[:, :-1] > 0.22)
-                lobe_crease = lc & inside
+            # Dappled Studio Ghibli leaf-cluster shading (2-4 px coherent sunlit/shaded leaf tufts!)
+            nd_s = best_nx * lx_s + best_ny * ly_s + nz_n * lz_s + best_lobe_bias + 0.22 * tuft_f
+            rim_hi = inside & (best_z < 0.60) & ((best_nx * lx_s + best_ny * ly_s) > 0.26) & (v_h > 0.38)
+            nd_s = np.where(rim_hi, nd_s + 0.24, nd_s)
+            nd_s = nd_s - np.clip(0.38 - v_h, 0.0, 0.38) * 0.64
             d_surf = d0 - nz_n * (r_m * 0.82) - np.clip(v_h, 0.0, 1.0) * (h_m * 0.42 * sp_c)
+            if sp == 5:
+                blossom_leaf_mask = inside & (v_h < 0.40) & (nd_s < 0.24)
 
-        # Clean 4-step cel-shaded tone ramp (tones 1..4 for canopy, tone 0 for deep pine-ink underside & internal lobe creases!)
+        # Clean 5-step cel-shaded tone ramp (tones 0..4)
         tone_idx = np.clip(np.floor((nd_s + 0.12) * 3.05).astype(np.int32), 0, 4)
-        if lobe_crease is not None:
-            tone_idx[lobe_crease] = 0
 
         sub_z = zbuf[y0_b : y1_b + 1, x0_b : x1_b + 1]
         win = inside & (d_surf < sub_z)
@@ -5352,7 +6039,18 @@ def _render_sculpted_pixel_art_trees_and_hedges(
         gy_w = y0_b + wy
         gx_w = x0_b + wx
         zbuf[gy_w, gx_w] = d_surf[wy, wx]
-        rgb_buf[gy_w, gx_w] = ramp[tone_idx[wy, wx]]
+        col_out = ramp[tone_idx[wy, wx]]
+        # Blossoming orchard: fresh orchard-green leaf tufts tucked under blossom clusters!
+        if blossom_leaf_mask is not None:
+            is_bl_leaf = blossom_leaf_mask[wy, wx]
+            if is_bl_leaf.any():
+                col_out = col_out.copy()
+                col_out[is_bl_leaf] = np.where(
+                    (tone_idx[wy, wx][is_bl_leaf] == 0)[:, None],
+                    [42.0, 92.0, 40.0],
+                    [58.0, 122.0, 48.0],
+                ).astype(np.float32)
+        rgb_buf[gy_w, gx_w] = col_out
         mat_buf[gy_w, gx_w] = M_TREE
         obj_buf[gy_w, gx_w] = oid
         norm_buf[gy_w, gx_w, 0] = 0.18
@@ -5727,6 +6425,11 @@ def render_diorama(
                     rl_along = _sample_bilinear_05m(scene.rail_along[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0, max_jump=3.0)
                     xwalk = _sample_bilinear_05m(scene.crosswalk_sdf_05m[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0) >= 0.5
                     dist_lake_v = _sample_bilinear_05m(scene.dist_shore_05m[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0)
+                    lake_sdf_v = _sample_bilinear_05m(scene.lake_sdf_05m[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0)
+                    glake = (lake_sdf_v >= 0.50) & (gsem != G_POOL)
+                    pier_sdf_v = _sample_bilinear_05m(scene.pier_sdf_05m[r0:r1, c0:c1], ge, gn, r0=r0, c0=c0)
+                    gharbor = glake & (pier_sdf_v >= 0.48)
+                    pier_h_v = scene.pier_deck_h_05m[r0:r1, c0:c1][gr, gc]
                 else:
                     gz = sub_dem[gr, gc].copy()
                     gz_sm = None
@@ -5740,6 +6443,9 @@ def render_diorama(
                     rl_dist = scene.rail_dist[r0:r1, c0:c1][gr, gc].astype(np.float32)
                     rl_along = scene.rail_along[r0:r1, c0:c1][gr, gc]
                     dist_lake_v = None
+                    lake_sdf_v = None
+                    pier_sdf_v = None
+                    pier_h_v = None
 
                 raw_ortho = sample_ortho_25cm(scene, ge, gn)
                 gcol, gmat, gz, g_seebad_pool = _shade_drawn_ground_90s(
@@ -5750,6 +6456,9 @@ def render_diorama(
                     mpp=camera.mpp,
                     dist_lake=dist_lake_v,
                     gz_smooth=gz_sm,
+                    pier_sdf=pier_sdf_v,
+                    pier_h_val=pier_h_v,
+                    lake_sdf=lake_sdf_v,
                 )
 
                 out_k = (~gkpoly) & (~glake)
@@ -5768,6 +6477,9 @@ def render_diorama(
                     gcliff_v = gcliff[gv]
                     g_sb_v = g_seebad_pool[gv]
                     gnx, gny, gnz = gnx[gv], gny[gv], gnz[gv]
+                    gz_v = gz[gv]
+                    gsem_v = gsem[gv]
+                    lake_sdf_gv = lake_sdf_v[gv] if lake_sdf_v is not None else None
 
                     order = np.argsort(gdepth)[::-1]
                     gix, giy, gdepth = gix[order], giy[order], gdepth[order]
@@ -5775,6 +6487,10 @@ def render_diorama(
                     gcliff_v = gcliff_v[order]
                     g_sb_v = g_sb_v[order]
                     gnx, gny, gnz = gnx[order], gny[order], gnz[order]
+                    gz_v = gz_v[order]
+                    gsem_v = gsem_v[order]
+                    if lake_sdf_gv is not None:
+                        lake_sdf_gv = lake_sdf_gv[order]
 
                     for ox, oy in ((0, 0), (1, 0), (0, 1), (1, 1)):
                         tx = np.clip(gix + ox, 0, W - 1)
@@ -5790,9 +6506,91 @@ def render_diorama(
                         norm_buf[ty[win], tx[win], 1] = gny[win]
                         norm_buf[ty[win], tx[win], 2] = gnz[win]
 
+                    # v13 M1B: Solid vertical pier skirt extrusion down to waterline (gives all Seebad jetties & piers crisp 3D thickness!)
+                    is_pier_px = gmat == M_HARBOR_OBJ
+                    if is_pier_px.any():
+                        pi_s = np.nonzero(is_pier_px)[0]
+                        p_ix = gix[pi_s]
+                        p_iy = giy[pi_s]
+                        p_d = gdepth[pi_s]
+                        p_col = (gcol[pi_s] * 0.68).astype(np.float32)
+                        skirt_px = max(4, int(round(0.90 / max(0.08, camera.mpp))))
+                        for oy_sk in range(1, skirt_px + 1):
+                            ty_sk = p_iy + oy_sk
+                            v_sk = ty_sk < H
+                            if not v_sk.any():
+                                continue
+                            d_sk = p_d[v_sk] + 0.02 * oy_sk
+                            for ox_sk in (0, 1):
+                                tx_sk = np.clip(p_ix[v_sk] + ox_sk, 0, W - 1)
+                                win_sk = d_sk < zbuf[ty_sk[v_sk], tx_sk]
+                                if win_sk.any():
+                                    wy_sk, wx_sk = ty_sk[v_sk][win_sk], tx_sk[win_sk]
+                                    zbuf[wy_sk, wx_sk] = d_sk[win_sk]
+                                    rgb_buf[wy_sk, wx_sk] = p_col[v_sk][win_sk]
+                                    mat_buf[wy_sk, wx_sk] = M_HARBOR_OBJ
+                                    obj_buf[wy_sk, wx_sk] = 250000
+                                    shadow_buf[wy_sk, wx_sk] = False
+                                    norm_buf[wy_sk, wx_sk, 0] = 0.40
+                                    norm_buf[wy_sk, wx_sk, 1] = -0.40
+                                    norm_buf[wy_sk, wx_sk, 2] = 0.82
+
+                    # v13 M1B Iter2: Systemic Continuous Shoreline Bank Skirt (kills 100% of dark 0.5m M_BG shoreline holes!)
+                    if lake_sdf_gv is not None:
+                        is_shore_lip = (~glake_v) & (lake_sdf_gv >= 0.08) & (gz_v > (LAKE_SURFACE_Z + 0.05))
+                    else:
+                        is_shore_lip = np.zeros(len(gix), dtype=np.bool_)
+                    if is_shore_lip.any():
+                        sh_i = np.nonzero(is_shore_lip)[0]
+                        sh_ix = gix[sh_i]
+                        sh_iy = giy[sh_i]
+                        sh_d = gdepth[sh_i]
+                        sh_sh = gsh[sh_i]
+                        sh_paved = np.isin(
+                            gsem_v[sh_i],
+                            [G_FOOTPATH, G_PLATFORM_PIER, G_STREET_MAIN, G_STREET_MINOR, G_PARKING],
+                        )
+                        sh_base_col = (gcol[sh_i] * 0.80).astype(np.float32)
+                        max_sh_px = max(14, int(round(2.6 / max(0.08, camera.mpp))))
+                        drop_px = np.clip(
+                            np.ceil((gz_v[sh_i] - LAKE_SURFACE_Z) * 0.90 / max(0.08, camera.mpp)).astype(np.int32) + 2,
+                            2,
+                            max_sh_px,
+                        )
+                        earth_olive = np.array([74.0, 96.0, 58.0], dtype=np.float32)
+                        for oy_sk in range(1, max_sh_px + 1):
+                            act_sh = drop_px >= oy_sk
+                            if not act_sh.any():
+                                continue
+                            ai_sh = np.nonzero(act_sh)[0]
+                            ty_sk = sh_iy[ai_sh] + oy_sk
+                            v_sk = ty_sk < H
+                            if not v_sk.any():
+                                continue
+                            ai_sh = ai_sh[v_sk]
+                            ty_sk = ty_sk[v_sk]
+                            d_sk = sh_d[ai_sh] + 0.03 + 0.015 * oy_sk
+                            t_blend = min(0.55, 0.08 * oy_sk)
+                            nat_col = (1.0 - t_blend) * sh_base_col[ai_sh] + t_blend * earth_olive
+                            stone_c = np.array([166.0, 162.0, 152.0] if oy_sk <= 2 else [138.0, 134.0, 124.0], dtype=np.float32)
+                            col_sk = np.where(sh_paved[ai_sh][:, None], stone_c, nat_col).astype(np.float32)
+                            for ox_sk in (0, 1):
+                                tx_sk = np.clip(sh_ix[ai_sh] + ox_sk, 0, W - 1)
+                                win_sk = d_sk < zbuf[ty_sk, tx_sk]
+                                if win_sk.any():
+                                    wy_sk, wx_sk = ty_sk[win_sk], tx_sk[win_sk]
+                                    zbuf[wy_sk, wx_sk] = d_sk[win_sk]
+                                    rgb_buf[wy_sk, wx_sk] = col_sk[win_sk]
+                                    mat_buf[wy_sk, wx_sk] = M_GROUND
+                                    obj_buf[wy_sk, wx_sk] = 0
+                                    shadow_buf[wy_sk, wx_sk] = sh_sh[ai_sh][win_sk]
+                                    norm_buf[wy_sk, wx_sk, 0] = 0.0
+                                    norm_buf[wy_sk, wx_sk, 1] = 0.0
+                                    norm_buf[wy_sk, wx_sk, 2] = 0.92
+
                     # F14c + v12: Ashlar Jura-Stone Retaining Walls ONLY on sustained cliffs (gcliff_v & s_nz < 0.64),
                     # eliminating jagged white/grey retaining-wall streaks on grassy roadside embankments!
-                    steep = (gnz < 0.88) & (~glake_v)
+                    steep = (gnz < 0.88) & (~glake_v) & (~is_shore_lip)
                     if steep.any():
                         si = np.nonzero(steep)[0]
                         s_ix = gix[si]
@@ -8063,7 +8861,7 @@ def render_diorama(
             hl = b["footprint_l"] * 0.38
             for sx_o in (-hw, hw):
                 for sy_o in (-hl, hl):
-                    zs = np.arange(b["z_ground"], b["z_roof"] - 0.2, max(0.3, camera.mpp * 0.5))
+                    zs = np.arange(b["z_ground"], b["z_roof"] - 0.2, max(0.06, camera.mpp * 0.55))
                     if len(zs) == 0:
                         continue
                     px, py, pd = camera.project(np.full_like(zs, be_c + sx_o), np.full_like(zs, bn_c + sy_o), zs)
@@ -8089,7 +8887,7 @@ def render_diorama(
             dist_s = math.hypot(sa["e"] - sb["e"], sa["n"] - sb["n"])
             if dist_s <= 5.5:
                 z_pipe = min(sa["z_roof"], sb["z_roof"]) + 0.45
-                ns_p = max(4, int(math.ceil(dist_s / max(0.18, camera.mpp * 0.65))) + 1)
+                ns_p = max(4, int(math.ceil(dist_s / max(0.06, camera.mpp * 0.55))) + 1)
                 tp = np.linspace(0.0, 1.0, ns_p)
                 pe_p = sa["e"] + (sb["e"] - sa["e"]) * tp
                 pn_p = sa["n"] + (sb["n"] - sa["n"]) * tp
@@ -8106,13 +8904,14 @@ def render_diorama(
                         obj_buf[iy[win], ix[win]] = sa["idx"] + 1
                         norm_buf[iy[win], ix[win]] = [0.25, -0.25, 0.93]
                         shadow_buf[iy[win], ix[win]] = False
-        # v9.0 Circular brushed-steel safety guardrail ring atop each tall Lindt cocoa silo
+        # v9.0 Circular brushed-steel safety guardrail ring atop each tall Lindt cocoa silo (resolution-aware!)
         rc_sa = int(np.clip((N_MAX - sa["n"]) / GRID_RES, 0, GRID_H - 1))
         cc_sa = int(np.clip((sa["e"] - E_MIN) / GRID_RES, 0, GRID_W - 1))
         if active_mask[rc_sa, cc_sa]:
             r_gr = min(2.4, sa["footprint_w"] * 0.44)
             z_gr = sa["z_roof"] + 0.95
-            ang_gr = np.linspace(0.0, 2.0 * math.pi, 13)
+            n_gr = max(24, int(math.ceil(2.0 * math.pi * r_gr / max(0.06, camera.mpp * 0.55))) + 1)
+            ang_gr = np.linspace(0.0, 2.0 * math.pi, n_gr)
             es_gr = sa["e"] + r_gr * np.cos(ang_gr)
             ns_gr = sa["n"] + r_gr * np.sin(ang_gr)
             px_g, py_g, pd_g = camera.project(es_gr, ns_gr, np.full_like(es_gr, z_gr))
@@ -8398,6 +9197,16 @@ def render_diorama(
                 sv[:, 1] *= 0.92
                 sv[:, 2] *= 1.15
                 shaded[is_veg_or_g] = sv
+            # v13.0: Gently attenuate pale silver-birch M_TRUNK at night (~0.62) so trunks stay moonlit, never neon white
+            is_trunk_n = m_here == M_TRUNK
+            if is_trunk_n.any():
+                st = shaded[is_trunk_n]
+                lum_t = 0.299 * st[:, 0] + 0.587 * st[:, 1] + 0.114 * st[:, 2]
+                pale_att = np.where(lum_t > 60.0, 0.62, 0.85)[:, None].astype(np.float32)
+                st *= pale_att
+                st[:, 0] *= 0.88
+                st[:, 2] *= 1.12
+                shaded[is_trunk_n] = st
 
         # F7: Emissive lit windows, shopfronts, signs & streetlamp globes (Night full, Sunset dusk warm!)
         is_emissive = m_here == M_WINDOW_LIT
@@ -8775,15 +9584,22 @@ def _apply_pixel_art_outlines_float(
             rgb_buf[cy_b, cx_b] *= 0.60
         else:
             rgb_buf[cy_b, cx_b] *= np.array([0.46, 0.48, 0.56], dtype=np.float32)
+    # v13 M1B Iter2: Softer hue-shifted botanical sel-out for foliage (NEVER harsh near-black cartoon rings!)
     if tree_world_sh.any():
         ty, tx = np.nonzero(tree_world_sh)
-        rgb_buf[ty, tx] *= np.array([0.38, 0.48, 0.42], dtype=np.float32) if not is_night else 0.56
+        c_sh = rgb_buf[ty, tx]
+        if is_night:
+            rgb_buf[ty, tx] = 0.66 * c_sh + 0.34 * np.array([12.0, 24.0, 30.0], dtype=np.float32)
+        else:
+            is_red_fol = c_sh[:, 0] > c_sh[:, 1]
+            sel_tint = np.where(is_red_fol[:, None], [42.0, 22.0, 30.0], [18.0, 46.0, 28.0]).astype(np.float32)
+            rgb_buf[ty, tx] = 0.58 * c_sh + 0.42 * sel_tint
     if tree_world_sun.any():
         ty_s, tx_s = np.nonzero(tree_world_sun)
-        rgb_buf[ty_s, tx_s] *= np.array([0.54, 0.64, 0.52], dtype=np.float32) if not is_night else 0.66
+        rgb_buf[ty_s, tx_s] *= np.array([0.76, 0.84, 0.70], dtype=np.float32) if not is_night else 0.78
     if tree_inner_edge.any():
         iy_t, ix_t = np.nonzero(tree_inner_edge)
-        rgb_buf[iy_t, ix_t] *= np.array([0.62, 0.72, 0.64], dtype=np.float32) if not is_night else 0.76
+        rgb_buf[iy_t, ix_t] *= np.array([0.78, 0.86, 0.76], dtype=np.float32) if not is_night else 0.80
 
     island_fg = mat_buf > M_DROP_SHADOW
     island_border = (
@@ -9461,7 +10277,7 @@ def render_diorama_tiled_hires(
     ov_img = Image.fromarray(ov_arr, mode="RGB")
     del ov_arr
     overview_webp_path.parent.mkdir(parents=True, exist_ok=True)
-    ov_img.save(overview_webp_path, format="WEBP", quality=94, method=4)
+    ov_img.save(overview_webp_path, format="WEBP", quality=98, method=4)
     full_png_path.parent.mkdir(parents=True, exist_ok=True)
     ov_img.save(full_png_path, optimize=True)
     del ov_img

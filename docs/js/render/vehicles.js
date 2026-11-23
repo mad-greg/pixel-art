@@ -5,11 +5,12 @@
  * bus ground contact shadow & tinted ZVV glazing.
  */
 
-import { samplePathAt } from '../sim/schedule.js';
+import { getWindVector, samplePathAt } from '../sim/schedule.js';
 
 const spriteCache = {};
 
 function createPixelBuffer(w, h) {
+  if (typeof document === 'undefined' || !document.createElement) return null;
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
@@ -156,6 +157,7 @@ function drawIsoBox(buf, cx, cy, tx, ty, halfLen, halfWid, heightPx, zBase, colo
 }
 
 export function getVehicleSprite(type, variant, angleIdx, mode, angleSteps = 32) {
+  if (typeof document === 'undefined' || !document.createElement) return null;
   const key = `${type}:${variant}:${angleIdx}:${angleSteps}:${mode}`;
   if (spriteCache[key]) return spriteCache[key];
 
@@ -358,6 +360,7 @@ export function getVehicleSprite(type, variant, angleIdx, mode, angleSteps = 32)
 }
 
 export function blitWorldSprite(targetCtx, cam, sp, wx, wy, wScale) {
+  if (!sp || !sp.canvas) return;
   const { scale, offsetX, offsetY, width: canvasW, height: canvasH } = cam;
   const resScale = sp.resScale || 1;
   const drawScale = (scale * wScale) / resScale;
@@ -699,7 +702,16 @@ export function draw3DCar(targetCtx, cam, pos, colorIdx, wScale, mode, tSec = 0,
         b.proj(hl * 0.46, -hw * 0.12, zBelt + 0.7),
         b.proj(frontRoofL + hl * 0.06, -hw * 0.12, zRoof - 0.5),
         b.proj(frontRoofL + hl * 0.06, -hw * 0.60, zRoof - 0.5),
-      ], 'rgba(216,238,255,0.34)');
+      ], isSunset ? 'rgba(255,226,188,0.36)' : 'rgba(216,238,255,0.38)');
+      // Specular diagonal windshield glint
+      if (b.s >= 0.75) {
+        fillPoly(targetCtx, [
+          b.proj(hl * 0.48, hw * 0.14, zBelt + 0.5),
+          b.proj(hl * 0.48, hw * 0.36, zBelt + 0.5),
+          b.proj(frontRoofL + hl * 0.08, hw * 0.24, zRoof - 0.4),
+          b.proj(frontRoofL + hl * 0.08, hw * 0.04, zRoof - 0.4),
+        ], isSunset ? 'rgba(255,240,212,0.28)' : 'rgba(240,250,255,0.30)');
+      }
     }
 
     fillPoly(targetCtx, [
@@ -727,6 +739,11 @@ export function draw3DCar(targetCtx, cam, pos, colorIdx, wScale, mode, tSec = 0,
   const hDot = Math.max(0.8, 0.9 * b.s);
   for (const wl of [-hl * 0.58, hl * 0.58]) {
     const wp = b.proj(wl, sideSign * (hw + 0.06), zBot + 0.4);
+    // Subtle wheel-arch shading arc above tire
+    if (b.s >= 0.7) {
+      targetCtx.fillStyle = isNight ? 'rgba(8,12,20,0.45)' : 'rgba(18,24,34,0.34)';
+      targetCtx.fillRect(Math.round(wp[0] - wDot * 0.68), Math.round(wp[1] - wDot * 0.72), Math.max(2, Math.round(wDot * 1.36)), Math.max(1, Math.round(wDot * 0.42)));
+    }
     targetCtx.fillStyle = isNight ? '#11161f' : '#1c222b';
     targetCtx.fillRect(Math.round(wp[0] - wDot * 0.55), Math.round(wp[1] - wDot * 0.45), Math.max(2, Math.round(wDot * 1.1)), Math.max(1.5, Math.round(wDot * 0.95)));
     targetCtx.fillStyle = shadeHex('#9aa6b4', 0.95, mode);
@@ -781,6 +798,25 @@ export function draw3DCar(targetCtx, cam, pos, colorIdx, wScale, mode, tSec = 0,
     const cSz = Math.max(1.1, rDot * 0.95);
     targetCtx.fillStyle = '#ff2a22';
     targetCtx.fillRect(chmsl[0] - cSz * 0.5, chmsl[1] - cSz * 0.5, cSz, cSz);
+    // Crisp asphalt brake-light reflection bar
+    if (b.s >= 0.7) {
+      fillPoly(targetCtx, [
+        b.proj(-hl - 1.2, -hw * 0.72, 0.12),
+        b.proj(-hl - 1.2, hw * 0.72, 0.12),
+        b.proj(-hl - 5.2, hw * 0.95, 0.12),
+        b.proj(-hl - 5.2, -hw * 0.95, 0.12),
+      ], isNight ? 'rgba(255, 48, 36, 0.34)' : 'rgba(255, 52, 42, 0.18)');
+    }
+  }
+
+  // Subtle deterministic dusk/night exhaust wisp on cruising combustion vehicles
+  if ((isNight || isSunset) && !braking && b.s >= 0.8 && (colorIdx % 3 !== 0)) {
+    const exAge = (((tSec * 1.4 + colorIdx * 0.37) % 1) + 1) % 1;
+    const ep = b.proj(-hl - 1.4 - exAge * 4.5, -hw * 0.42, zBot + 0.5 + exAge * 1.1);
+    const eSz = Math.max(1.0, (1.1 + exAge * 1.4) * b.s);
+    const eAlpha = (1 - exAge) * (isNight ? 0.24 : 0.18);
+    targetCtx.fillStyle = `rgba(210, 224, 240, ${eAlpha.toFixed(2)})`;
+    targetCtx.fillRect(Math.round(ep[0] - eSz * 0.5), Math.round(ep[1] - eSz * 0.4), Math.round(eSz), Math.max(1, Math.round(eSz * 0.75)));
   }
 
   if (blinker !== 'none' && (Math.floor(tSec * 2.8) % 2 === 0)) {
@@ -861,6 +897,36 @@ function drawBusSection(targetCtx, b, hl, hw, mode, tSec, opts) {
     targetCtx.stroke();
   }
 
+  // Warm interior passenger silhouettes through tinted ZVV windows
+  if (b.s >= 0.65) {
+    const paxCol = isNight ? 'rgba(42, 34, 24, 0.58)' : 'rgba(180, 206, 232, 0.24)';
+    const paxSz = Math.max(1.2, 1.65 * b.s);
+    targetCtx.fillStyle = paxCol;
+    for (let pl = winStart + 3.0; pl < winEnd - 3.2; pl += 6.2) {
+      const pp = b.proj(pl, sideSign * (hw + 0.07), zWinBot + 1.7);
+      targetCtx.fillRect(Math.round(pp[0] - paxSz * 0.45), Math.round(pp[1] - paxSz * 0.7), Math.max(1, Math.round(paxSz * 0.9)), Math.max(1, Math.round(paxSz * 1.1)));
+    }
+  }
+
+  // Warm curb door-spill glow during ZVV station dwell
+  if (isDwelling) {
+    const doorL = isFront ? hl - 4.2 : 0;
+    fillPoly(targetCtx, [
+      b.proj(doorL - 2.2, sideSign * (hw + 0.15), zBot + 0.2),
+      b.proj(doorL + 2.2, sideSign * (hw + 0.15), zBot + 0.2),
+      b.proj(doorL + 2.2, sideSign * (hw + 0.15), zWinTop - 0.3),
+      b.proj(doorL - 2.2, sideSign * (hw + 0.15), zWinTop - 0.3),
+    ], (isNight || isSunset) ? 'rgba(255, 224, 134, 0.72)' : 'rgba(254, 243, 199, 0.42)');
+    if (isNight || isSunset) {
+      fillPoly(targetCtx, [
+        b.proj(doorL - 2.4, sideSign * (hw + 0.2), 0.2),
+        b.proj(doorL + 2.4, sideSign * (hw + 0.2), 0.2),
+        b.proj(doorL + 3.4, sideSign * (hw + 4.8), 0.1),
+        b.proj(doorL - 3.4, sideSign * (hw + 4.8), 0.1),
+      ], isNight ? 'rgba(255, 222, 130, 0.32)' : 'rgba(255, 214, 124, 0.18)');
+    }
+  }
+
   if (isFront) {
     fillPoly(targetCtx, [
       b.proj(hl - 5.6, sideSign * (hw + 0.10), zWinTop - 1.3),
@@ -874,6 +940,12 @@ function drawBusSection(targetCtx, b, hl, hw, mode, tSec, opts) {
       b.proj(hl - 2.3, sideSign * (hw + 0.12), zWinTop - 0.35),
       b.proj(hl - 5.2, sideSign * (hw + 0.12), zWinTop - 0.35),
     ], '#ff9e1b');
+    // Crisp side LED matrix highlight pixels
+    if (b.s >= 0.8) {
+      const lp = b.proj(hl - 3.7, sideSign * (hw + 0.14), zWinTop - 0.7);
+      targetCtx.fillStyle = '#fff1c2';
+      targetCtx.fillRect(Math.round(lp[0] - 0.8 * b.s), Math.round(lp[1] - 0.35 * b.s), Math.max(1, Math.round(1.6 * b.s)), Math.max(1, Math.round(0.65 * b.s)));
+    }
   }
 
   for (const wl of wheelPositions) {
@@ -940,6 +1012,19 @@ function drawBusSection(targetCtx, b, hl, hw, mode, tSec, opts) {
       b.proj(acHalf, hw * 0.58, zRoof + 1.4),
       b.proj(-acHalf, hw * 0.58, zRoof + 1.4),
     ], shadeHex('#cfd7e0', 1.0, mode), outlineCol, lw * 0.7);
+    // Detailed roof HVAC vent louvers
+    if (b.s >= 0.7) {
+      targetCtx.strokeStyle = shadeHex('#64748b', 0.95, mode);
+      targetCtx.lineWidth = Math.max(0.65, lw * 0.65);
+      for (const vl of [-acHalf * 0.55, 0, acHalf * 0.55]) {
+        const v0 = b.proj(vl, -hw * 0.42, zRoof + 1.45);
+        const v1 = b.proj(vl, hw * 0.42, zRoof + 1.45);
+        targetCtx.beginPath();
+        targetCtx.moveTo(v0[0], v0[1]);
+        targetCtx.lineTo(v1[0], v1[1]);
+        targetCtx.stroke();
+      }
+    }
   }
 
   const rDot = Math.max(1.4, 1.8 * b.s);
@@ -1205,6 +1290,25 @@ export function draw3DTrainUnit(targetCtx, cam, pRear, pFront, kind, variant, wS
         b.proj(w + 5.2, sideSign * (hw + 0.09), zEave - 1.5),
         b.proj(w, sideSign * (hw + 0.09), zEave - 1.5),
       ], winColor);
+      // Warm interior passenger silhouettes & sunlit diagonal glazing reflections
+      if (b.s >= 0.65) {
+        if (isNight || isSunset) {
+          const paxCol = isNight ? 'rgba(54, 42, 26, 0.55)' : 'rgba(255, 224, 150, 0.35)';
+          const pLo = b.proj(w + 2.5, sideSign * (hw + 0.11), zSkirt + 2.3);
+          const pHi = b.proj(w + 2.5, sideSign * (hw + 0.11), zSkirt + 6.9);
+          const psz = Math.max(1.2, 1.5 * b.s);
+          targetCtx.fillStyle = paxCol;
+          targetCtx.fillRect(Math.round(pLo[0] - psz * 0.4), Math.round(pLo[1] - psz * 0.5), Math.max(1, Math.round(psz * 0.8)), Math.max(1, Math.round(psz)));
+          targetCtx.fillRect(Math.round(pHi[0] - psz * 0.4), Math.round(pHi[1] - psz * 0.5), Math.max(1, Math.round(psz * 0.8)), Math.max(1, Math.round(psz)));
+        } else {
+          fillPoly(targetCtx, [
+            b.proj(w + 0.6, sideSign * (hw + 0.11), zSkirt + 6.0),
+            b.proj(w + 2.2, sideSign * (hw + 0.11), zSkirt + 6.0),
+            b.proj(w + 3.4, sideSign * (hw + 0.11), zEave - 1.7),
+            b.proj(w + 1.8, sideSign * (hw + 0.11), zEave - 1.7),
+          ], 'rgba(220, 242, 255, 0.34)');
+        }
+      }
     }
 
     const redDoor = shadeHex('#d92121', sideShade * 1.05, mode);
@@ -1330,6 +1434,13 @@ export function draw3DTrainUnit(targetCtx, cam, pRear, pFront, kind, variant, wS
       b.proj(wL1, hw * 0.72, zEave - 1.2),
       b.proj(wL1, -hw * 0.72, zEave - 1.2),
     ], isNight ? '#58789c' : '#1d2d40');
+    // Glowing amber/white SBB destination LED strip above cab windshield
+    fillPoly(targetCtx, [
+      b.proj(wL1 + endSign * 0.2, -hw * 0.56, zEave - 2.3),
+      b.proj(wL1 + endSign * 0.2, hw * 0.56, zEave - 2.3),
+      b.proj(wL1 + endSign * 0.1, hw * 0.52, zEave - 1.45),
+      b.proj(wL1 + endSign * 0.1, -hw * 0.52, zEave - 1.45),
+    ], isNight ? '#ffdf78' : '#ffb830');
   }
 
   const rw = hw * 0.62;
@@ -1366,11 +1477,18 @@ export function draw3DTrainUnit(targetCtx, cam, pRear, pFront, kind, variant, wS
   const rDot = Math.max(1.4, 1.8 * b.s);
 
   if (isLead) {
-    const p0 = b.proj(-22, -rw * 0.9, zCrown + 3.4);
-    const p1 = b.proj(-22, rw * 0.9, zCrown + 3.4);
+    // Articulated V-shape SBB roof pantograph (base -> knee -> upper arm -> collector bow)
+    const pBase = b.proj(-26.5, 0, zCrown + 0.3);
+    const pKnee = b.proj(-18.5, 0, zCrown + 2.1);
+    const pTop = b.proj(-22.5, 0, zCrown + 3.6);
+    const p0 = b.proj(-22.5, -rw * 0.95, zCrown + 3.6);
+    const p1 = b.proj(-22.5, rw * 0.95, zCrown + 3.6);
     targetCtx.strokeStyle = isNight ? '#96a8c0' : '#4a5462';
-    targetCtx.lineWidth = Math.max(1.0, b.s * 0.7);
+    targetCtx.lineWidth = Math.max(1.0, b.s * 0.65);
     targetCtx.beginPath();
+    targetCtx.moveTo(pBase[0], pBase[1]);
+    targetCtx.lineTo(pKnee[0], pKnee[1]);
+    targetCtx.lineTo(pTop[0], pTop[1]);
     targetCtx.moveTo(p0[0], p0[1]);
     targetCtx.lineTo(p1[0], p1[1]);
     targetCtx.stroke();
@@ -1378,16 +1496,15 @@ export function draw3DTrainUnit(targetCtx, cam, pRear, pFront, kind, variant, wS
     if (!isDwelling) {
       const sparkSlot = Math.floor(tSec * 14.0);
       const sparkHash = Math.sin(sparkSlot * 127.1 + Math.round(b.cx * 0.05) * 31.7) * 43758.5453;
-      if ((sparkHash - Math.floor(sparkHash)) > (isNight ? 0.945 : 0.975)) {
-        const pm = b.proj(-22, 0, zCrown + 3.6);
-        const spR = Math.max(2.0, 3.2 * b.s);
+      if ((sparkHash - Math.floor(sparkHash)) > (isNight ? 0.935 : 0.970)) {
+        const spR = Math.max(2.0, 3.4 * b.s);
         targetCtx.save();
-        targetCtx.fillStyle = isNight ? 'rgba(110, 230, 255, 0.55)' : 'rgba(140, 235, 255, 0.35)';
+        targetCtx.fillStyle = isNight ? 'rgba(110, 230, 255, 0.58)' : 'rgba(140, 235, 255, 0.38)';
         targetCtx.beginPath();
-        targetCtx.arc(pm[0], pm[1], spR * 1.9, 0, Math.PI * 2);
+        targetCtx.arc(pTop[0], pTop[1], spR * 2.0, 0, Math.PI * 2);
         targetCtx.fill();
         targetCtx.fillStyle = '#f2feff';
-        targetCtx.fillRect(Math.round(pm[0] - spR * 0.5), Math.round(pm[1] - spR * 0.5), Math.max(2, Math.round(spR)), Math.max(2, Math.round(spR)));
+        targetCtx.fillRect(Math.round(pTop[0] - spR * 0.5), Math.round(pTop[1] - spR * 0.5), Math.max(2, Math.round(spR)), Math.max(2, Math.round(spR)));
         targetCtx.restore();
       }
     }
@@ -1469,9 +1586,13 @@ export function draw3DCyclist(targetCtx, cam, pos, colorIdx, wScale, mode, tSec)
   const helmCol = shadeHex(helmetHex, 1.08, mode);
 
   pix(0.0, 0.4, 0.0, 6.4, 1.6, isNight ? 'rgba(6,10,20,0.52)' : 'rgba(18,24,32,0.34)');
+  const spokeGlint = Math.sin(tSec * 18.0 + colorIdx * 2.3) > 0.35;
   for (const wl of [-2.5, 2.6]) {
     pix(wl, 0, 1.25, 2.3, 2.5, tireCol);
     pix(wl, 0, 1.25, 1.0, 1.0, hubCol);
+    if (spokeGlint && b.s >= 0.75) {
+      pix(wl + pedal * 0.4, 0, 1.45, 0.7, 0.7, isNight ? '#94a3b8' : '#e2e8f0');
+    }
   }
   pix(-1.1, 0, 2.1, 2.7, 0.85, frameCol);
   pix(0.5, 0, 2.9, 2.9, 0.85, frameCol);
@@ -1484,23 +1605,22 @@ export function draw3DCyclist(targetCtx, cam, pos, colorIdx, wScale, mode, tSec)
   pix(-0.1 + pUp * 0.5, 0.2, 2.0 - pUp * 0.5, 0.95, 1.35, skinCol);
   pix(0.1 + pUp * 0.6, 0.2, 1.1 - pUp * 0.6, 1.1, 0.8, tireCol);
 
-  pix(-0.1, 0, 4.7, 2.3, 2.0, jDark);
-  pix(0.0, -0.2, 5.2, 2.0, 1.3, jLit);
-  pix(1.3, 0.1, 4.4, 1.6, 0.95, jLit);
-  pix(2.0, 0.1, 3.9, 0.85, 0.85, skinCol);
+  // Natural forward-leaning riding posture
+  pix(0.15, 0, 4.7, 2.3, 1.9, jDark);
+  pix(0.3, -0.2, 5.2, 2.0, 1.3, jLit);
+  pix(1.45, 0.1, 4.35, 1.6, 0.95, jLit);
+  pix(2.1, 0.1, 3.85, 0.85, 0.85, skinCol);
 
-  pix(1.1, 0.1, 6.2, 1.25, 1.15, skinCol);
-  pix(1.0, 0.0, 6.9, 1.85, 1.0, helmCol);
-  pix(1.45, 0.0, 6.5, 1.15, 0.5, tireCol);
+  pix(1.3, 0.1, 6.1, 1.25, 1.15, skinCol);
+  pix(1.2, 0.0, 6.8, 1.85, 1.0, helmCol);
+  pix(1.65, 0.0, 6.4, 1.15, 0.5, tireCol);
 
   if (isNight || mode === 'sunset') {
-    if (isNight) {
-      fillPoly(targetCtx, [
-        b.proj(3.0, 0, 2.8),
-        b.proj(12.0, 2.4, 0.2),
-        b.proj(12.0, -2.4, 0.2),
-      ], 'rgba(255, 252, 224, 0.16)');
-    }
+    fillPoly(targetCtx, [
+      b.proj(3.0, 0, 2.8),
+      b.proj(12.5, 2.5, 0.2),
+      b.proj(12.5, -2.5, 0.2),
+    ], isNight ? 'rgba(255, 252, 224, 0.20)' : 'rgba(255, 240, 192, 0.11)');
     pix(2.9, 0, 3.3, 1.2, 1.2, isNight ? '#ffffff' : '#fff9c4');
     const blink = Math.floor(tSec * 4.0 + colorIdx * 1.3) % 2 === 0;
     if (blink) {
@@ -1596,25 +1716,38 @@ export function drawShipEntity(ctx, depthMgr, cam, ship, st, sIdx, worldW, world
     ctx.restore();
 
     const bowOff = (isSteamer ? 30 : (isMotor ? 10 : 7)) * wScale;
-    const bowA = (isNight ? 0.55 : 0.78) * speedRatio;
+    const bowA = (isNight ? 0.55 : 0.82) * speedRatio;
     const foamCol = isNight
       ? `rgba(176,208,242,${bowA.toFixed(2)})`
       : `rgba(248,254,255,${bowA.toFixed(2)})`;
-    drawPixelRectWorld(ctx, cam, pos.wx + pos.tx * bowOff, pos.wy + pos.ty * bowOff, 3.6, 1.8, foamCol, wScale);
+    drawPixelRectWorld(ctx, cam, pos.wx + pos.tx * bowOff, pos.wy + pos.ty * bowOff, isSteamer ? 4.4 : 3.4, 1.8, foamCol, wScale);
+    if (isSteamer || isMotor) {
+      const bNx = -pos.ty * (isSteamer ? 3.2 : 1.6) * wScale;
+      const bNy = pos.tx * (isSteamer ? 1.8 : 0.9) * wScale;
+      drawPixelRectWorld(ctx, cam, pos.wx + pos.tx * (bowOff - 3.5 * wScale) + bNx, pos.wy + pos.ty * (bowOff - 3.5 * wScale) + bNy, 2.4, 1.3, foamCol, wScale);
+      drawPixelRectWorld(ctx, cam, pos.wx + pos.tx * (bowOff - 3.5 * wScale) - bNx, pos.wy + pos.ty * (bowOff - 3.5 * wScale) - bNy, 2.4, 1.3, foamCol, wScale);
+    }
   }
 
+  // Subtle hull water reflection under sailboats and night salon reflections under ZSG MS Helvetia
+  if (!isSteamer && !isMotor && !isNight) {
+    const refA = isSunset ? 0.24 : 0.20;
+    const billow = Math.sin(tSec * 2.4 + sIdx * 1.7) * 1.2 * wScale;
+    drawPixelRectWorld(ctx, cam, pos.wx + billow, pos.wy + 4.5 * wScale, 5.2, 2.2, isSunset ? `rgba(255,228,198,${refA})` : `rgba(232,248,255,${refA})`, wScale);
+  }
   if (isNight && isSteamer) {
     for (let r = 0; r < 5; r++) {
       const along = (-16 + r * 8) * wScale;
       for (let d = 1; d <= 3; d++) {
         const rx = pos.wx + pos.tx * along + Math.sin(tSec * 3.8 + r * 1.9 + d * 1.3) * 2.4 * wScale;
         const ry = pos.wy + pos.ty * along + (5 + d * 3.4) * wScale;
-        const ra = (0.42 - d * 0.10).toFixed(2);
-        drawPixelRectWorld(ctx, cam, rx, ry, 4.2, 1.6, `rgba(255,214,112,${ra})`, wScale);
+        const ra = (0.44 - d * 0.10).toFixed(2);
+        drawPixelRectWorld(ctx, cam, rx, ry, 4.4, 1.6, `rgba(255,214,112,${ra})`, wScale);
       }
     }
   }
 
+  const wind = getWindVector(tSec);
   const bobY = Math.sin(tSec * (isSteamer ? 1.8 : 2.6) + sIdx * 1.9) * (isSteamer ? 0.55 : 0.85) * wScale;
   const angIdx = ((Math.round((Math.atan2(pos.ty, pos.tx) / (Math.PI * 2)) * 32) % 32) + 32) % 32;
   const sp = getVehicleSprite(ship.kind, 0, angIdx, mode);
@@ -1633,17 +1766,17 @@ export function drawShipEntity(ctx, depthMgr, cam, ship, st, sIdx, worldW, world
       for (const side of [-1, 1]) {
         const baseWx = pos.wx + (pos.tx * 2 + nx * side * 11.5) * wScale;
         const baseWy = pos.wy + bobY + (pos.ty * 2 + ny * side * 11.5) * wScale;
-        for (let p = 0; p < 5; p++) {
-          const prog = (((tSec * 4.5 * speedRatio + p / 5 + (side > 0 ? 0.3 : 0)) % 1) + 1) % 1;
-          const aft = prog * 16.0 * speedRatio * wScale;
-          const jLat = Math.sin(tSec * 9.0 + p * 2.1 + side) * 1.4 * wScale;
+        for (let p = 0; p < 6; p++) {
+          const prog = (((tSec * 4.8 * speedRatio + p / 6 + (side > 0 ? 0.3 : 0)) % 1) + 1) % 1;
+          const aft = prog * 17.5 * speedRatio * wScale;
+          const jLat = Math.sin(tSec * 9.5 + p * 2.1 + side) * 1.5 * wScale;
           const fWx = baseWx - pos.tx * aft + nx * side * jLat;
           const fWy = baseWy - pos.ty * aft + ny * side * jLat + 0.6 * wScale;
-          const fa = (1.0 - prog) * speedRatio * (isNight ? 0.52 : 0.84);
+          const fa = (1.0 - prog) * speedRatio * (isNight ? 0.54 : 0.88);
           const fCol = isNight
             ? `rgba(182, 214, 246, ${fa.toFixed(2)})`
             : (isSunset ? `rgba(255, 236, 212, ${fa.toFixed(2)})` : `rgba(248, 254, 255, ${fa.toFixed(2)})`);
-          drawPixelRectWorld(targetCtx, cam, fWx, fWy, 2.4 + (1 - prog) * 1.6, 1.5, fCol, wScale);
+          drawPixelRectWorld(targetCtx, cam, fWx, fWy, 2.5 + (1 - prog) * 1.8, 1.5, fCol, wScale);
         }
       }
     }
@@ -1653,13 +1786,13 @@ export function drawShipEntity(ctx, depthMgr, cam, ship, st, sIdx, worldW, world
     if (isSteamer) {
       const funWx = pos.wx + pos.tx * 2 * wScale;
       const funWy = pos.wy + bobY + pos.ty * 2 * wScale - 28.5 * wScale;
-      const steamMul = isDocked ? 0.52 : 0.82;
-      for (let p = 0; p < 5; p++) {
-        const age = (((tSec * 0.42 + p / 5) % 1) + 1) % 1;
-        const sWx = funWx - pos.tx * age * (4 + 14 * speedRatio) * wScale + Math.sin(age * 5.0 + p * 1.7) * 1.2 * wScale;
-        const sWy = funWy - age * 16 * wScale - pos.ty * age * (2 + 6 * speedRatio) * wScale;
-        const sa = (1 - age) * (age < 0.18 ? age / 0.18 : 1.0) * steamMul * (isNight ? 0.55 : 0.72);
-        const sz = (isDocked ? 1.8 : 2.2) + age * (isDocked ? 3.2 : 4.5);
+      const steamMul = isDocked ? 0.52 : 0.85;
+      for (let p = 0; p < 6; p++) {
+        const age = (((tSec * 0.42 + p / 6) % 1) + 1) % 1;
+        const sWx = funWx + (-pos.tx * (4 + 12 * speedRatio) + wind.wx * 8.0) * age * wScale + Math.sin(age * 5.0 + p * 1.7) * 1.2 * wScale;
+        const sWy = funWy - age * 16.5 * wScale + (-pos.ty * (2 + 5 * speedRatio) + wind.wy * 4.0) * age * wScale;
+        const sa = (1 - age) * (age < 0.18 ? age / 0.18 : 1.0) * steamMul * (isNight ? 0.55 : 0.74);
+        const sz = (isDocked ? 1.8 : 2.2) + age * (isDocked ? 3.2 : 4.6);
         const sCol = isNight
           ? `rgba(168, 186, 216, ${sa.toFixed(2)})`
           : (isSunset ? `rgba(255, 228, 200, ${sa.toFixed(2)})` : `rgba(246, 249, 252, ${sa.toFixed(2)})`);

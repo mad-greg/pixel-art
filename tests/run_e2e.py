@@ -48,8 +48,10 @@ TIER_SUITES: dict[int, List[Tuple[str, List[str], Path]]] = {
         ("tier2_lettering", [sys.executable], REPO_ROOT / "tests" / "tier2_lettering.py"),
         ("tier2_landmarks_v11", [sys.executable], REPO_ROOT / "tests" / "tier2_landmarks_v11.py"),
         ("tier2_v12_visuals", [sys.executable], REPO_ROOT / "tests" / "tier2_v12_visuals.py"),
+        ("tier2_v13_vegetation", [sys.executable], REPO_ROOT / "tests" / "tier2_v13_vegetation.py"),
         ("tier2_browser_bounds", ["node"], REPO_ROOT / "tests" / "tier2_browser_bounds.mjs"),
         ("tier2_smoothness", ["node"], REPO_ROOT / "tests" / "tier2_smoothness.mjs"),
+        ("tier2_v13_living", ["node"], REPO_ROOT / "tests" / "tier2_v13_living.mjs"),
     ],
     3: [
         ("tier3_combinations", ["node"], REPO_ROOT / "tests" / "tier3_combinations.mjs"),
@@ -253,6 +255,11 @@ def main(argv: List[str] | None = None) -> int:
         default=120.0,
         help="Per-suite timeout in seconds before killing subprocess group (default: 120)",
     )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List registered test suites for the selected tier(s) and exit 0",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -260,6 +267,14 @@ def main(argv: List[str] | None = None) -> int:
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    if args.list:
+        for tier in selected_tiers:
+            for suite_name, cmd_prefix, script_path in TIER_SUITES[tier]:
+                runtime = Path(cmd_prefix[0]).name
+                rel = script_path.relative_to(REPO_ROOT)
+                print(f"Tier {tier}: {suite_name} ({runtime} {rel})")
+        return 0
 
     t_all0 = time.perf_counter()
     results: List[TierResult] = []

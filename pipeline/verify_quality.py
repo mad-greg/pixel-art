@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import numpy as np
 from PIL import Image
+from scipy import ndimage
 
 from .config import DOCS_DIR, RENDERS_DIR
 
@@ -87,13 +88,205 @@ def _measure_anti_stipple(img_path: Path) -> tuple[float, float, int]:
     return float(alt_y.mean()), chk_flat, n_uniq
 
 
+def check_botanical_diversity(img_rgb: np.ndarray) -> tuple[int, float, int]:
+    """Measure botanical foliage color richness and tonal luminance IQR on a day RGB image/tile.
+
+    Foliage pixels are defined as green-dominant pixels (G > R + 6 and G > B + 6).
+    Returns (unique_foliage_colors, foliage_lum_iqr, n_foliage_px).
+    """
+    arr = np.asarray(img_rgb, dtype=np.uint8)
+    r16 = arr[:, :, 0].astype(np.int16)
+    g16 = arr[:, :, 1].astype(np.int16)
+    b16 = arr[:, :, 2].astype(np.int16)
+    fol = (g16 > (r16 + 6)) & (g16 > (b16 + 6))
+    n_fol = int(fol.sum())
+    if n_fol < 100:
+        return 0, 0.0, n_fol
+    packed_f = (
+        (arr[fol, 0].astype(np.uint32) << 16)
+        | (arr[fol, 1].astype(np.uint32) << 8)
+        | arr[fol, 2].astype(np.uint32)
+    )
+    n_uniq_fol = int(len(np.unique(packed_f)))
+    rf = arr[fol, 0].astype(np.float32)
+    gf = arr[fol, 1].astype(np.float32)
+    bf = arr[fol, 2].astype(np.float32)
+    lum = 0.299 * rf + 0.587 * gf + 0.114 * bf
+    iqr = float(np.percentile(lum, 75) - np.percentile(lum, 25))
+    return n_uniq_fol, iqr, n_fol
+
+
+def measure_grid_hole_and_speckle(img_rgb: np.ndarray) -> tuple[float, float, float]:
+    """Measure periodic wire-cage/waffle grid-hole energy and point-splat speckle/clump density.
+
+    Hardened v13 M1B Iter2 guard (zero angular blind spots):
+      - max_waffle_score: peak 32x32 (stride 16) 2D FFT crossing-wavevector ratio with 3x3 peak energy
+        integration in the 3.5..6.5 px (0.5 m @ 0.11 m/px) band, pairing peak1 anywhere in [0, 180) deg
+        with peak2 at 45..135 deg separation (eliminates the old [85, 95] deg blind spot).
+      - peak_speckle: max of (a) peak 32x32 density of strictly isolated 1px high-contrast speckles and
+        (b) Lake Zurich water-context 2D high-frequency clump/hole density (catches 2-4px point-splatted
+        moored boats and wire-cage decks over water without false-tripping clean piers/buildings).
+      - global_speckle: global fraction of strictly isolated high-contrast 1px speckles.
+    """
+    arr = np.asarray(img_rgb, dtype=np.float32)
+    r_c, g_c, b_c = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    lum = 0.299 * r_c + 0.587 * g_c + 0.114 * b_c
+    h, w = lum.shape
+
+    # 1a. Strictly isolated 1px high-contrast speckle detection (clean 1px outlines/lines have >=2 collinear neighbors -> 0.0)
+    med3 = ndimage.median_filter(lum, size=3)
+    diff_med = np.abs(lum - med3)
+    n_agree = np.zeros_like(lum, dtype=np.uint8)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dy == 0 and dx == 0:
+                continue
+            shifted = np.roll(np.roll(lum, dy, axis=0), dx, axis=1)
+            n_agree += (np.abs(shifted - med3) < 14.0).astype(np.uint8)
+    speckle_mask = (diff_med > 28.0) & (n_agree >= 7)
+    speckle_mask[:2, :] = False
+    speckle_mask[-2:, :] = False
+    speckle_mask[:, :2] = False
+    speckle_mask[:, -2:] = False
+    peak_1px = float(
+        ndimage.uniform_filter(speckle_mask.astype(np.float32), size=32, mode="constant").max()
+    ) if (h >= 32 and w >= 32) else float(speckle_mask.mean())
+    global_speckle = float(speckle_mask.mean())
+
+    # 1b. 2D high-contrast bipolar hole/spike & sign-reversal fields
+    med5 = ndimage.median_filter(lum, size=5)
+    hi_px = ((lum - med5) > 22.0).astype(np.float32)
+    lo_px = ((med5 - lum) > 22.0).astype(np.float32)
+    win_u = min(32, h, w)
+    d_hi = ndimage.uniform_filter(hi_px, size=win_u, mode="constant")
+    d_lo = ndimage.uniform_filter(lo_px, size=win_u, mode="constant")
+    bipole_map = np.sqrt(d_hi * d_lo)
+
+    # Water-context 2D clump/speckle detector (catches 2-4px point-splatted moored boats & wire-cage decks over Lake Zurich!)
+    # Excludes bright cyan swimming pools (G>155 or B>145) and dark diorama sky borders (G<62)
+    is_water = (
+        (g_c > (r_c + 12.0))
+        & (b_c > (r_c + 12.0))
+        & (g_c >= 62.0) & (g_c <= 155.0)
+        & (b_c >= 75.0) & (b_c <= 145.0)
+        & (r_c <= 85.0)
+    )
+    peak_wclump = 0.0
+    if is_water.any() and h >= 32 and w >= 32:
+        w_frac64 = ndimage.uniform_filter(is_water.astype(np.float32), size=min(64, h, w), mode="constant")
+        dx1 = lum[:, 1:] - lum[:, :-1]
+        dy1 = lum[1:, :] - lum[:-1, :]
+        dx2 = lum[:, 2:] - lum[:, :-2]
+        dy2 = lum[2:, :] - lum[:-2, :]
+        alt_x = np.zeros_like(lum, dtype=np.float32)
+        alt_y = np.zeros_like(lum, dtype=np.float32)
+        alt_x[:, 1:-1] = (
+            (dx1[:, :-1] * dx1[:, 1:] < 0.0) & (np.abs(dx1[:, :-1]) > 18.0) & (np.abs(dx1[:, 1:]) > 18.0)
+        ).astype(np.float32)
+        alt_y[1:-1, :] = (
+            (dy1[:-1, :] * dy1[1:, :] < 0.0) & (np.abs(dy1[:-1, :]) > 18.0) & (np.abs(dy1[1:, :]) > 18.0)
+        ).astype(np.float32)
+        alt_x[:, 2:-2] = np.maximum(
+            alt_x[:, 2:-2],
+            ((dx2[:, :-2] * dx2[:, 2:] < 0.0) & (np.abs(dx2[:, :-2]) > 22.0) & (np.abs(dx2[:, 2:]) > 22.0)).astype(np.float32),
+        )
+        alt_y[2:-2, :] = np.maximum(
+            alt_y[2:-2, :],
+            ((dy2[:-2, :] * dy2[2:, :] < 0.0) & (np.abs(dy2[:-2, :]) > 22.0) & (np.abs(dy2[2:, :]) > 22.0)).astype(np.float32),
+        )
+        alt_2d_map = np.sqrt(
+            ndimage.uniform_filter(alt_x, size=32, mode="constant")
+            * ndimage.uniform_filter(alt_y, size=32, mode="constant")
+        )
+        # Bipolar grid/boat clutter over water (e.g. real Bendlikon wire-cage & moored boat static)
+        w_bip = np.where(w_frac64 >= 0.45, np.minimum(bipole_map, alt_2d_map), 0.0)
+        # Unipolar bright/dark point-splat static on open water (e.g. white boat dots on flat teal water)
+        d_dev = np.maximum(d_hi, d_lo)
+        w_uni = np.where(w_frac64 >= 0.55, np.minimum(d_dev, alt_2d_map), 0.0)
+        peak_wclump = float(max(w_bip.max(), w_uni.max()))
+
+    peak_speckle = max(peak_1px, peak_wclump * 0.78)
+
+    # 2. Zero-blind-spot 32x32 stride-16 2D FFT crossing-wavevector waffle score (3x3 peak energy, 3.5..6.5 px band)
+    max_waffle = 0.0
+    if h >= 32 and w >= 32:
+        hann1d = np.hanning(32).astype(np.float32)
+        hann2d = np.outer(hann1d, hann1d)
+        fy, fx = np.meshgrid(np.arange(-16, 16, dtype=np.float32), np.arange(-16, 16, dtype=np.float32), indexing="ij")
+        rad = np.hypot(fx, fy)
+        ang = (np.degrees(np.arctan2(fy, fx)) + 180.0) % 180.0
+        ac_mask = rad >= 2.0
+        half_plane = (fy > 0) | ((fy == 0) & (fx > 0))
+        band = half_plane & (rad >= 4.9) & (rad <= 9.2)
+        b_ys, b_xs = np.nonzero(band)
+        b_angs = ang[b_ys, b_xs]
+        w_frac32 = ndimage.uniform_filter(is_water.astype(np.float32), size=32, mode="constant") if is_water.any() else np.zeros((h, w), dtype=np.float32)
+
+        for y0 in range(0, h - 31, 16):
+            for x0 in range(0, w - 31, 16):
+                bp = float(bipole_map[y0 + 16, x0 + 16])
+                dev = float(max(d_hi[y0 + 16, x0 + 16], d_lo[y0 + 16, x0 + 16]))
+                wf_c = float(w_frac32[y0 + 16, x0 + 16])
+                # Require genuine high-contrast 2D holes/bars (either bipolar >= 0.16, or water-grid bar dev >= 0.20)
+                if bp < 0.16 and not (wf_c >= 0.35 and dev >= 0.20):
+                    continue
+                patch = lum[y0 : y0 + 32, x0 : x0 + 32]
+                if float(patch.std()) < 16.0:
+                    continue
+                p_win = (patch - float(patch.mean())) * hann2d
+                F = np.abs(np.fft.fftshift(np.fft.fft2(p_win))) ** 2
+                ac_tot = float(F[ac_mask].sum()) + 1e-6
+                F3 = ndimage.uniform_filter(F, size=3, mode="constant") * 9.0
+                vals = F3[b_ys, b_xs] / ac_tot
+                i1 = int(np.argmax(vals))
+                p1 = float(vals[i1])
+                if p1 < 0.02:
+                    continue
+                a1 = float(b_angs[i1])
+                da = np.abs(b_angs - a1)
+                sep = np.minimum(da, 180.0 - da)
+                orth = (sep >= 45.0) & (sep <= 135.0)
+                if not orth.any():
+                    continue
+                p2 = float(vals[orth].max())
+                strength = max(bp, dev if wf_c >= 0.35 else 0.0)
+                score = ((p1 * p2) ** 0.5) * min(1.5, strength / 0.22)
+                if score > max_waffle:
+                    max_waffle = score
+
+    return float(max_waffle), float(peak_speckle), float(global_speckle)
+
+
+def check_grid_hole_and_speckle_guard(img_rgb: np.ndarray, label: str = "image") -> tuple[float, float, float]:
+    """Assert that an RGB tile/crop is free of wire-cage waffle grid holes and point-splat speckle/clump clouds."""
+    max_waffle, peak_speckle, global_speckle = measure_grid_hole_and_speckle(img_rgb)
+    assert max_waffle < MAX_WAFFLE_SCORE, (
+        f"Wire-cage / waffle grid-hole artifact detected in {label}: "
+        f"max_waffle={max_waffle:.4f} (limit <{MAX_WAFFLE_SCORE})"
+    )
+    assert peak_speckle < MAX_PEAK_SPECKLE, (
+        f"Localized point-splat speckle/clump cloud detected in {label}: "
+        f"peak_speckle={peak_speckle:.4f} (limit <{MAX_PEAK_SPECKLE})"
+    )
+    assert global_speckle < MAX_GLOBAL_SPECKLE, (
+        f"Excessive global 1px speckle noise detected in {label}: "
+        f"global_speckle={global_speckle:.4f} (limit <{MAX_GLOBAL_SPECKLE})"
+    )
+    return max_waffle, peak_speckle, global_speckle
+
+
 MAX_TILE_BYTES = 500_000
 MAX_DOCS_MB = 300.0
 MAX_STIPPLE_ALT_Y = 0.14
 MAX_STIPPLE_CHK_FLAT = 5.0
+MIN_BOTANICAL_FOLIAGE_COLORS = 10
+MIN_BOTANICAL_FOLIAGE_IQR = 22.0
+MAX_WAFFLE_SCORE = 0.090
+MAX_PEAK_SPECKLE = 0.115
+MAX_GLOBAL_SPECKLE = 0.012
 
 
-def verify_all(skip_stipple: bool = False) -> None:
+def verify_all(skip_stipple: bool = False, skip_grid_guard: bool = False) -> None:
     mf_day = None
     for mode in ("day", "sunset", "night"):
         p = RENDERS_DIR / f"kilchberg_diorama_{mode}.png"
@@ -250,9 +443,45 @@ def verify_all(skip_stipple: bool = False) -> None:
     assert len(meta["buildings"]) >= 1800, f"Expected >=1800 interactive buildings, got {len(meta['buildings'])}"
     print(f"[ok] interactive metadata: {len(meta['landmarks'])} landmarks, {len(meta['buildings'])} clickable 3D buildings")
 
+    # v13.0: Botanical vegetation species diversity check on foliage-rich day L2 tiles
+    day_tdir = DOCS_DIR / "assets" / "tiles" / "day"
+    bot_candidates = ("18_5.webp", "7_3.webp", "14_2.webp", "6_2.webp", "10_7.webp")
+    bot_checked = []
+    for tname in bot_candidates:
+        tp = day_tdir / tname
+        if not tp.exists():
+            continue
+        t_rgb = np.asarray(Image.open(tp).convert("RGB"))
+        n_fol_c, fol_iqr, n_fol_px = check_botanical_diversity(t_rgb)
+        if n_fol_px >= 20_000:
+            assert n_fol_c >= MIN_BOTANICAL_FOLIAGE_COLORS, (
+                f"Low botanical foliage diversity on day/{tname}: {n_fol_c} colors (< {MIN_BOTANICAL_FOLIAGE_COLORS})"
+            )
+            assert fol_iqr >= MIN_BOTANICAL_FOLIAGE_IQR, (
+                f"Flat botanical foliage luminance on day/{tname}: IQR={fol_iqr:.1f} (< {MIN_BOTANICAL_FOLIAGE_IQR})"
+            )
+            bot_checked.append(f"{tname}({n_fol_c}c,IQR={fol_iqr:.1f})")
+    assert len(bot_checked) >= 1, "No foliage-rich day tiles found for botanical diversity check"
+    print(f"[ok] botanical diversity: {', '.join(bot_checked)}")
+
+    # v13.0 M1B: Automated wire-cage grid-hole & point-splat speckle guard on systemic harbor/bridge/shoreline day L2 tiles
+    if not skip_grid_guard:
+        guard_tiles = ("15_6.webp", "11_8.webp", "23_3.webp", "15_5.webp", "8_9.webp")
+        guard_checked = []
+        for tname in guard_tiles:
+            tp = day_tdir / tname
+            if not tp.exists():
+                continue
+            t_rgb = np.asarray(Image.open(tp).convert("RGB"))
+            mw, ps, gs = check_grid_hole_and_speckle_guard(t_rgb, label=f"day/{tname}")
+            guard_checked.append(f"{tname}(w={mw:.3f},ps={ps:.3f})")
+        assert len(guard_checked) >= 1, "No systemic harbor/bridge day tiles found for grid-hole & speckle guard"
+        print(f"[ok] grid-hole & speckle guard: {', '.join(guard_checked)}")
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Verify Kilchberg 0.11 m/px diorama quality, tile sizes, seams, and anti-stipple smoothness.")
     ap.add_argument("--skip-stipple", action="store_true", help="Skip anti-stipple check on legacy tiles before full render.")
+    ap.add_argument("--skip-grid-guard", action="store_true", help="Skip wire-cage grid-hole & speckle guard on pre-M3B legacy tiles.")
     args = ap.parse_args()
-    verify_all(skip_stipple=args.skip_stipple)
+    verify_all(skip_stipple=args.skip_stipple, skip_grid_guard=args.skip_grid_guard)

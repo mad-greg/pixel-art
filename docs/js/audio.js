@@ -49,12 +49,13 @@ const TREE_BIRD_PERCHES = [
 ];
 
 export function createAudioEngine({
-  assetVer = '11.0',
+  assetVer = '13.0',
   getCamera,
   getMode,
   getWorldSize,
   getAnimData,
   getTrafficSim,
+  getLivingAudioSignals,
   getAnimTimeSec,
 }) {
   let soundEnabled = false;
@@ -336,7 +337,58 @@ export function createAudioEngine({
         if (lvl > bestBell.level) bestBell = { level: lvl, brightness: sp.brightness, pan: sp.pan };
       }
     }
-    applyChannelSpatial('bells', bestBell.level, bestBell.brightness, bestBell.pan);
+    const livingSignals = (typeof getLivingAudioSignals === 'function')
+      ? (getLivingAudioSignals(worldW, worldH, tSec, mode) || [])
+      : [];
+
+    if (livingSignals.length > 0) {
+      const CHANNEL_MAX_RANGE = {
+        train: 0.14,
+        bus: 0.075,
+        traffic: 0.062,
+        town_traffic: 0.085,
+        boat: 0.09,
+        lake_waves: 0.042,
+        birds: 0.050,
+        crickets: 0.050,
+        bells: 0.28,
+      };
+      for (let i = 0; i < livingSignals.length; i++) {
+        const sig = livingSignals[i];
+        if (!sig || !SOUND_TRACKS[sig.channel]) continue;
+        if (!Number.isFinite(sig.u) || !Number.isFinite(sig.v) || !Number.isFinite(sig.weight) || sig.weight <= 0) continue;
+        const maxRange = CHANNEL_MAX_RANGE[sig.channel] || 0.08;
+        const range = Math.min(maxRange, Number.isFinite(sig.offscreenRange) ? sig.offscreenRange : maxRange);
+        const sp = computeSpatialFactor(sig.u, sig.v, u0, u1, v0, v1, uC, halfVisU, zoomNorm, range);
+        if (sp.level <= 0.002) continue;
+        const bMul = Number.isFinite(sig.brightnessMul) ? sig.brightnessMul : 1.0;
+        const lvl = sp.level * Math.min(1.0, sig.weight);
+        if (sig.channel === 'train' && lvl > bestTrain.level) {
+          bestTrain = { level: lvl, brightness: sp.brightness * bMul, pan: sp.pan };
+        } else if (sig.channel === 'bus' && lvl > bestBus.level) {
+          bestBus = { level: lvl, brightness: sp.brightness * bMul, pan: sp.pan };
+        } else if (sig.channel === 'boat' && lvl > bestBoat.level) {
+          bestBoat = { level: lvl, brightness: sp.brightness * bMul, pan: sp.pan };
+        } else if (sig.channel === 'lake_waves' && lvl > bestWave.level) {
+          bestWave = { level: lvl, brightness: sp.brightness * bMul, pan: sp.pan };
+        } else if (sig.channel === 'birds' && lvl > bestBird.level) {
+          bestBird = { level: lvl, brightness: sp.brightness * bMul, pan: sp.pan };
+        } else if (sig.channel === 'crickets' && lvl > bestCricket.level) {
+          bestCricket = { level: lvl, brightness: sp.brightness * bMul, pan: sp.pan };
+        } else if (sig.channel === 'bells' && !isNight && lvl > bestBell.level) {
+          bestBell = { level: lvl, brightness: sp.brightness * bMul, pan: sp.pan };
+        }
+      }
+      applyChannelSpatial('train', bestTrain.level, bestTrain.brightness, bestTrain.pan);
+      applyChannelSpatial('bus', bestBus.level * nightTrafficMul, bestBus.brightness, bestBus.pan);
+      applyChannelSpatial('boat', bestBoat.level, bestBoat.brightness, bestBoat.pan);
+      applyChannelSpatial('lake_waves', bestWave.level * wavePulse * waveZoomGate, bestWave.brightness, bestWave.pan);
+      applyChannelSpatial('birds', bestBird.level * birdMul, bestBird.brightness, bestBird.pan);
+      applyChannelSpatial('crickets', bestCricket.level * cricketMul, bestCricket.brightness, bestCricket.pan);
+      applyChannelSpatial('bells', bestBell.level, bestBell.brightness, bestBell.pan);
+    } else {
+      applyChannelSpatial('bells', bestBell.level, bestBell.brightness, bestBell.pan);
+    }
   }
 
   async function initSoundscape() {
